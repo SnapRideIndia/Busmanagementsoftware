@@ -1,0 +1,97 @@
+{
+  "theme": "Light",
+  "archetype": "4 (Swiss & High-Contrast) adapted for Brand - The Control Room",
+  "typography": {
+    "fonts": {
+      "heading": "Work Sans",
+      "body": "IBM Plex Sans",
+      "mono": "JetBrains Mono"
+    },
+    "scale": {
+      "h1": "text-3xl md:text-4xl font-semibold tracking-tight",
+      "h2": "text-2xl md:text-3xl font-medium tracking-tight",
+      "h3": "text-xl md:text-2xl font-medium",
+      "h4": "text-lg md:text-xl font-medium",
+      "body": "text-sm md:text-base leading-relaxed",
+      "small": "text-xs md:text-sm font-medium uppercase tracking-wider"
+    },
+    "guidelines": "Do not exceed text-4xl for dashboard headers. Use JetBrains Mono for data numbers/KPI metrics to ensure tabular alignment and precision."
+  },
+  "colors": {
+    "brand": {
+      "primary": "#134219",
+      "primary_hover": "#0E3213",
+      "accent": "#BA9149",
+      "accent_hover": "#A67F3B"
+    },
+    "background": {
+      "default": "#F8F9FA",
+      "surface": "#FFFFFF",
+      "sidebar": "#134219"
+    },
+    "text": {
+      "primary": "#111827",
+      "secondary": "#4B5563",
+      "muted": "#9CA3AF",
+      "on_primary": "#FFFFFF",
+      "on_sidebar": "#F3F4F6",
+      "sidebar_active": "#BA9149"
+    },
+    "status": {
+      "success": "#16A34A",
+      "warning": "#F59E0B",
+      "error": "#DC2626",
+      "info": "#2563EB"
+    },
+    "guidelines": "Use Night Green (#134219) for major structural elements like sidebars and primary buttons. Use Matte Goldenrod (#BA9149) for active states, key CTAs, and alerts. Ensure 4.5:1 contrast."
+  },
+  "layout_and_spacing": {
+    "grid_strategy": "MODE B: THE CONTROL ROOM GRID",
+    "spacing_scale": "Use tight spacing (p-4, p-6) for dashboard widgets. p-8 for main layout padding. Grid gap-4 or gap-6 for metrics.",
+    "radius": "rounded-md (6px) for cards, buttons, and inputs. No heavy rounding to maintain an authoritative, technical feel.",
+    "shadows": "shadow-sm for cards. shadow-md for dropdowns/modals. Avoid heavy/soft shadows. Keep it crisp.",
+    "borders": "1px solid border-gray-200 on cards and tables. For active elements, use border-[#134219]."
+  },
+  "components": {
+    "buttons": "Flat, no gradient. Primary: bg-[#134219] text-white hover:bg-[#0E3213]. Accent/Secondary: bg-[#BA9149] text-white hover:bg-[#A67F3B] or border border-[#BA9149] text-[#BA9149].",
+    "cards": "Flat background (#FFFFFF), border border-gray-200, shadow-sm, padding p-6. No glassmorphism in dashboard.",
+    "tables": "Dense rows. text-sm. Header uppercase text-xs tracking-wider text-gray-500 bg-gray-50. hover:bg-gray-50 on rows. Use standard pagination.",
+    "inputs": "Shadcn defaults customized with rounded-md and focus:ring-[#BA9149].",
+    "navigation": "Sidebar: Fixed left, width 256px, bg-[#134219]. Active item text-[#BA9149] with subtle bg-[#ffffff]/10.",
+    "charts": "Recharts. Use #134219 and #BA9149 for primary data series. Use #16A34A for positive metrics and #DC2626 for deductions."
+  },
+  "motion_and_interactions": {
+    "hover_states": "All buttons/links must have explicitly defined hover states. Table rows hover state is mandatory.",
+    "transitions": "Use fast, precise transitions. transition-colors duration-150 ease-in-out.",
+    "loading": "Skeleton loaders matching the shape of data. No spinners for full page loads."
+  },
+  "icons_and_media": {
+    "icon_library": "@phosphor-icons/react",
+    "icon_style": "weight='regular' for UI, weight='fill' for active sidebar items.",
+    "images": {
+      "login_background": {
+        "url": "https://images.pexels.com/photos/12382509/pexels-photo-12382509.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "A bright green city bus navigating a street at night. Use as a split-screen background for the Login Screen with a semi-transparent black overlay."
+      },
+      "driver_placeholder": {
+        "url": "https://images.unsplash.com/photo-1631798262744-5c15818c2e92?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDN8MHwxfHNlYXJjaHwxfHxidXMlMjBkcml2ZXIlMjBwcm9mZXNzaW9uYWwlMjBwb3J0cmFpdHxlbnwwfHx8fDE3NzQ2ODc0MDF8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Driver portrait placeholder for Driver Management screen."
+      },
+      "bus_placeholder": {
+        "url": "https://images.unsplash.com/photo-1759674406716-9645dcddd353?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxOTB8MHwxfHNlYXJjaHwzfHxtb2Rlcm4lMjBncmVlbiUyMHB1YmxpYyUyMHRyYW5zcG9ydCUyMGJ1c3xlbnwwfHx8fDE3NzQ2ODc0MDB8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Bus image placeholder for Bus Master Screen."
+      }
+    }
+  },
+  "instructions_to_main_agent": [
+    "Install dependencies: @phosphor-icons/react, recharts, react-router-dom.",
+    "Implement the layout with a fixed Sidebar on the left (bg-[#134219], text-white) and a top Header for user context.",
+    "Ensure the Dashboard uses a tight bento/control-room grid (grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4) for KPIs (Total Buses, Active Drivers, Incidents, Energy Efficiency).",
+    "For tables (Tender, Bus Master, Drivers, Billing, Incidents), use Shadcn Table with sticky headers and pagination.",
+    "Implement the Deduction Engine logic exactly as specified. Base Payment = PK Rate * KM. Display calculations transparently in the Billing Screen.",
+    "Use Phosphor Icons for all side navigation and action buttons.",
+    "Include 'data-testid' on all interactive elements (e.g., data-testid='login-button', data-testid='sidebar-buses').",
+    "For the Live Operations tracking, implement a simulated map using a placeholder UI (e.g., a styled div with absolute positioned pins or a simple leaflet map).",
+    "Billing screen must have an 'Export as PDF/Excel' button (you can mock the export logic with a generic download function or alert)."
+  ]
+}
