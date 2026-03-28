@@ -1,34 +1,45 @@
-.App-logo {
-    height: 40vmin;
-    pointer-events: none;
+/* TGSRTC Bus Management System Styles */
+
+.sidebar-item {
+  @apply flex items-center gap-3 px-4 py-2.5 text-sm rounded-md transition-colors duration-150;
+}
+.sidebar-item:hover {
+  background: rgba(255,255,255,0.1);
+}
+.sidebar-item.active {
+  background: rgba(255,255,255,0.12);
+  color: #BA9149;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-    .App-logo {
-        animation: App-logo-spin infinite 20s linear;
-    }
+.kpi-card {
+  @apply bg-white border border-gray-200 shadow-sm rounded-md p-5 transition-all duration-150;
+}
+.kpi-card:hover {
+  @apply shadow-md;
 }
 
-.App-header {
-    background-color: #0f0f10;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    font-size: calc(10px + 2vmin);
-    color: white;
+.table-header {
+  @apply text-xs font-medium uppercase tracking-wider text-gray-500 bg-gray-50;
 }
 
-.App-link {
-    color: #61dafb;
+.page-header {
+  @apply flex items-center justify-between mb-6;
+}
+.page-title {
+  @apply text-2xl md:text-3xl font-semibold tracking-tight text-gray-900;
+  font-family: 'Work Sans', sans-serif;
 }
 
-@keyframes App-logo-spin {
-    from {
-        transform: rotate(0deg);
-    }
-    to {
-        transform: rotate(360deg);
-    }
+.btn-primary {
+  @apply bg-[#134219] text-white hover:bg-[#0E3213] transition-colors duration-150 px-4 py-2 rounded-md text-sm font-medium;
+}
+.btn-accent {
+  @apply bg-[#BA9149] text-white hover:bg-[#A67F3B] transition-colors duration-150 px-4 py-2 rounded-md text-sm font-medium;
+}
+
+/* Leaflet fix */
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  border-radius: 0.375rem;
 }
