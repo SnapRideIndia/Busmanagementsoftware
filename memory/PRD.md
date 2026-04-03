@@ -81,6 +81,19 @@ Build a fully functional Bus Management System dashboard with complete backend. 
 - Backend: 100% (57 endpoints)
 - Frontend: 95%
 
+## Iteration 3 - Duty Assignment + Passengers + Logo (April 3, 2026)
+- [x] Duty Assignment module: assign routes to drivers with 2 trips (outward + return)
+- [x] Start/end points, start/arrival times per trip, date selection
+- [x] SMS notification (SIMULATED - logs to backend console, marks as sent)
+- [x] Send individual SMS or bulk "Send All SMS" for a date
+- [x] Passengers Traveled KPI on dashboard (clickable drill-down)
+- [x] Passenger drill-down: daily/monthly/quarterly, depot/bus/route filters
+- [x] Sidebar logo: Bus icon, added Duty Roster + Passengers nav items
+
+## Test Results (Iteration 3)
+- Backend: 100% (72 endpoints)
+- Frontend: 98%
+
 ## Prioritized Backlog
 ### P0 (Critical)
 - None remaining
