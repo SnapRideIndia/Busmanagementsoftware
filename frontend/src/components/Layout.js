@@ -3,7 +3,8 @@ import { useAuth } from "../contexts/AuthContext";
 import {
   LayoutDashboard, FileText, Bus, Users, MapPin, Zap,
   BarChart3, Calculator, Receipt, FileBarChart, AlertTriangle,
-  Settings, LogOut, ChevronLeft, ChevronRight, Menu, IndianRupee, Route
+  Settings, LogOut, ChevronLeft, ChevronRight, Menu, IndianRupee, Route,
+  ClipboardList, UsersRound
 } from "lucide-react";
 import { useState } from "react";
 
@@ -12,6 +13,7 @@ const navItems = [
   { to: "/tenders", label: "Tenders", icon: FileText },
   { to: "/buses", label: "Bus Master", icon: Bus },
   { to: "/drivers", label: "Drivers", icon: Users },
+  { to: "/duties", label: "Duty Roster", icon: ClipboardList },
   { to: "/live-operations", label: "Live Operations", icon: MapPin },
   { to: "/energy", label: "Energy", icon: Zap },
   { to: "/kpi", label: "KPI", icon: BarChart3 },
@@ -21,6 +23,7 @@ const navItems = [
   { to: "/incidents", label: "Incidents", icon: AlertTriangle },
   { to: "/revenue-details", label: "Revenue", icon: IndianRupee },
   { to: "/km-details", label: "KM Tracking", icon: Route },
+  { to: "/passenger-details", label: "Passengers", icon: UsersRound },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -51,8 +54,8 @@ export default function Layout({ children }) {
       >
         {/* Logo */}
         <div className="flex items-center gap-3 px-4 h-16 border-b border-white/10 shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-[#C8102E] flex items-center justify-center text-white font-bold text-sm shrink-0">
-            TS
+          <div className="w-8 h-8 rounded-lg bg-[#C8102E] flex items-center justify-center text-white shrink-0">
+            <Bus size={16} />
           </div>
           {!collapsed && (
             <span className="font-semibold text-sm tracking-tight" style={{ fontFamily: 'Inter' }}>

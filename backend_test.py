@@ -569,6 +569,163 @@ class BusManagementTester:
         
         return success and success2 and success3 and success4
 
+    def test_duty_assignments(self):
+        """Test new duty assignment API endpoints"""
+        print("\n📋 Testing Duty Assignment APIs...")
+        
+        # List duties for today
+        today = datetime.now().strftime("%Y-%m-%d")
+        success, duties = self.run_test(
+            "Duties - List Today",
+            "GET",
+            "duties",
+            200,
+            params={"date": today}
+        )
+        if success:
+            print(f"   Duties found for today: {len(duties)}")
+        
+        # Get drivers and buses for creating duty
+        success_drivers, drivers = self.run_test("Get Drivers for Duty", "GET", "drivers", 200)
+        success_buses, buses = self.run_test("Get Buses for Duty", "GET", "buses", 200)
+        
+        if success_drivers and success_buses and drivers and buses:
+            # Create new duty assignment
+            new_duty = {
+                "driver_license": drivers[0]['license_number'],
+                "bus_id": buses[0]['bus_id'],
+                "route_name": "Test Route Express",
+                "start_point": "Test Start Point",
+                "end_point": "Test End Point",
+                "date": today,
+                "trips": [
+                    {"trip_number": 1, "start_time": "08:00", "end_time": "10:00", "direction": "outward"},
+                    {"trip_number": 2, "start_time": "11:30", "end_time": "13:30", "direction": "return"}
+                ]
+            }
+            success2, created_duty = self.run_test(
+                "Duties - Create",
+                "POST",
+                "duties",
+                200,
+                data=new_duty
+            )
+            
+            if success2 and created_duty:
+                duty_id = created_duty.get('id')
+                print(f"   Created duty ID: {duty_id}")
+                
+                # Test SMS sending (simulated)
+                success3, sms_response = self.run_test(
+                    "Duties - Send SMS",
+                    "POST",
+                    f"duties/{duty_id}/send-sms",
+                    200
+                )
+                if success3:
+                    print(f"   SMS sent to: {sms_response.get('phone', 'N/A')}")
+                
+                # Test duty update
+                update_duty = {**new_duty, "route_name": "Updated Test Route"}
+                success4, _ = self.run_test(
+                    "Duties - Update",
+                    "PUT",
+                    f"duties/{duty_id}",
+                    200,
+                    data=update_duty
+                )
+                
+                # Test delete duty
+                success5, _ = self.run_test(
+                    "Duties - Delete",
+                    "DELETE",
+                    f"duties/{duty_id}",
+                    200
+                )
+                
+                return success and success2 and success3 and success4 and success5
+        
+        # Test send all SMS for today
+        success_all, all_sms_response = self.run_test(
+            "Duties - Send All SMS",
+            "POST",
+            "duties/send-all-sms",
+            200,
+            params={"date": today}
+        )
+        if success_all:
+            print(f"   Bulk SMS sent count: {all_sms_response.get('count', 0)}")
+        
+        return success and success_all
+
+    def test_passenger_details(self):
+        """Test new passenger details API endpoints"""
+        print("\n👥 Testing Passenger Detail APIs...")
+        
+        # Test daily passenger details
+        success, response = self.run_test(
+            "Passenger Details (Daily)",
+            "GET",
+            "passengers/details",
+            200,
+            params={"period": "daily"}
+        )
+        if success:
+            data_count = len(response.get('data', []))
+            total_passengers = response.get('total_passengers', 0)
+            print(f"   Daily passenger records: {data_count}")
+            print(f"   Total passengers: {total_passengers}")
+            print(f"   Routes available: {len(response.get('routes', []))}")
+        
+        # Test monthly aggregation
+        success2, _ = self.run_test(
+            "Passenger Details (Monthly)",
+            "GET",
+            "passengers/details",
+            200,
+            params={"period": "monthly"}
+        )
+        
+        # Test quarterly aggregation
+        success3, _ = self.run_test(
+            "Passenger Details (Quarterly)",
+            "GET",
+            "passengers/details",
+            200,
+            params={"period": "quarterly"}
+        )
+        
+        # Test depot filter
+        success4, _ = self.run_test(
+            "Passenger Details (Depot Filter)",
+            "GET",
+            "passengers/details",
+            200,
+            params={"period": "daily", "depot": "Miyapur Depot"}
+        )
+        
+        # Test route filter
+        success5, _ = self.run_test(
+            "Passenger Details (Route Filter)",
+            "GET",
+            "passengers/details",
+            200,
+            params={"period": "daily", "route": "Miyapur-Secunderabad Express"}
+        )
+        
+        # Test date range filter
+        today = datetime.now().strftime("%Y-%m-%d")
+        week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+        success6, _ = self.run_test(
+            "Passenger Details (Date Range)",
+            "GET",
+            "passengers/details",
+            200,
+            params={"period": "daily", "date_from": week_ago, "date_to": today}
+        )
+        
+        return success and success2 and success3 and success4 and success5 and success6
+
 def main():
     print("🚌 Starting Bus Management System API Tests")
     print("=" * 60)
@@ -586,6 +743,8 @@ def main():
         ("Dashboard", tester.test_dashboard),
         ("Revenue Details", tester.test_revenue_details),
         ("KM Details", tester.test_km_details),
+        ("Duty Assignments", tester.test_duty_assignments),
+        ("Passenger Details", tester.test_passenger_details),
         ("Tender Management", tester.test_tender_management),
         ("Bus Management", tester.test_bus_management),
         ("Driver Management", tester.test_driver_management),

@@ -161,6 +161,23 @@ class BillingGenerateReq(BaseModel):
     period_end: str
     depot: str = ""
 
+class TripDetail(BaseModel):
+    trip_number: int
+    start_time: str
+    end_time: str
+    direction: str = "outward"
+
+class DutyReq(BaseModel):
+    driver_license: str
+    driver_name: str = ""
+    driver_phone: str = ""
+    bus_id: str
+    route_name: str
+    start_point: str
+    end_point: str
+    date: str
+    trips: list = []
+
 # ══════════════════════════════════════════════════════════
 # AUTH ROUTES
 # ══════════════════════════════════════════════════════════
@@ -300,6 +317,7 @@ async def get_dashboard(date_from: str = "", date_to: str = "", depot: str = "",
         rev_query["date"] = {"$gte": date_from, "$lte": date_to}
     rev_data = await db.revenue_data.find(rev_query, {"_id": 0}).to_list(10000)
     total_ticket_revenue = sum(r.get("revenue_amount", 0) for r in rev_data)
+    total_passengers = sum(r.get("passengers", 0) for r in rev_data)
     # Daily KM chart data
     daily_km = {}
     for t in trips:
@@ -326,6 +344,7 @@ async def get_dashboard(date_from: str = "", date_to: str = "", depot: str = "",
         "total_energy": round(total_energy, 2), "active_incidents": active_incidents,
         "total_revenue": round(total_revenue, 2),
         "total_ticket_revenue": round(total_ticket_revenue, 2),
+        "total_passengers": total_passengers,
         "availability_pct": round((total_km / scheduled_km * 100) if scheduled_km > 0 else 0, 1),
         "km_chart": km_chart, "energy_chart": energy_chart, "depots": depots
     }
@@ -1173,6 +1192,166 @@ async def get_km_details(
     return {"data": [], "total_km": 0, "depots": depots_list, "bus_ids": bus_ids_list, "period": period}
 
 # ══════════════════════════════════════════════════════════
+# DUTY ASSIGNMENTS
+# ══════════════════════════════════════════════════════════
+
+@api.get("/duties")
+async def list_duties(date: str = "", driver_license: str = "", bus_id: str = "", user: dict = Depends(get_current_user)):
+    query = {}
+    if date:
+        query["date"] = date
+    if driver_license:
+        query["driver_license"] = driver_license
+    if bus_id:
+        query["bus_id"] = bus_id
+    duties = await db.duty_assignments.find(query, {"_id": 0}).to_list(1000)
+    return duties
+
+@api.post("/duties")
+async def create_duty(req: DutyReq, user: dict = Depends(get_current_user)):
+    driver = await db.drivers.find_one({"license_number": req.driver_license}, {"_id": 0})
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    bus = await db.buses.find_one({"bus_id": req.bus_id}, {"_id": 0})
+    if not bus:
+        raise HTTPException(status_code=404, detail="Bus not found")
+    doc = req.model_dump()
+    doc["id"] = f"DTY-{str(uuid.uuid4())[:8].upper()}"
+    doc["driver_name"] = driver.get("name", req.driver_name)
+    doc["driver_phone"] = driver.get("phone", req.driver_phone)
+    doc["depot"] = bus.get("depot", "")
+    doc["status"] = "assigned"
+    doc["sms_sent"] = False
+    doc["created_at"] = datetime.now(timezone.utc).isoformat()
+    doc["created_by"] = user.get("name", "")
+    await db.duty_assignments.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+@api.put("/duties/{duty_id}")
+async def update_duty(duty_id: str, req: DutyReq, user: dict = Depends(get_current_user)):
+    update = req.model_dump()
+    driver = await db.drivers.find_one({"license_number": req.driver_license}, {"_id": 0})
+    if driver:
+        update["driver_name"] = driver.get("name", "")
+        update["driver_phone"] = driver.get("phone", "")
+    result = await db.duty_assignments.update_one({"id": duty_id}, {"$set": update})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Duty not found")
+    return {"message": "Duty updated"}
+
+@api.delete("/duties/{duty_id}")
+async def delete_duty(duty_id: str, user: dict = Depends(get_current_user)):
+    result = await db.duty_assignments.delete_one({"id": duty_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Duty not found")
+    return {"message": "Duty deleted"}
+
+@api.post("/duties/{duty_id}/send-sms")
+async def send_duty_sms(duty_id: str, user: dict = Depends(get_current_user)):
+    duty = await db.duty_assignments.find_one({"id": duty_id}, {"_id": 0})
+    if not duty:
+        raise HTTPException(status_code=404, detail="Duty not found")
+    trips_text = ""
+    for t in duty.get("trips", []):
+        trips_text += f"Trip {t['trip_number']}: {t.get('direction','').title()} {t['start_time']}-{t['end_time']}. "
+    sms_message = (
+        f"TGSRTC Duty Alert: Dear {duty['driver_name']}, "
+        f"your duty on {duty['date']}: "
+        f"Bus {duty['bus_id']}, Route: {duty['route_name']} "
+        f"({duty['start_point']} to {duty['end_point']}). "
+        f"{trips_text}"
+        f"Report on time. -TGSRTC"
+    )
+    logger.info(f"SMS to {duty['driver_phone']}: {sms_message}")
+    await db.duty_assignments.update_one({"id": duty_id}, {"$set": {"sms_sent": True, "sms_message": sms_message}})
+    return {"message": "SMS sent successfully", "sms_text": sms_message, "phone": duty["driver_phone"]}
+
+@api.post("/duties/send-all-sms")
+async def send_all_duty_sms(date: str = Query(...), user: dict = Depends(get_current_user)):
+    duties = await db.duty_assignments.find({"date": date, "sms_sent": False}, {"_id": 0}).to_list(1000)
+    sent_count = 0
+    for duty in duties:
+        trips_text = ""
+        for t in duty.get("trips", []):
+            trips_text += f"Trip {t['trip_number']}: {t.get('direction','').title()} {t['start_time']}-{t['end_time']}. "
+        sms_message = (
+            f"TGSRTC Duty Alert: Dear {duty['driver_name']}, "
+            f"your duty on {duty['date']}: "
+            f"Bus {duty['bus_id']}, Route: {duty['route_name']} "
+            f"({duty['start_point']} to {duty['end_point']}). "
+            f"{trips_text}-TGSRTC"
+        )
+        logger.info(f"SMS to {duty['driver_phone']}: {sms_message}")
+        await db.duty_assignments.update_one({"id": duty["id"]}, {"$set": {"sms_sent": True, "sms_message": sms_message}})
+        sent_count += 1
+    return {"message": f"SMS sent to {sent_count} drivers", "count": sent_count}
+
+# ══════════════════════════════════════════════════════════
+# PASSENGER DETAILS (Ticket Issuing Machine API data)
+# ══════════════════════════════════════════════════════════
+
+@api.get("/passengers/details")
+async def get_passenger_details(
+    depot: str = "", bus_id: str = "",
+    date_from: str = "", date_to: str = "",
+    period: str = "daily", route: str = "",
+    user: dict = Depends(get_current_user)
+):
+    query = {}
+    if depot:
+        query["depot"] = depot
+    if bus_id:
+        query["bus_id"] = bus_id
+    if route:
+        query["route"] = route
+    if date_from and date_to:
+        query["date"] = {"$gte": date_from, "$lte": date_to}
+    data = await db.revenue_data.find(query, {"_id": 0}).to_list(50000)
+    buses = await db.buses.find({}, {"_id": 0}).to_list(1000)
+    bus_map = {b["bus_id"]: b for b in buses}
+    depots_list = list(set(b.get("depot", "") for b in buses if b.get("depot")))
+    bus_ids_list = [b["bus_id"] for b in buses]
+    routes_list = list(set(d.get("route", "") for d in data if d.get("route")))
+    if period == "daily":
+        for d in data:
+            d["depot"] = d.get("depot") or bus_map.get(d.get("bus_id"), {}).get("depot", "")
+        total_pax = sum(d.get("passengers", 0) for d in data)
+        return {"data": data, "total_passengers": total_pax, "depots": depots_list, "bus_ids": bus_ids_list, "routes": routes_list, "period": "daily"}
+    elif period == "monthly":
+        monthly = {}
+        for d in data:
+            month_key = d["date"][:7]
+            key = f"{d['bus_id']}_{month_key}"
+            dep = d.get("depot") or bus_map.get(d.get("bus_id"), {}).get("depot", "")
+            if key not in monthly:
+                monthly[key] = {"bus_id": d["bus_id"], "depot": dep, "period": month_key, "passengers": 0, "revenue_amount": 0, "days": 0, "route": d.get("route", "")}
+            monthly[key]["passengers"] += d.get("passengers", 0)
+            monthly[key]["revenue_amount"] += d.get("revenue_amount", 0)
+            monthly[key]["days"] += 1
+        result = sorted(monthly.values(), key=lambda x: (x["period"], x["bus_id"]))
+        total_pax = sum(r["passengers"] for r in result)
+        return {"data": result, "total_passengers": total_pax, "depots": depots_list, "bus_ids": bus_ids_list, "routes": routes_list, "period": "monthly"}
+    elif period == "quarterly":
+        quarterly = {}
+        for d in data:
+            year = d["date"][:4]
+            month = int(d["date"][5:7])
+            q = (month - 1) // 3 + 1
+            quarter_key = f"{year}-Q{q}"
+            key = f"{d['bus_id']}_{quarter_key}"
+            dep = d.get("depot") or bus_map.get(d.get("bus_id"), {}).get("depot", "")
+            if key not in quarterly:
+                quarterly[key] = {"bus_id": d["bus_id"], "depot": dep, "period": quarter_key, "passengers": 0, "revenue_amount": 0, "days": 0}
+            quarterly[key]["passengers"] += d.get("passengers", 0)
+            quarterly[key]["revenue_amount"] += d.get("revenue_amount", 0)
+            quarterly[key]["days"] += 1
+        result = sorted(quarterly.values(), key=lambda x: (x["period"], x["bus_id"]))
+        total_pax = sum(r["passengers"] for r in result)
+        return {"data": result, "total_passengers": total_pax, "depots": depots_list, "bus_ids": bus_ids_list, "routes": routes_list, "period": "quarterly"}
+    return {"data": [], "total_passengers": 0, "depots": depots_list, "bus_ids": bus_ids_list, "routes": routes_list, "period": period}
+
+# ══════════════════════════════════════════════════════════
 # SEED DATA
 # ══════════════════════════════════════════════════════════
 
@@ -1330,6 +1509,49 @@ async def seed_data():
             {"key": "default_subsidy_rate", "value": "5", "updated_at": datetime.now(timezone.utc).isoformat()},
         ]
         await db.settings.insert_many(settings)
+    # Duty assignments (sample for today and next 3 days)
+    if await db.duty_assignments.count_documents({}) == 0:
+        drivers_list = await db.drivers.find({"status": "active"}, {"_id": 0}).to_list(100)
+        buses_list = await db.buses.find({"status": "active"}, {"_id": 0}).to_list(100)
+        route_defs = [
+            {"name": "Miyapur-Secunderabad Express", "start": "Miyapur", "end": "Secunderabad"},
+            {"name": "LB Nagar-MGBS City", "start": "LB Nagar", "end": "MGBS"},
+            {"name": "Kukatpally-Charminar", "start": "Kukatpally", "end": "Charminar"},
+            {"name": "Uppal-Mehdipatnam", "start": "Uppal", "end": "Mehdipatnam"},
+            {"name": "ECIL-Nampally", "start": "ECIL", "end": "Nampally"},
+            {"name": "Secunderabad-Warangal", "start": "Secunderabad", "end": "Warangal"},
+            {"name": "Dilsukhnagar-Ameerpet", "start": "Dilsukhnagar", "end": "Ameerpet"},
+            {"name": "Habsiguda-Jubilee Hills", "start": "Habsiguda", "end": "Jubilee Hills"},
+        ]
+        duties = []
+        for day_offset in range(4):
+            date = (datetime.now(timezone.utc) + timedelta(days=day_offset)).strftime("%Y-%m-%d")
+            for i, driver in enumerate(drivers_list[:8]):
+                bus = buses_list[i] if i < len(buses_list) else buses_list[0]
+                rd = route_defs[i % len(route_defs)]
+                start_h = 6 + (i % 4) * 2
+                duties.append({
+                    "id": f"DTY-{date[-5:]}-{str(i+1).zfill(2)}",
+                    "driver_license": driver["license_number"],
+                    "driver_name": driver["name"],
+                    "driver_phone": driver.get("phone", ""),
+                    "bus_id": bus["bus_id"],
+                    "depot": bus.get("depot", ""),
+                    "route_name": rd["name"],
+                    "start_point": rd["start"],
+                    "end_point": rd["end"],
+                    "date": date,
+                    "trips": [
+                        {"trip_number": 1, "start_time": f"{start_h:02d}:00", "end_time": f"{start_h+2:02d}:00", "direction": "outward"},
+                        {"trip_number": 2, "start_time": f"{start_h+3:02d}:30", "end_time": f"{start_h+5:02d}:30", "direction": "return"}
+                    ],
+                    "status": "assigned",
+                    "sms_sent": day_offset == 0,
+                    "sms_message": "" if day_offset > 0 else f"TGSRTC Duty Alert: Dear {driver['name']}, duty on {date}: Bus {bus['bus_id']}, {rd['name']}.",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "created_by": "System"
+                })
+        await db.duty_assignments.insert_many(duties)
     # Write test credentials
     os.makedirs("/app/memory", exist_ok=True)
     with open("/app/memory/test_credentials.md", "w") as f:

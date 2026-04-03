@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { Bus, Users, Zap, AlertTriangle, TrendingUp, RefreshCw, MapPin, IndianRupee } from "lucide-react";
+import { Bus, Users, Zap, AlertTriangle, TrendingUp, RefreshCw, MapPin, IndianRupee, UsersRound } from "lucide-react";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
 export default function DashboardPage() {
@@ -40,6 +40,7 @@ export default function DashboardPage() {
     { label: "KM Operated", value: data.total_km?.toLocaleString(), sub: `${data.availability_pct}% availability`, icon: MapPin, color: "#16A34A", clickable: true, link: "/km-details" },
     { label: "Energy (kWh)", value: data.total_energy?.toLocaleString(), sub: "This period", icon: Zap, color: "#F59E0B", clickable: false },
     { label: "Revenue", value: `Rs.${(data.total_ticket_revenue / 100000).toFixed(1)}L`, sub: "Ticket collection", icon: IndianRupee, color: "#C8102E", clickable: true, link: "/revenue-details" },
+    { label: "Passengers", value: data.total_passengers?.toLocaleString(), sub: "Ticket machine data", icon: UsersRound, color: "#8B5CF6", clickable: true, link: "/passenger-details" },
     { label: "Open Incidents", value: data.active_incidents, sub: "Needs attention", icon: AlertTriangle, color: "#DC2626", clickable: false },
   ] : [];
 

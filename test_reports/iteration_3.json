@@ -1,0 +1,60 @@
+{
+  "summary": "Completed comprehensive testing of Bus Management System with 3 new features: Duty Assignment module, Passengers KPI drill-down, and sidebar logo fix. All backend APIs (100% success rate) and frontend functionality working correctly.",
+  "backend_issues": {
+    "critical_bugs": [],
+    "flaky_endpoints": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "component": "Chart components",
+        "issue": "Chart width/height warnings in console (non-blocking)",
+        "affected_selectors": ["ResponsiveContainer"],
+        "fix_priority": "LOW"
+      }
+    ]
+  },
+  "passed_tests": [
+    "Admin login with admin@tgsrtc.com / admin123",
+    "Dashboard shows Passengers KPI card with clickable 'Click for details' text",
+    "Click Passengers KPI -> navigates to /passenger-details page",
+    "Passenger Details: period filter (daily/monthly/quarterly) works",
+    "Passenger Details: depot, bus, route filters work",
+    "Passenger Details: shows trend chart, route-wise table, bus-wise table",
+    "Sidebar has 'Duty Roster' nav item - click navigates to /duties",
+    "Sidebar has 'Passengers' nav item - navigation works",
+    "Sidebar logo shows Bus icon (not 'TS' text) - logo fix working",
+    "Duty Roster page: shows seeded duties for today (8 duties)",
+    "Duty page: Assign new duty with driver, bus, route, start/end points, trip times",
+    "Duty page: Edit existing duty dialog opens correctly",
+    "Duty page: Send SMS for individual duty (simulated) works",
+    "Duty page: Send All SMS button works",
+    "Duty page: Date filter works",
+    "Duty page: Each duty shows 2 trips (outward + return) with times",
+    "Backend: GET /api/duties returns duty list (8 duties found)",
+    "Backend: POST /api/duties creates new duty successfully",
+    "Backend: PUT /api/duties/{id} updates duty",
+    "Backend: DELETE /api/duties/{id} deletes duty",
+    "Backend: POST /api/duties/{id}/send-sms simulates SMS (logs to console)",
+    "Backend: POST /api/duties/send-all-sms works for bulk SMS",
+    "Backend: GET /api/passengers/details with all filter combinations",
+    "Backend: GET /api/passengers/details daily/monthly/quarterly periods",
+    "Backend: GET /api/passengers/details depot/bus/route filters",
+    "Backend: GET /api/passengers/details date range filters",
+    "Dashboard KPI cards: Revenue and KM Operated are clickable",
+    "Revenue KPI navigation to /revenue-details works",
+    "KM KPI navigation to /km-details works",
+    "All 72 backend API endpoints (100% success rate including new duty and passenger APIs)"
+  ],
+  "test_report_links": ["/app/backend_test.py"],
+  "action_item_for_main_agent": "",
+  "updated_files": ["/app/backend_test.py"],
+  "success_percentage": {
+    "backend": "100%",
+    "frontend": "98%"
+  },
+  "should_call_test_agent_after_fix": "false",
+  "should_main_agent_test_itself": "true"
+}

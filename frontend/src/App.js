@@ -18,6 +18,8 @@ import IncidentPage from "./pages/IncidentPage";
 import SettingsPage from "./pages/SettingsPage";
 import RevenueDetailPage from "./pages/RevenueDetailPage";
 import KmDetailPage from "./pages/KmDetailPage";
+import DutyPage from "./pages/DutyPage";
+import PassengerDetailPage from "./pages/PassengerDetailPage";
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -58,6 +60,8 @@ function App() {
           <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
           <Route path="/revenue-details" element={<ProtectedRoute><RevenueDetailPage /></ProtectedRoute>} />
           <Route path="/km-details" element={<ProtectedRoute><KmDetailPage /></ProtectedRoute>} />
+          <Route path="/duties" element={<ProtectedRoute><DutyPage /></ProtectedRoute>} />
+          <Route path="/passenger-details" element={<ProtectedRoute><PassengerDetailPage /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </BrowserRouter>
