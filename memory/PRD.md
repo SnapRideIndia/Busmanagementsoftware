@@ -47,9 +47,39 @@ Build a fully functional Bus Management System dashboard with complete backend. 
 - [x] Seed data (3 tenders, 10 buses, 8 drivers, 30 days data)
 - [x] TGSRTC color theme (Night Green #134219, Goldenrod #BA9149)
 
-## Test Results
+## Test Results (Iteration 1)
 - Backend: 100% (49/49 tests passed)
 - Frontend: 95% (19/20 - minor selector fix applied)
+
+## Iteration 2 - Revenue/KM Drill-Down + UI Overhaul (April 3, 2026)
+- [x] Revenue KPI clickable - drill-down with day/month/quarter views
+- [x] Revenue data from Ticket Issuing Machine API (90 days seeded)
+- [x] KM KPI clickable - drill-down with day/month/quarter views
+- [x] KM data from GPS API (30 days seeded)
+- [x] Both pages: depot, bus, date filters + charts + tables
+- [x] Complete UI: Primary #C8102E (Red), Sidebar #1F2937, Font Inter
+- [x] Sidebar: Revenue and KM Tracking nav items added
+
+## Test Results (Iteration 2)
+- Backend: 100% (57 endpoints)
+- Frontend: 95%
+
+## Test Results (Iteration 1)
+- Backend: 100% (49/49 tests passed)
+- Frontend: 95% (19/20 - minor selector fix applied)
+
+## Iteration 2 - Revenue/KM Drill-Down + UI Overhaul (April 3, 2026)
+- [x] Revenue KPI clickable - drill-down with day/month/quarter views
+- [x] Revenue data from Ticket Issuing Machine API (90 days seeded)
+- [x] KM KPI clickable - drill-down with day/month/quarter views
+- [x] KM data from GPS API (30 days seeded)
+- [x] Both pages: depot, bus, date filters + charts + tables
+- [x] Complete UI: Primary #C8102E (Red), Sidebar #1F2937, Font Inter
+- [x] Sidebar: Revenue and KM Tracking nav items added
+
+## Test Results (Iteration 2)
+- Backend: 100% (57 endpoints)
+- Frontend: 95%
 
 ## Prioritized Backlog
 ### P0 (Critical)
