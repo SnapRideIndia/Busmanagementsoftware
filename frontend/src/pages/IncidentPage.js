@@ -45,7 +45,7 @@ export default function IncidentPage() {
     <div data-testid="incident-page">
       <div className="page-header">
         <h1 className="page-title">Incident Management</h1>
-        <Button onClick={() => setOpen(true)} className="bg-[#134219] hover:bg-[#0E3213]" data-testid="report-incident-btn">
+        <Button onClick={() => setOpen(true)} className="bg-[#C8102E] hover:bg-[#A50E25]" data-testid="report-incident-btn">
           <Plus size={16} className="mr-1.5" /> Report Incident
         </Button>
       </div>
@@ -122,7 +122,7 @@ export default function IncidentPage() {
                 </Select>
               </div>
             </div>
-            <Button onClick={handleAdd} className="w-full bg-[#134219] hover:bg-[#0E3213]" data-testid="incident-save-btn">Report</Button>
+            <Button onClick={handleAdd} className="w-full bg-[#C8102E] hover:bg-[#A50E25]" data-testid="incident-save-btn">Report</Button>
           </div>
         </DialogContent>
       </Dialog>

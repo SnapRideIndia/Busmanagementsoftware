@@ -294,6 +294,12 @@ async def get_dashboard(date_from: str = "", date_to: str = "", depot: str = "",
     active_incidents = len(incidents)
     billings = await db.billing.find({}, {"_id": 0}).to_list(100)
     total_revenue = sum(b.get("final_payable", 0) for b in billings)
+    # Ticket revenue
+    rev_query = {}
+    if date_from and date_to:
+        rev_query["date"] = {"$gte": date_from, "$lte": date_to}
+    rev_data = await db.revenue_data.find(rev_query, {"_id": 0}).to_list(10000)
+    total_ticket_revenue = sum(r.get("revenue_amount", 0) for r in rev_data)
     # Daily KM chart data
     daily_km = {}
     for t in trips:
@@ -319,6 +325,7 @@ async def get_dashboard(date_from: str = "", date_to: str = "", depot: str = "",
         "total_km": round(total_km, 2), "scheduled_km": round(scheduled_km, 2),
         "total_energy": round(total_energy, 2), "active_incidents": active_incidents,
         "total_revenue": round(total_revenue, 2),
+        "total_ticket_revenue": round(total_ticket_revenue, 2),
         "availability_pct": round((total_km / scheduled_km * 100) if scheduled_km > 0 else 0, 1),
         "km_chart": km_chart, "energy_chart": energy_chart, "depots": depots
     }
@@ -1043,6 +1050,129 @@ async def update_setting(req: SettingsReq, user: dict = Depends(get_current_user
     return {"message": "Setting updated"}
 
 # ══════════════════════════════════════════════════════════
+# REVENUE DETAILS (Ticket Issuing Machine API data)
+# ══════════════════════════════════════════════════════════
+
+@api.get("/revenue/details")
+async def get_revenue_details(
+    depot: str = "", bus_id: str = "",
+    date_from: str = "", date_to: str = "",
+    period: str = "daily",
+    user: dict = Depends(get_current_user)
+):
+    query = {}
+    if depot:
+        query["depot"] = depot
+    if bus_id:
+        query["bus_id"] = bus_id
+    if date_from and date_to:
+        query["date"] = {"$gte": date_from, "$lte": date_to}
+    data = await db.revenue_data.find(query, {"_id": 0}).to_list(50000)
+    buses = await db.buses.find({}, {"_id": 0}).to_list(1000)
+    bus_map = {b["bus_id"]: b for b in buses}
+    depots_list = list(set(b.get("depot", "") for b in buses if b.get("depot")))
+    bus_ids_list = [b["bus_id"] for b in buses]
+    if period == "daily":
+        for d in data:
+            d["depot"] = d.get("depot") or bus_map.get(d.get("bus_id"), {}).get("depot", "")
+        total = sum(d.get("revenue_amount", 0) for d in data)
+        return {"data": data, "total_revenue": round(total, 2), "depots": depots_list, "bus_ids": bus_ids_list, "period": "daily"}
+    elif period == "monthly":
+        monthly = {}
+        for d in data:
+            month_key = d["date"][:7]
+            key = f"{d['bus_id']}_{month_key}"
+            dep = d.get("depot") or bus_map.get(d.get("bus_id"), {}).get("depot", "")
+            if key not in monthly:
+                monthly[key] = {"bus_id": d["bus_id"], "depot": dep, "period": month_key, "revenue_amount": 0, "passengers": 0, "days": 0, "route": d.get("route", "")}
+            monthly[key]["revenue_amount"] += d.get("revenue_amount", 0)
+            monthly[key]["passengers"] += d.get("passengers", 0)
+            monthly[key]["days"] += 1
+        result = sorted(monthly.values(), key=lambda x: (x["period"], x["bus_id"]))
+        total = sum(r["revenue_amount"] for r in result)
+        return {"data": result, "total_revenue": round(total, 2), "depots": depots_list, "bus_ids": bus_ids_list, "period": "monthly"}
+    elif period == "quarterly":
+        quarterly = {}
+        for d in data:
+            year = d["date"][:4]
+            month = int(d["date"][5:7])
+            q = (month - 1) // 3 + 1
+            quarter_key = f"{year}-Q{q}"
+            key = f"{d['bus_id']}_{quarter_key}"
+            dep = d.get("depot") or bus_map.get(d.get("bus_id"), {}).get("depot", "")
+            if key not in quarterly:
+                quarterly[key] = {"bus_id": d["bus_id"], "depot": dep, "period": quarter_key, "revenue_amount": 0, "passengers": 0, "days": 0}
+            quarterly[key]["revenue_amount"] += d.get("revenue_amount", 0)
+            quarterly[key]["passengers"] += d.get("passengers", 0)
+            quarterly[key]["days"] += 1
+        result = sorted(quarterly.values(), key=lambda x: (x["period"], x["bus_id"]))
+        total = sum(r["revenue_amount"] for r in result)
+        return {"data": result, "total_revenue": round(total, 2), "depots": depots_list, "bus_ids": bus_ids_list, "period": "quarterly"}
+    return {"data": [], "total_revenue": 0, "depots": depots_list, "bus_ids": bus_ids_list, "period": period}
+
+# ══════════════════════════════════════════════════════════
+# KM DETAILS (GPS API data)
+# ══════════════════════════════════════════════════════════
+
+@api.get("/km/details")
+async def get_km_details(
+    depot: str = "", bus_id: str = "",
+    date_from: str = "", date_to: str = "",
+    period: str = "daily",
+    user: dict = Depends(get_current_user)
+):
+    buses = await db.buses.find({}, {"_id": 0}).to_list(1000)
+    bus_map = {b["bus_id"]: b for b in buses}
+    depots_list = list(set(b.get("depot", "") for b in buses if b.get("depot")))
+    bus_ids_list = [b["bus_id"] for b in buses]
+    query = {}
+    if bus_id:
+        query["bus_id"] = bus_id
+    elif depot:
+        depot_buses = [b["bus_id"] for b in buses if b.get("depot") == depot]
+        if depot_buses:
+            query["bus_id"] = {"$in": depot_buses}
+    if date_from and date_to:
+        query["date"] = {"$gte": date_from, "$lte": date_to}
+    trips = await db.trip_data.find(query, {"_id": 0}).to_list(50000)
+    for t in trips:
+        t["depot"] = bus_map.get(t.get("bus_id"), {}).get("depot", "")
+        t["source"] = "GPS API"
+    if period == "daily":
+        total_km = sum(t.get("actual_km", 0) for t in trips)
+        return {"data": trips, "total_km": round(total_km, 2), "depots": depots_list, "bus_ids": bus_ids_list, "period": "daily"}
+    elif period == "monthly":
+        monthly = {}
+        for t in trips:
+            month_key = t["date"][:7]
+            key = f"{t['bus_id']}_{month_key}"
+            if key not in monthly:
+                monthly[key] = {"bus_id": t["bus_id"], "depot": t.get("depot", ""), "period": month_key, "actual_km": 0, "scheduled_km": 0, "days": 0}
+            monthly[key]["actual_km"] += t.get("actual_km", 0)
+            monthly[key]["scheduled_km"] += t.get("scheduled_km", 0)
+            monthly[key]["days"] += 1
+        result = sorted(monthly.values(), key=lambda x: (x["period"], x["bus_id"]))
+        total_km = sum(r["actual_km"] for r in result)
+        return {"data": result, "total_km": round(total_km, 2), "depots": depots_list, "bus_ids": bus_ids_list, "period": "monthly"}
+    elif period == "quarterly":
+        quarterly = {}
+        for t in trips:
+            year = t["date"][:4]
+            month = int(t["date"][5:7])
+            q = (month - 1) // 3 + 1
+            quarter_key = f"{year}-Q{q}"
+            key = f"{t['bus_id']}_{quarter_key}"
+            if key not in quarterly:
+                quarterly[key] = {"bus_id": t["bus_id"], "depot": t.get("depot", ""), "period": quarter_key, "actual_km": 0, "scheduled_km": 0, "days": 0}
+            quarterly[key]["actual_km"] += t.get("actual_km", 0)
+            quarterly[key]["scheduled_km"] += t.get("scheduled_km", 0)
+            quarterly[key]["days"] += 1
+        result = sorted(quarterly.values(), key=lambda x: (x["period"], x["bus_id"]))
+        total_km = sum(r["actual_km"] for r in result)
+        return {"data": result, "total_km": round(total_km, 2), "depots": depots_list, "bus_ids": bus_ids_list, "period": "quarterly"}
+    return {"data": [], "total_km": 0, "depots": depots_list, "bus_ids": bus_ids_list, "period": period}
+
+# ══════════════════════════════════════════════════════════
 # SEED DATA
 # ══════════════════════════════════════════════════════════
 
@@ -1142,6 +1272,27 @@ async def seed_data():
                     "tariff_rate": 8.5
                 })
         await db.energy_data.insert_many(energy_records)
+    # Revenue data (Ticket Issuing Machine)
+    if await db.revenue_data.count_documents({}) == 0:
+        revenue_records = []
+        buses_list = await db.buses.find({"status": "active"}, {"_id": 0}).to_list(100)
+        routes = ["Route-101 Miyapur-Secunderabad", "Route-202 LB Nagar-MGBS", "Route-303 Kukatpally-Charminar",
+                   "Route-404 Secunderabad-Warangal", "Route-505 Uppal-Mehdipatnam", "Route-606 ECIL-Nampally"]
+        for day_offset in range(90):
+            date = (datetime.now(timezone.utc) - timedelta(days=day_offset)).strftime("%Y-%m-%d")
+            for bus in buses_list:
+                capacity = bus.get("capacity", 40)
+                base_rev = capacity * random.uniform(3.5, 7.0) * random.randint(4, 8)
+                passengers = random.randint(int(capacity * 3), int(capacity * 7))
+                revenue_records.append({
+                    "bus_id": bus["bus_id"], "date": date,
+                    "depot": bus.get("depot", ""),
+                    "route": random.choice(routes),
+                    "revenue_amount": round(base_rev, 2),
+                    "passengers": passengers,
+                    "source": "ticket_issuing_machine"
+                })
+        await db.revenue_data.insert_many(revenue_records)
     # Deduction rules
     if await db.deduction_rules.count_documents({}) == 0:
         rules = [

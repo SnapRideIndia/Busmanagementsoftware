@@ -69,7 +69,7 @@ export default function ReportsPage() {
               <label className="text-xs font-medium uppercase text-gray-500">To</label>
               <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-40" data-testid="report-date-to" />
             </div>
-            <Button onClick={generate} disabled={loading} className="bg-[#134219] hover:bg-[#0E3213]" data-testid="generate-report-btn">
+            <Button onClick={generate} disabled={loading} className="bg-[#C8102E] hover:bg-[#A50E25]" data-testid="generate-report-btn">
               <FileBarChart size={14} className="mr-1.5" /> {loading ? "Loading..." : "Generate"}
             </Button>
             <Button onClick={() => download("excel")} variant="outline" data-testid="download-excel-btn">

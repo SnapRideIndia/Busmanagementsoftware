@@ -16,6 +16,8 @@ import BillingPage from "./pages/BillingPage";
 import ReportsPage from "./pages/ReportsPage";
 import IncidentPage from "./pages/IncidentPage";
 import SettingsPage from "./pages/SettingsPage";
+import RevenueDetailPage from "./pages/RevenueDetailPage";
+import KmDetailPage from "./pages/KmDetailPage";
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -54,6 +56,8 @@ function App() {
           <Route path="/reports" element={<ProtectedRoute><ReportsPage /></ProtectedRoute>} />
           <Route path="/incidents" element={<ProtectedRoute><IncidentPage /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+          <Route path="/revenue-details" element={<ProtectedRoute><RevenueDetailPage /></ProtectedRoute>} />
+          <Route path="/km-details" element={<ProtectedRoute><KmDetailPage /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </BrowserRouter>

@@ -65,7 +65,7 @@ export default function DriverPage() {
         <h1 className="page-title">Driver Management</h1>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => setAssignOpen(true)} data-testid="assign-driver-btn"><Link size={14} className="mr-1.5" /> Assign Bus</Button>
-          <Button onClick={() => { setForm(emptyDriver); setEditing(null); setOpen(true); }} className="bg-[#134219] hover:bg-[#0E3213]" data-testid="add-driver-btn">
+          <Button onClick={() => { setForm(emptyDriver); setEditing(null); setOpen(true); }} className="bg-[#C8102E] hover:bg-[#A50E25]" data-testid="add-driver-btn">
             <Plus size={16} className="mr-1.5" /> Add Driver
           </Button>
         </div>
@@ -121,7 +121,7 @@ export default function DriverPage() {
                 <SelectContent><SelectItem value="active">Active</SelectItem><SelectItem value="inactive">Inactive</SelectItem></SelectContent>
               </Select>
             </div>
-            <Button onClick={handleSave} className="w-full bg-[#134219] hover:bg-[#0E3213]" data-testid="driver-save-btn">{editing ? "Update" : "Save"}</Button>
+            <Button onClick={handleSave} className="w-full bg-[#C8102E] hover:bg-[#A50E25]" data-testid="driver-save-btn">{editing ? "Update" : "Save"}</Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -163,7 +163,7 @@ export default function DriverPage() {
                 <SelectContent>{buses.map((b) => <SelectItem key={b.bus_id} value={b.bus_id}>{b.bus_id}</SelectItem>)}</SelectContent>
               </Select>
             </div>
-            <Button onClick={handleAssign} className="w-full bg-[#134219] hover:bg-[#0E3213]" data-testid="assign-driver-save-btn">Assign</Button>
+            <Button onClick={handleAssign} className="w-full bg-[#C8102E] hover:bg-[#A50E25]" data-testid="assign-driver-save-btn">Assign</Button>
           </div>
         </DialogContent>
       </Dialog>

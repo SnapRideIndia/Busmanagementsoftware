@@ -41,7 +41,7 @@ export default function KpiPage() {
     <div data-testid="kpi-page">
       <div className="page-header">
         <h1 className="page-title">KPI Dashboard</h1>
-        <Button onClick={load} className="bg-[#134219] hover:bg-[#0E3213]" data-testid="generate-kpi-btn">
+        <Button onClick={load} className="bg-[#C8102E] hover:bg-[#A50E25]" data-testid="generate-kpi-btn">
           <BarChart3 size={14} className="mr-1.5" /> Generate Report
         </Button>
       </div>
@@ -59,7 +59,7 @@ export default function KpiPage() {
               <div className="flex items-start justify-between">
                 <div>
                   <p className="text-xs font-medium uppercase tracking-wider text-gray-500 mb-1">{m.label}</p>
-                  <p className="text-2xl font-semibold" style={{ fontFamily: 'JetBrains Mono', color: m.color }}>
+                  <p className="text-2xl font-semibold" style={{ fontFamily: 'Inter', color: m.color }}>
                     {loading ? "..." : m.value}
                   </p>
                 </div>

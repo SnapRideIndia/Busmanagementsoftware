@@ -56,7 +56,7 @@ export default function EnergyPage() {
     <div data-testid="energy-page">
       <div className="page-header">
         <h1 className="page-title">Energy Management</h1>
-        <Button onClick={() => setAddOpen(true)} className="bg-[#134219] hover:bg-[#0E3213]" data-testid="add-energy-btn">
+        <Button onClick={() => setAddOpen(true)} className="bg-[#C8102E] hover:bg-[#A50E25]" data-testid="add-energy-btn">
           <Plus size={16} className="mr-1.5" /> Add Charging Data
         </Button>
       </div>
@@ -70,15 +70,15 @@ export default function EnergyPage() {
           <SelectContent><SelectItem value="all">All Buses</SelectItem>{buses.map(b => <SelectItem key={b.bus_id} value={b.bus_id}>{b.bus_id}</SelectItem>)}</SelectContent>
         </Select>
         <Button onClick={load} variant="outline" data-testid="energy-filter-btn">Filter</Button>
-        <Button onClick={() => { loadReport(); setTab("report"); }} className="bg-[#BA9149] hover:bg-[#A67F3B] text-white" data-testid="view-energy-report-btn">
+        <Button onClick={() => { loadReport(); setTab("report"); }} className="bg-[#C8102E] hover:bg-[#A50E25] text-white" data-testid="view-energy-report-btn">
           <TrendingUp size={14} className="mr-1.5" /> View Report
         </Button>
       </div>
 
       {/* Tabs */}
       <div className="flex gap-2 mb-4">
-        <Button variant={tab === "data" ? "default" : "outline"} onClick={() => setTab("data")} className={tab === "data" ? "bg-[#134219] hover:bg-[#0E3213]" : ""} data-testid="energy-tab-data">Charging Data</Button>
-        <Button variant={tab === "report" ? "default" : "outline"} onClick={() => { setTab("report"); loadReport(); }} className={tab === "report" ? "bg-[#134219] hover:bg-[#0E3213]" : ""} data-testid="energy-tab-report">Report</Button>
+        <Button variant={tab === "data" ? "default" : "outline"} onClick={() => setTab("data")} className={tab === "data" ? "bg-[#C8102E] hover:bg-[#A50E25]" : ""} data-testid="energy-tab-data">Charging Data</Button>
+        <Button variant={tab === "report" ? "default" : "outline"} onClick={() => { setTab("report"); loadReport(); }} className={tab === "report" ? "bg-[#C8102E] hover:bg-[#A50E25]" : ""} data-testid="energy-tab-report">Report</Button>
       </div>
 
       {tab === "data" && (
@@ -132,8 +132,8 @@ export default function EnergyPage() {
                     <XAxis dataKey="bus_id" tick={{ fontSize: 10 }} />
                     <YAxis tick={{ fontSize: 10 }} />
                     <Tooltip />
-                    <Bar dataKey="allowed_kwh" fill="#134219" name="Allowed kWh" />
-                    <Bar dataKey="actual_kwh" fill="#BA9149" name="Actual kWh" />
+                    <Bar dataKey="allowed_kwh" fill="#2563EB" name="Allowed kWh" />
+                    <Bar dataKey="actual_kwh" fill="#F59E0B" name="Actual kWh" />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -184,7 +184,7 @@ export default function EnergyPage() {
               <div className="space-y-2"><Label>Units (kWh)</Label><Input type="number" value={form.units_charged} onChange={(e) => setForm({ ...form, units_charged: e.target.value })} data-testid="energy-units" /></div>
               <div className="space-y-2"><Label>Tariff (Rs/kWh)</Label><Input type="number" value={form.tariff_rate} onChange={(e) => setForm({ ...form, tariff_rate: e.target.value })} data-testid="energy-tariff" /></div>
             </div>
-            <Button onClick={handleAdd} className="w-full bg-[#134219] hover:bg-[#0E3213]" data-testid="energy-save-btn">Save</Button>
+            <Button onClick={handleAdd} className="w-full bg-[#C8102E] hover:bg-[#A50E25]" data-testid="energy-save-btn">Save</Button>
           </div>
         </DialogContent>
       </Dialog>

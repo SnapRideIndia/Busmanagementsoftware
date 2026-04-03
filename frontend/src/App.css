@@ -1,18 +1,19 @@
 /* TGSRTC Bus Management System Styles */
 
 .sidebar-item {
-  @apply flex items-center gap-3 px-4 py-2.5 text-sm rounded-md transition-colors duration-150;
+  @apply flex items-center gap-3 px-4 py-2.5 text-sm rounded-lg transition-colors duration-150;
 }
 .sidebar-item:hover {
-  background: rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.08);
 }
 .sidebar-item.active {
-  background: rgba(255,255,255,0.12);
-  color: #BA9149;
+  background: rgba(200,16,46,0.15);
+  color: #C8102E;
+  font-weight: 500;
 }
 
 .kpi-card {
-  @apply bg-white border border-gray-200 shadow-sm rounded-md p-5 transition-all duration-150;
+  @apply bg-white border border-gray-200 shadow-sm rounded-lg p-5 transition-all duration-150;
 }
 .kpi-card:hover {
   @apply shadow-md;
@@ -26,20 +27,23 @@
   @apply flex items-center justify-between mb-6;
 }
 .page-title {
-  @apply text-2xl md:text-3xl font-semibold tracking-tight text-gray-900;
-  font-family: 'Work Sans', sans-serif;
+  @apply text-2xl md:text-3xl font-semibold tracking-tight text-[#1A1A1A];
+  font-family: 'Inter', sans-serif;
 }
 
 .btn-primary {
-  @apply bg-[#134219] text-white hover:bg-[#0E3213] transition-colors duration-150 px-4 py-2 rounded-md text-sm font-medium;
+  @apply bg-[#C8102E] text-white hover:bg-[#A50E25] transition-colors duration-150 px-4 py-2 rounded-lg text-sm font-medium;
 }
-.btn-accent {
-  @apply bg-[#BA9149] text-white hover:bg-[#A67F3B] transition-colors duration-150 px-4 py-2 rounded-md text-sm font-medium;
+.btn-secondary {
+  @apply bg-[#E5E7EB] text-[#1A1A1A] hover:bg-[#D1D5DB] transition-colors duration-150 px-4 py-2 rounded-lg text-sm font-medium;
+}
+.btn-success {
+  @apply bg-[#16A34A] text-white hover:bg-[#15803D] transition-colors duration-150 px-4 py-2 rounded-lg text-sm font-medium;
 }
 
 /* Leaflet fix */
 .leaflet-container {
   width: 100%;
   height: 100%;
-  border-radius: 0.375rem;
+  border-radius: 0.5rem;
 }

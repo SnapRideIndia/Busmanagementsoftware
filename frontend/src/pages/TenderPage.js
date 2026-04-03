@@ -53,7 +53,7 @@ export default function TenderPage() {
     <div data-testid="tender-page">
       <div className="page-header">
         <h1 className="page-title">Tender Management</h1>
-        <Button onClick={() => { setForm(empty); setEditing(null); setOpen(true); }} className="bg-[#134219] hover:bg-[#0E3213]" data-testid="add-tender-btn">
+        <Button onClick={() => { setForm(empty); setEditing(null); setOpen(true); }} className="bg-[#C8102E] hover:bg-[#A50E25]" data-testid="add-tender-btn">
           <Plus size={16} className="mr-1.5" /> Add Tender
         </Button>
       </div>
@@ -128,7 +128,7 @@ export default function TenderPage() {
                 <SelectContent><SelectItem value="active">Active</SelectItem><SelectItem value="inactive">Inactive</SelectItem></SelectContent>
               </Select>
             </div>
-            <Button onClick={handleSave} className="w-full bg-[#134219] hover:bg-[#0E3213]" data-testid="tender-save-btn">{editing ? "Update" : "Save"}</Button>
+            <Button onClick={handleSave} className="w-full bg-[#C8102E] hover:bg-[#A50E25]" data-testid="tender-save-btn">{editing ? "Update" : "Save"}</Button>
           </div>
         </DialogContent>
       </Dialog>

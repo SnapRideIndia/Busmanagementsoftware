@@ -56,18 +56,18 @@ export default function LoginPage() {
           backgroundSize: "cover", backgroundPosition: "center"
         }}
       >
-        <div className="absolute inset-0 bg-[#134219]/80" />
+        <div className="absolute inset-0 bg-[#1F2937]/85" />
         <div className="relative z-10 text-white px-12 max-w-lg">
           <div className="flex items-center gap-3 mb-6">
-            <div className="w-12 h-12 rounded-lg bg-[#BA9149] flex items-center justify-center">
+            <div className="w-12 h-12 rounded-lg bg-[#C8102E] flex items-center justify-center">
               <Bus size={24} />
             </div>
             <div>
-              <h1 className="text-2xl font-bold" style={{ fontFamily: 'Work Sans' }}>TGSRTC</h1>
+              <h1 className="text-2xl font-bold" style={{ fontFamily: 'Inter' }}>TGSRTC</h1>
               <p className="text-sm text-white/70">Bus Management System</p>
             </div>
           </div>
-          <h2 className="text-3xl font-semibold mb-4" style={{ fontFamily: 'Work Sans' }}>
+          <h2 className="text-3xl font-semibold mb-4" style={{ fontFamily: 'Inter' }}>
             Powering Telangana's Electric Bus Fleet
           </h2>
           <p className="text-white/70 text-sm leading-relaxed">
@@ -77,22 +77,22 @@ export default function LoginPage() {
       </div>
 
       {/* Right - Form */}
-      <div className="flex-1 flex items-center justify-center p-8 bg-[#F8F9FA]">
+      <div className="flex-1 flex items-center justify-center p-8 bg-[#F5F5F5]">
         <Card className="w-full max-w-md shadow-sm border-gray-200">
           <CardHeader className="space-y-1 pb-4">
             <div className="lg:hidden flex items-center gap-2 mb-4">
-              <div className="w-10 h-10 rounded-lg bg-[#134219] flex items-center justify-center text-white">
+              <div className="w-10 h-10 rounded-lg bg-[#C8102E] flex items-center justify-center text-white">
                 <Bus size={20} />
               </div>
-              <span className="font-semibold text-lg text-[#134219]" style={{ fontFamily: 'Work Sans' }}>TGSRTC BMS</span>
+              <span className="font-semibold text-lg text-[#C8102E]" style={{ fontFamily: 'Inter' }}>TGSRTC BMS</span>
             </div>
-            <CardTitle className="text-2xl font-semibold" style={{ fontFamily: 'Work Sans' }}>Sign in</CardTitle>
+            <CardTitle className="text-2xl font-semibold" style={{ fontFamily: 'Inter' }}>Sign in</CardTitle>
             <p className="text-sm text-gray-500">Enter your credentials to access the dashboard</p>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleLogin} className="space-y-4">
               {error && (
-                <div className="bg-red-50 text-red-600 text-sm px-4 py-2.5 rounded-md border border-red-200" data-testid="login-error">
+                <div className="bg-red-50 text-red-600 text-sm px-4 py-2.5 rounded-lg border border-red-200" data-testid="login-error">
                   {error}
                 </div>
               )}
@@ -102,7 +102,7 @@ export default function LoginPage() {
                   id="email" type="email" placeholder="admin@tgsrtc.com"
                   value={email} onChange={(e) => setEmail(e.target.value)}
                   data-testid="login-email-input"
-                  className="focus-visible:ring-[#BA9149]"
+                  className="rounded-lg"
                 />
               </div>
               <div className="space-y-2">
@@ -112,7 +112,7 @@ export default function LoginPage() {
                     id="password" type={showPw ? "text" : "password"} placeholder="Enter password"
                     value={password} onChange={(e) => setPassword(e.target.value)}
                     data-testid="login-password-input"
-                    className="focus-visible:ring-[#BA9149] pr-10"
+                    className="rounded-lg pr-10"
                   />
                   <button
                     type="button" onClick={() => setShowPw(!showPw)}
@@ -125,14 +125,14 @@ export default function LoginPage() {
               <Button
                 type="submit" disabled={loading}
                 data-testid="login-submit-btn"
-                className="w-full bg-[#134219] hover:bg-[#0E3213]"
+                className="w-full bg-[#C8102E] hover:bg-[#A50E25] rounded-lg"
               >
                 {loading ? "Signing in..." : "Sign in"}
               </Button>
               <button
                 type="button" onClick={() => setForgotOpen(true)}
                 data-testid="forgot-password-btn"
-                className="text-sm text-[#BA9149] hover:underline w-full text-center block"
+                className="text-sm text-[#C8102E] hover:underline w-full text-center block"
               >
                 Forgot password?
               </button>
@@ -156,7 +156,7 @@ export default function LoginPage() {
               />
             </div>
             {forgotMsg && <p className="text-sm text-green-600">{forgotMsg}</p>}
-            <Button type="submit" className="w-full bg-[#134219] hover:bg-[#0E3213]" data-testid="forgot-submit-btn">
+            <Button type="submit" className="w-full bg-[#C8102E] hover:bg-[#A50E25]" data-testid="forgot-submit-btn">
               Send Reset Link
             </Button>
           </form>

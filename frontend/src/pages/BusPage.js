@@ -70,7 +70,7 @@ export default function BusPage() {
           <Button variant="outline" onClick={() => setAssignOpen(true)} data-testid="assign-tender-btn">
             <Link size={14} className="mr-1.5" /> Assign Tender
           </Button>
-          <Button onClick={() => { setForm(emptyBus); setEditing(null); setOpen(true); }} className="bg-[#134219] hover:bg-[#0E3213]" data-testid="add-bus-btn">
+          <Button onClick={() => { setForm(emptyBus); setEditing(null); setOpen(true); }} className="bg-[#C8102E] hover:bg-[#A50E25]" data-testid="add-bus-btn">
             <Plus size={16} className="mr-1.5" /> Add Bus
           </Button>
         </div>
@@ -142,7 +142,7 @@ export default function BusPage() {
                 </Select>
               </div>
             </div>
-            <Button onClick={handleSave} className="w-full bg-[#134219] hover:bg-[#0E3213]" data-testid="bus-save-btn">{editing ? "Update" : "Save"}</Button>
+            <Button onClick={handleSave} className="w-full bg-[#C8102E] hover:bg-[#A50E25]" data-testid="bus-save-btn">{editing ? "Update" : "Save"}</Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -187,7 +187,7 @@ export default function BusPage() {
                 <SelectContent>{tenders.map((t) => <SelectItem key={t.tender_id} value={t.tender_id}>{t.tender_id} - {t.description}</SelectItem>)}</SelectContent>
               </Select>
             </div>
-            <Button onClick={handleAssign} className="w-full bg-[#134219] hover:bg-[#0E3213]" data-testid="assign-save-btn">Assign</Button>
+            <Button onClick={handleAssign} className="w-full bg-[#C8102E] hover:bg-[#A50E25]" data-testid="assign-save-btn">Assign</Button>
           </div>
         </DialogContent>
       </Dialog>

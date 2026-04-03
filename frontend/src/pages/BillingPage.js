@@ -50,7 +50,7 @@ export default function BillingPage() {
     <div data-testid="billing-page">
       <div className="page-header">
         <h1 className="page-title">Billing</h1>
-        <Button onClick={() => setGenOpen(true)} className="bg-[#134219] hover:bg-[#0E3213]" data-testid="generate-invoice-btn">
+        <Button onClick={() => setGenOpen(true)} className="bg-[#C8102E] hover:bg-[#A50E25]" data-testid="generate-invoice-btn">
           <Receipt size={16} className="mr-1.5" /> Generate Invoice
         </Button>
       </div>
@@ -67,13 +67,13 @@ export default function BillingPage() {
             <TableBody>
               {invoices.map((inv) => (
                 <TableRow key={inv.invoice_id} className="hover:bg-gray-50" data-testid={`invoice-row-${inv.invoice_id}`}>
-                  <TableCell className="font-mono font-medium text-[#134219]">{inv.invoice_id}</TableCell>
+                  <TableCell className="font-mono font-medium text-[#C8102E]">{inv.invoice_id}</TableCell>
                   <TableCell className="text-sm">{inv.period_start} - {inv.period_end}</TableCell>
                   <TableCell>{inv.depot}</TableCell>
                   <TableCell className="text-right font-mono">{inv.base_payment?.toLocaleString()}</TableCell>
                   <TableCell className="text-right font-mono text-blue-600">{inv.energy_adjustment?.toLocaleString()}</TableCell>
                   <TableCell className="text-right font-mono text-red-600">{inv.total_deduction?.toLocaleString()}</TableCell>
-                  <TableCell className="text-right font-mono font-semibold text-[#134219]">{inv.final_payable?.toLocaleString()}</TableCell>
+                  <TableCell className="text-right font-mono font-semibold text-[#C8102E]">{inv.final_payable?.toLocaleString()}</TableCell>
                   <TableCell><Badge className="bg-green-100 text-green-700 hover:bg-green-100">{inv.status}</Badge></TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1">
@@ -98,7 +98,7 @@ export default function BillingPage() {
             <div className="space-y-2"><Label>Period Start</Label><Input type="date" value={form.period_start} onChange={(e) => setForm({ ...form, period_start: e.target.value })} data-testid="billing-period-start" /></div>
             <div className="space-y-2"><Label>Period End</Label><Input type="date" value={form.period_end} onChange={(e) => setForm({ ...form, period_end: e.target.value })} data-testid="billing-period-end" /></div>
             <div className="space-y-2"><Label>Depot (optional)</Label><Input value={form.depot} onChange={(e) => setForm({ ...form, depot: e.target.value })} placeholder="Leave empty for all" data-testid="billing-depot" /></div>
-            <Button onClick={handleGenerate} disabled={generating} className="w-full bg-[#134219] hover:bg-[#0E3213]" data-testid="billing-generate-submit">
+            <Button onClick={handleGenerate} disabled={generating} className="w-full bg-[#C8102E] hover:bg-[#A50E25]" data-testid="billing-generate-submit">
               {generating ? "Generating..." : "Generate Invoice"}
             </Button>
           </div>
@@ -136,7 +136,7 @@ export default function BillingPage() {
                     <tr className="border-b bg-red-50"><td className="p-3 font-medium">Total Deductions</td><td className="p-3 text-right font-mono font-semibold text-red-600">Rs. {selected.total_deduction?.toLocaleString()}</td></tr>
                   </tbody>
                   <tfoot>
-                    <tr className="bg-[#134219] text-white"><td className="p-4 font-bold text-base">FINAL PAYABLE</td><td className="p-4 text-right font-mono font-bold text-lg">Rs. {selected.final_payable?.toLocaleString()}</td></tr>
+                    <tr className="bg-[#C8102E] text-white"><td className="p-4 font-bold text-base">FINAL PAYABLE</td><td className="p-4 text-right font-mono font-bold text-lg">Rs. {selected.final_payable?.toLocaleString()}</td></tr>
                   </tfoot>
                 </table>
               </div>

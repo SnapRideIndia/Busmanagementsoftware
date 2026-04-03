@@ -3,7 +3,7 @@ import { useAuth } from "../contexts/AuthContext";
 import {
   LayoutDashboard, FileText, Bus, Users, MapPin, Zap,
   BarChart3, Calculator, Receipt, FileBarChart, AlertTriangle,
-  Settings, LogOut, ChevronLeft, ChevronRight, Menu
+  Settings, LogOut, ChevronLeft, ChevronRight, Menu, IndianRupee, Route
 } from "lucide-react";
 import { useState } from "react";
 
@@ -19,6 +19,8 @@ const navItems = [
   { to: "/billing", label: "Billing", icon: Receipt },
   { to: "/reports", label: "Reports", icon: FileBarChart },
   { to: "/incidents", label: "Incidents", icon: AlertTriangle },
+  { to: "/revenue-details", label: "Revenue", icon: IndianRupee },
+  { to: "/km-details", label: "KM Tracking", icon: Route },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -34,7 +36,7 @@ export default function Layout({ children }) {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#F8F9FA]">
+    <div className="flex h-screen overflow-hidden bg-[#F5F5F5]">
       {/* Mobile overlay */}
       {mobileOpen && (
         <div className="fixed inset-0 bg-black/40 z-40 lg:hidden" onClick={() => setMobileOpen(false)} />
@@ -43,17 +45,17 @@ export default function Layout({ children }) {
       {/* Sidebar */}
       <aside
         data-testid="sidebar"
-        className={`fixed lg:static z-50 h-full bg-[#134219] text-white flex flex-col transition-all duration-200 ${
+        className={`fixed lg:static z-50 h-full bg-[#1F2937] text-white flex flex-col transition-all duration-200 ${
           collapsed ? "w-[68px]" : "w-64"
         } ${mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
       >
         {/* Logo */}
         <div className="flex items-center gap-3 px-4 h-16 border-b border-white/10 shrink-0">
-          <div className="w-8 h-8 rounded-md bg-[#BA9149] flex items-center justify-center text-white font-bold text-sm shrink-0">
+          <div className="w-8 h-8 rounded-lg bg-[#C8102E] flex items-center justify-center text-white font-bold text-sm shrink-0">
             TS
           </div>
           {!collapsed && (
-            <span className="font-semibold text-sm tracking-tight" style={{ fontFamily: 'Work Sans' }}>
+            <span className="font-semibold text-sm tracking-tight" style={{ fontFamily: 'Inter' }}>
               TGSRTC BMS
             </span>
           )}
@@ -68,7 +70,7 @@ export default function Layout({ children }) {
               data-testid={`sidebar-${item.label.toLowerCase().replace(/\s/g, "-")}`}
               onClick={() => setMobileOpen(false)}
               className={({ isActive }) =>
-                `sidebar-item ${isActive ? "active" : "text-gray-300"} ${collapsed ? "justify-center px-2" : ""}`
+                `sidebar-item ${isActive ? "active" : "text-gray-400"} ${collapsed ? "justify-center px-2" : ""}`
               }
             >
               <item.icon size={18} className="shrink-0" />
@@ -92,27 +94,29 @@ export default function Layout({ children }) {
       {/* Main */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
-        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 lg:px-8 shrink-0">
-          <button
-            className="lg:hidden p-2 hover:bg-gray-100 rounded-md"
-            onClick={() => setMobileOpen(true)}
-            data-testid="mobile-menu-btn"
-          >
-            <Menu size={20} />
-          </button>
-          <div className="hidden lg:block" />
+        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 lg:px-8 shrink-0 shadow-sm">
+          <div className="flex items-center gap-3">
+            <button
+              className="lg:hidden p-2 hover:bg-gray-100 rounded-lg"
+              onClick={() => setMobileOpen(true)}
+              data-testid="mobile-menu-btn"
+            >
+              <Menu size={20} />
+            </button>
+            <div className="hidden lg:block h-1 w-16 bg-[#C8102E] rounded-full" />
+          </div>
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <p className="text-sm font-medium text-gray-900">{user?.name || "User"}</p>
+              <p className="text-sm font-medium text-[#1A1A1A]">{user?.name || "User"}</p>
               <p className="text-xs text-gray-500 capitalize">{user?.role?.replace("_", " ") || ""}</p>
             </div>
-            <div className="w-9 h-9 rounded-full bg-[#134219] text-white flex items-center justify-center text-sm font-medium">
+            <div className="w-9 h-9 rounded-full bg-[#C8102E] text-white flex items-center justify-center text-sm font-medium">
               {(user?.name || "U")[0]}
             </div>
             <button
               onClick={handleLogout}
               data-testid="logout-btn"
-              className="p-2 hover:bg-gray-100 rounded-md text-gray-500 transition-colors"
+              className="p-2 hover:bg-gray-100 rounded-lg text-gray-500 transition-colors"
               title="Logout"
             >
               <LogOut size={18} />

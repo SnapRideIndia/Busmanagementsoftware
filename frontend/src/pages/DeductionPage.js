@@ -55,7 +55,7 @@ export default function DeductionPage() {
     <div data-testid="deduction-page">
       <div className="page-header">
         <h1 className="page-title">Deduction Engine</h1>
-        <Button onClick={() => { setForm(emptyRule); setEditing(null); setOpen(true); }} className="bg-[#134219] hover:bg-[#0E3213]" data-testid="add-rule-btn">
+        <Button onClick={() => { setForm(emptyRule); setEditing(null); setOpen(true); }} className="bg-[#C8102E] hover:bg-[#A50E25]" data-testid="add-rule-btn">
           <Plus size={16} className="mr-1.5" /> Configure Rule
         </Button>
       </div>
@@ -97,7 +97,7 @@ export default function DeductionPage() {
           <div className="flex flex-wrap gap-3 mb-4">
             <Input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} className="w-40" data-testid="deduction-period-start" />
             <Input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} className="w-40" data-testid="deduction-period-end" />
-            <Button onClick={applyDeductions} className="bg-[#BA9149] hover:bg-[#A67F3B] text-white" data-testid="apply-deductions-btn">
+            <Button onClick={applyDeductions} className="bg-[#C8102E] hover:bg-[#A50E25] text-white" data-testid="apply-deductions-btn">
               <Play size={14} className="mr-1.5" /> Apply
             </Button>
           </div>
@@ -148,7 +148,7 @@ export default function DeductionPage() {
             </div>
             {form.is_capped && <div className="space-y-2"><Label>Cap Limit (Rs)</Label><Input type="number" value={form.cap_limit} onChange={(e) => setForm({ ...form, cap_limit: e.target.value })} data-testid="rule-cap-limit" /></div>}
             <div className="space-y-2"><Label>Description</Label><Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} data-testid="rule-description" /></div>
-            <Button onClick={handleSave} className="w-full bg-[#134219] hover:bg-[#0E3213]" data-testid="rule-save-btn">{editing ? "Update" : "Save"}</Button>
+            <Button onClick={handleSave} className="w-full bg-[#C8102E] hover:bg-[#A50E25]" data-testid="rule-save-btn">{editing ? "Update" : "Save"}</Button>
           </div>
         </DialogContent>
       </Dialog>

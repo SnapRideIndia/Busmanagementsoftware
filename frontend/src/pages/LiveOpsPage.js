@@ -20,7 +20,7 @@ L.Icon.Default.mergeOptions({
 const busIcon = (status) => L.divIcon({
   className: "custom-marker",
   html: `<div style="width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:bold;color:#fff;background:${
-    status === "on_route" ? "#134219" : status === "at_stop" ? "#F59E0B" : "#2563EB"
+    status === "on_route" ? "#16A34A" : status === "at_stop" ? "#F59E0B" : "#2563EB"
   };border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.3)">B</div>`,
   iconSize: [28, 28], iconAnchor: [14, 14],
 });
@@ -73,7 +73,7 @@ export default function LiveOpsPage() {
               </MapContainer>
             </div>
             <div className="flex gap-4 mt-3 text-xs">
-              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#134219]" />On Route ({liveData.filter(b => b.status === "on_route").length})</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#16A34A]" />On Route ({liveData.filter(b => b.status === "on_route").length})</span>
               <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#F59E0B]" />At Stop ({liveData.filter(b => b.status === "at_stop").length})</span>
               <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#2563EB]" />Charging ({liveData.filter(b => b.status === "charging").length})</span>
             </div>

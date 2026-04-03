@@ -473,6 +473,102 @@ class BusManagementTester:
         
         return success
 
+    def test_revenue_details(self):
+        """Test new revenue details API endpoints"""
+        print("\n📊 Testing Revenue Detail APIs...")
+        
+        # Test daily revenue details
+        success, response = self.run_test(
+            "Revenue Details (Daily)",
+            "GET",
+            "revenue/details",
+            200,
+            params={"period": "daily"}
+        )
+        if success:
+            data_count = len(response.get('data', []))
+            total_revenue = response.get('total_revenue', 0)
+            print(f"   Daily records: {data_count}")
+            print(f"   Total revenue: Rs.{total_revenue}")
+            print(f"   Depots available: {len(response.get('depots', []))}")
+        
+        # Test monthly aggregation
+        success2, _ = self.run_test(
+            "Revenue Details (Monthly)",
+            "GET",
+            "revenue/details",
+            200,
+            params={"period": "monthly"}
+        )
+        
+        # Test quarterly aggregation
+        success3, _ = self.run_test(
+            "Revenue Details (Quarterly)",
+            "GET",
+            "revenue/details",
+            200,
+            params={"period": "quarterly"}
+        )
+        
+        # Test depot filter
+        success4, _ = self.run_test(
+            "Revenue Details (Depot Filter)",
+            "GET",
+            "revenue/details",
+            200,
+            params={"period": "daily", "depot": "Miyapur Depot"}
+        )
+        
+        return success and success2 and success3 and success4
+
+    def test_km_details(self):
+        """Test new KM details API endpoints"""
+        print("\n🗺️ Testing KM Detail APIs...")
+        
+        # Test daily KM details
+        success, response = self.run_test(
+            "KM Details (Daily)",
+            "GET",
+            "km/details",
+            200,
+            params={"period": "daily"}
+        )
+        if success:
+            data_count = len(response.get('data', []))
+            total_km = response.get('total_km', 0)
+            print(f"   Daily trip records: {data_count}")
+            print(f"   Total KM: {total_km}")
+            print(f"   Depots available: {len(response.get('depots', []))}")
+        
+        # Test monthly aggregation
+        success2, _ = self.run_test(
+            "KM Details (Monthly)",
+            "GET",
+            "km/details",
+            200,
+            params={"period": "monthly"}
+        )
+        
+        # Test quarterly aggregation
+        success3, _ = self.run_test(
+            "KM Details (Quarterly)",
+            "GET",
+            "km/details",
+            200,
+            params={"period": "quarterly"}
+        )
+        
+        # Test depot filter
+        success4, _ = self.run_test(
+            "KM Details (Depot Filter)",
+            "GET",
+            "km/details",
+            200,
+            params={"period": "daily", "depot": "Miyapur Depot"}
+        )
+        
+        return success and success2 and success3 and success4
+
 def main():
     print("🚌 Starting Bus Management System API Tests")
     print("=" * 60)
@@ -488,6 +584,8 @@ def main():
     # Run all feature tests
     test_modules = [
         ("Dashboard", tester.test_dashboard),
+        ("Revenue Details", tester.test_revenue_details),
+        ("KM Details", tester.test_km_details),
         ("Tender Management", tester.test_tender_management),
         ("Bus Management", tester.test_bus_management),
         ("Driver Management", tester.test_driver_management),

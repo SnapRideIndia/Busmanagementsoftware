@@ -52,7 +52,7 @@ export default function SettingsPage() {
     <div data-testid="settings-page">
       <div className="page-header">
         <h1 className="page-title">Settings</h1>
-        <Button onClick={handleSaveAll} className="bg-[#134219] hover:bg-[#0E3213]" data-testid="save-all-settings-btn">
+        <Button onClick={handleSaveAll} className="bg-[#C8102E] hover:bg-[#A50E25]" data-testid="save-all-settings-btn">
           <Save size={16} className="mr-1.5" /> Save All Settings
         </Button>
       </div>
@@ -108,7 +108,7 @@ function NewSettingForm({ onSave }) {
     <div className="flex items-end gap-3">
       <div className="flex-1 space-y-1.5"><Label>Key</Label><Input value={key} onChange={(e) => setKey(e.target.value)} placeholder="setting_key" data-testid="new-setting-key" /></div>
       <div className="flex-1 space-y-1.5"><Label>Value</Label><Input value={value} onChange={(e) => setValue(e.target.value)} placeholder="value" data-testid="new-setting-value" /></div>
-      <Button onClick={handleAdd} className="bg-[#BA9149] hover:bg-[#A67F3B] text-white" data-testid="add-setting-btn">Add</Button>
+      <Button onClick={handleAdd} className="bg-[#C8102E] hover:bg-[#A50E25] text-white" data-testid="add-setting-btn">Add</Button>
     </div>
   );
 }
