@@ -1,5 +1,8 @@
-import { useState, useEffect } from "react";
-import API, { formatApiError } from "../lib/api";
+import { useState, useEffect, useCallback } from "react";
+import API, { formatApiError, buildQuery, unwrapListResponse, fetchAllPaginated, messageFromAxiosError } from "../lib/api";
+import TablePaginationBar from "../components/TablePaginationBar";
+import AsyncPanel from "../components/AsyncPanel";
+import { formatDateIN } from "../lib/dates";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
@@ -20,6 +23,10 @@ export default function DutyPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [filterDate, setFilterDate] = useState(today);
+  const [filterDepot, setFilterDepot] = useState("");
+  const [filterBusId, setFilterBusId] = useState("");
+  const [page, setPage] = useState(1);
+  const [listMeta, setListMeta] = useState({ total: 0, pages: 1, limit: 20 });
   const [form, setForm] = useState({
     driver_license: "", bus_id: "", route_name: "",
     start_point: "", end_point: "", date: today,
@@ -28,20 +35,40 @@ export default function DutyPage() {
       { trip_number: 2, start_time: "11:30", end_time: "13:30", direction: "return" }
     ]
   });
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    setLoading(true);
+    setFetchError(null);
     try {
-      const params = {};
-      if (filterDate) params.date = filterDate;
-      const [d, dr, b] = await Promise.all([
+      const params = buildQuery({
+        date: filterDate,
+        depot: filterDepot,
+        bus_id: filterBusId,
+        page,
+        limit: 20,
+      });
+      const [d, drItems, busItems] = await Promise.all([
         API.get("/duties", { params }),
-        API.get("/drivers"),
-        API.get("/buses")
+        fetchAllPaginated("/drivers", {}),
+        fetchAllPaginated("/buses", {}),
       ]);
-      setDuties(d.data); setDrivers(dr.data); setBuses(b.data);
-    } catch {}
-  };
-  useEffect(() => { load(); }, [filterDate]); // eslint-disable-line
+      const du = unwrapListResponse(d.data);
+      setDuties(du.items);
+      setListMeta({ total: du.total, pages: du.pages, limit: du.limit });
+      setDrivers(drItems);
+      setBuses(busItems);
+    } catch (err) {
+      setFetchError(messageFromAxiosError(err, "Failed to load duties"));
+      setDuties([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [filterDate, filterDepot, filterBusId, page]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const resetForm = () => setForm({
     driver_license: "", bus_id: "", route_name: "",
@@ -121,15 +148,44 @@ export default function DutyPage() {
       </div>
 
       {/* Filter */}
-      <div className="flex gap-3 mb-6">
-        <Input type="date" value={filterDate} onChange={(e) => setFilterDate(e.target.value)} className="w-44 rounded-lg" data-testid="duty-date-filter" />
-        <Button onClick={load} variant="outline" className="rounded-lg" data-testid="duty-filter-btn">Filter</Button>
+      <div className="flex flex-wrap gap-3 mb-6 items-end">
+        <div className="space-y-1">
+          <label className="text-xs font-medium uppercase text-gray-500">Date</label>
+          <Input type="date" value={filterDate} onChange={(e) => { setFilterDate(e.target.value); setPage(1); }} className="w-44 rounded-lg" data-testid="duty-date-filter" />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium uppercase text-gray-500">Depot</label>
+          <Select value={filterDepot || "all"} onValueChange={(v) => { setFilterDepot(v === "all" ? "" : v); setFilterBusId(""); setPage(1); }}>
+            <SelectTrigger className="w-44 rounded-lg"><SelectValue placeholder="All Depots" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Depots</SelectItem>
+              {[...new Set(buses.map((x) => x.depot).filter(Boolean))].sort().map((dep) => (
+                <SelectItem key={dep} value={dep}>{dep}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium uppercase text-gray-500">Bus</label>
+          <Select value={filterBusId || "all"} onValueChange={(v) => { setFilterBusId(v === "all" ? "" : v); setPage(1); }}>
+            <SelectTrigger className="w-36 rounded-lg"><SelectValue placeholder="All Buses" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Buses</SelectItem>
+              {(filterDepot ? buses.filter((x) => x.depot === filterDepot) : buses).map((x) => (
+                <SelectItem key={x.bus_id} value={x.bus_id}>{x.bus_id}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <Button onClick={load} variant="outline" className="rounded-lg" data-testid="duty-filter-btn">Refresh</Button>
       </div>
 
       {/* Duty Cards */}
       <div className="space-y-3">
-        {duties.map((d) => (
-          <Card key={d.id} className="border-gray-200 shadow-sm hover:shadow-md transition-shadow" data-testid={`duty-card-${d.id}`}>
+        {fetchError ? <AsyncPanel error={fetchError} onRetry={load} minHeight="min-h-[160px]" /> : null}
+        {!fetchError && loading && duties.length === 0 ? <AsyncPanel loading minHeight="min-h-[200px]" /> : null}
+        {!fetchError && duties.map((d) => (
+          <Card key={d.id} className={`border-gray-200 shadow-sm hover:shadow-md transition-shadow ${loading ? "opacity-70" : ""}`} data-testid={`duty-card-${d.id}`}>
             <CardContent className="p-4">
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                 <div className="flex-1">
@@ -176,15 +232,16 @@ export default function DutyPage() {
             </CardContent>
           </Card>
         ))}
-        {duties.length === 0 && (
+        {!fetchError && !loading && duties.length === 0 ? (
           <Card className="border-gray-200"><CardContent className="p-8 text-center text-gray-400">No duties assigned for this date</CardContent></Card>
-        )}
+        ) : null}
+        <TablePaginationBar page={page} pages={listMeta.pages} total={listMeta.total} limit={listMeta.limit} onPageChange={setPage} />
       </div>
 
       {/* Summary Table */}
       {duties.length > 0 && (
         <Card className="mt-6 border-gray-200 shadow-sm">
-          <CardHeader className="pb-2"><CardTitle className="text-base font-medium">Duty Summary - {filterDate}</CardTitle></CardHeader>
+          <CardHeader className="pb-2"><CardTitle className="text-base font-medium">Duty Summary — {formatDateIN(filterDate)}</CardTitle></CardHeader>
           <CardContent className="p-0">
             <Table>
               <TableHeader><TableRow className="table-header">

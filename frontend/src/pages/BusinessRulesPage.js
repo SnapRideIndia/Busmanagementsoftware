@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import API from "../lib/api";
+import API, { buildQuery, unwrapListResponse } from "../lib/api";
+import TablePaginationBar from "../components/TablePaginationBar";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -13,6 +14,7 @@ import { Switch } from "../components/ui/switch";
 import { Plus, Trash2, Save, Sliders, Shield, Zap, Receipt, Database } from "lucide-react";
 import { toast } from "sonner";
 import { formatApiError } from "../lib/api";
+import AsyncPanel from "../components/AsyncPanel";
 
 const categoryIcons = { kpi: Shield, operations: Sliders, infraction: Zap, billing: Receipt, data: Database };
 const categoryColors = { kpi: "text-blue-600", operations: "text-green-600", infraction: "text-red-600", billing: "text-purple-600", data: "text-orange-600" };
@@ -20,20 +22,38 @@ const categoryColors = { kpi: "text-blue-600", operations: "text-green-600", inf
 export default function BusinessRulesPage() {
   const [rules, setRules] = useState([]);
   const [category, setCategory] = useState("");
+  const [page, setPage] = useState(1);
+  const [listMeta, setListMeta] = useState({ total: 0, pages: 1, limit: 20 });
   const [editValues, setEditValues] = useState({});
   const [addOpen, setAddOpen] = useState(false);
   const [addForm, setAddForm] = useState({ rule_key: "", rule_value: "", category: "general", description: "" });
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
 
   const load = useCallback(async () => {
+    setLoading(true);
+    setFetchError(null);
     try {
-      const params = {};
-      if (category) params.category = category;
+      const params = buildQuery({ category, page, limit: 20 });
       const { data } = await API.get("/business-rules", { params });
-      setRules(data);
+      const u = unwrapListResponse(data);
+      setRules(u.items);
+      setListMeta({ total: u.total, pages: u.pages, limit: u.limit });
       const vals = {};
-      data.forEach(r => { vals[r.rule_key] = r.rule_value; });
-      setEditValues(vals);
-    } catch {}
+      u.items.forEach((r) => {
+        vals[r.rule_key] = r.rule_value;
+      });
+      setEditValues((prev) => ({ ...prev, ...vals }));
+    } catch (err) {
+      setFetchError(formatApiError(err.response?.data?.detail) || err.message || "Failed to load rules");
+      setRules([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [category, page]);
+
+  useEffect(() => {
+    setPage(1);
   }, [category]);
 
   useEffect(() => { load(); }, [load]);
@@ -78,7 +98,7 @@ export default function BusinessRulesPage() {
   return (
     <div data-testid="business-rules-page">
       <div className="page-header">
-        <h1 className="page-title">Business Rules (GCC §9)</h1>
+        <h1 className="page-title">Business rules</h1>
         <div className="flex gap-2">
           <Button onClick={() => setAddOpen(true)} variant="outline" data-testid="add-rule-btn"><Plus size={14} className="mr-1.5" /> Add Rule</Button>
           <Button onClick={handleSaveAll} className="bg-[#C8102E] hover:bg-[#A50E25]" data-testid="save-all-rules-btn"><Save size={14} className="mr-1.5" /> Save All</Button>
@@ -86,15 +106,18 @@ export default function BusinessRulesPage() {
       </div>
 
       <div className="flex gap-2 mb-6 flex-wrap">
-        <Button variant={!category ? "default" : "outline"} onClick={() => setCategory("")} className={!category ? "bg-[#C8102E] hover:bg-[#A50E25]" : ""} size="sm">All ({rules.length})</Button>
-        {categories.map(c => (
+        <Button variant={!category ? "default" : "outline"} onClick={() => setCategory("")} className={!category ? "bg-[#C8102E] hover:bg-[#A50E25]" : ""} size="sm">All ({listMeta.total})</Button>
+        {categories.map((c) => (
           <Button key={c} variant={category === c ? "default" : "outline"} onClick={() => setCategory(c)} className={category === c ? "bg-[#C8102E] hover:bg-[#A50E25]" : ""} size="sm" data-testid={`filter-cat-${c}`}>
-            {c.charAt(0).toUpperCase() + c.slice(1)} ({grouped[c]?.length || 0})
+            {c.charAt(0).toUpperCase() + c.slice(1)}
           </Button>
         ))}
       </div>
 
-      {Object.entries(grouped).filter(([cat]) => !category || cat === category).map(([cat, catRules]) => {
+      {fetchError ? <AsyncPanel error={fetchError} onRetry={load} minHeight="min-h-[160px]" /> : null}
+      {!fetchError && loading && rules.length === 0 ? <AsyncPanel loading minHeight="min-h-[200px]" /> : null}
+
+      {!fetchError && Object.entries(grouped).filter(([cat]) => !category || cat === category).map(([cat, catRules]) => {
         const Icon = categoryIcons[cat] || Sliders;
         const color = categoryColors[cat] || "text-gray-600";
         return (
@@ -128,6 +151,12 @@ export default function BusinessRulesPage() {
           </Card>
         );
       })}
+
+      {!fetchError && !loading && rules.length === 0 ? (
+        <p className="text-center text-gray-500 py-10 text-sm">No business rules match this filter.</p>
+      ) : null}
+
+      <TablePaginationBar page={page} pages={listMeta.pages} total={listMeta.total} limit={listMeta.limit} onPageChange={setPage} />
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent data-testid="add-rule-dialog">

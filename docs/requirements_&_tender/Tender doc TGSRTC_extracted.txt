@@ -1,0 +1,1621 @@
+--- Page 1 ---
+1 
+ 
+ 
+ 
+TGSRTC 
+ 
+TENDER FOR IMPLEMENTATION 
+OF 
+Electric Bus Management System (EBMS) 
+IN TGSRTC  
+Tender No: Dy.CTM(IT)/EBMS(01)/2026-IT 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+
+--- Page 2 ---
+2 
+ 
+DISCLAIMER 
+                            
+                  The information contained in this Tender document/Request for Proposal (RFP) or 
+subsequent clarifications provided to Tenderers and amendments, whether in document or 
+verbal or any other form by or on behalf of Telangana State Road Transp ort Corporation 
+(TGSRTC) by any of its employees or advisors is provided to Tenderers on the terms and 
+conditions set out in this Tender document/RFP and such other terms and conditions subject 
+to which such information is provided.  
+ 
+                  The purpose of this Tender document is to provide interested parties with 
+information that may be useful to them in eliciting their proposals pursuant to this Tender 
+document. This Tender document may not be appropriate for all persons and it is not possible 
+for TGSRTC, its employees or advisors to consider the investment objectives, financial situation 
+and particular needs of each party who reads or uses this Tender document.  
+ 
+                 This Tender document includes statements, which reflect various assumptions and 
+assessments made by TGSRTC in relation to the Contract. Such assumptions, assessments and 
+statements do not purport to contain all the information that each Tenderer may require.  
+ 
+                 The assumptions, assessments, statements and information contained in this Tender 
+document, may not be complete, accurate, adequate or correct. Each Tenderer should, 
+therefore, conduct his/its own investigations and analysis and should check the accuracy, 
+adequacy, correctness, reliability and comp leteness of the assumptions, assessments, 
+statements and information contained in this Tender document and obtain independent advice 
+from appropriate sources.  
+ 
+                 Information provided in this document to the Tenderer(s) is on a wide range of  
+matters, some of which depend upon interpretation of law. The information given is not an 
+exhaustive account of statutory requirements and should not be regarded as a complete or 
+authoritative statement of law. TGSRTC accepts no responsibility for the accuracy or otherwise 
+for any interpretation or opinion on law expressed herein.  
+              
+                 TGSRTC, its employees and advisors make no representation or warranty and shall 
+have no liability to any person, including any Applicant or Tender er under any law, statute, 
+rules or regulations or tort, principles of restitution for unjust enrichment or otherwise for any 
+loss, damages, cost or expense which may arise from or be incurred or suffered on account of 
+anything contained in this Tender doc ument or otherwise, including the accuracy, adequacy, 
+correctness, completeness or reliability of the Tender document and any assessment, 
+assumption, statement or information contained therein or deemed to form part of this Tender 
+document or arising in any way in the Tender Stage 
+ 
+ 
+--- Page 3 ---
+3 
+ 
+    Buyer Specific Additional T erms & Conditions (ATC) for Selection of Service Provider for 
+implementation of Electric Bus Management System (EBMS) Software services for Management 
+and Monitoring of Operation of Electric Buses being inducted under GCC model in TGSRTC 
+I N D E X 
+S. No. Item 
+1 Introduction 
+2 Electric Bus induction Plan 
+3 List of existing 13 Electric Bus Depots 
+4 Section-1 General Important Information Related to Bid 
+4(1) 1. Contract Period 
+4(2) 2. Earnest Money Deposit (EMD) 
+4(3) 3. Performance Security 
+4(4) 4. Scalability 
+4(5) 5. Right to T erminate the Process 
+4(6) 6. T ermination 
+4(7) 7. Termination of this Agreement due to bankruptcy of 
+Service  Provider 
+4(8)     8. Dispute resolution between the buyer and the   
+seller/service provider 
+4(9) 9. Integrity Pact 
+5 Section-2 Eligibility Criteria 
+6 Section-3 Payment T erms 
+7 Section-4  SLA 
+8 Section-5 Scope of Work 
+8(1) 1. Stake Holders involved and their obligations 
+8(2) 2. EBMS Work Flow 
+8(3) 3. T racking reports of Electric buses 
+8(4) 4. T ype of Instances for Alerts 
+8(5) 5. Business Rules for incidents reporting in EBMS 
+8(6) 6. Responsibility Matrix 
+8(7)     7. Details of infractions reports & formats for billing  purpose 
+8(8) 8. Automatic processing of concessionaire bills 
+8(9) 9. Other Terms and Conditions for the Vendor for  
+implementing EBMS 
+9 Section-6 Project timelines, milestones 
+ Section-7  Pre-Bid Meeting 
+10 Form 1 Bid submission letter 
+11 Form 2 Financial Capability of the Bidder 
+12 Form 3 Details of Blacklisting/Bankruptcy 
+13 Form 4 List of Key Personnel 
+14 INTEGRITY P ACT 
+ 
+ 
+--- Page 4 ---
+4 
+ 
+Invitation To Bid 
+ 
+Tender No: Dy.CTM(IT)/EBMS(01)/2026-IT 
+From:  
+Telangana State Road Transport Corporation (TGSRTC),  
+Bus Bhavan, B-Block,  
+RTC X Road, Musheerabad, Hyderabad-500020. Telangana State. 
+To: All Prospective Bidders  
+  
+           Telangana State Road Transport Corporation (TGSRTC), invites proposals (‘Bids’) in 
+response to this Request for Proposal (‘Tender’) document , from eligible reputed, 
+competent, and professional Information Technology companies, who meet the minimum 
+eligibility criteria, as specified in this Tender for implementation of Electric Bus 
+Management System (EBMS) in TGSRTC.  
+           The complete Tender document shall be published on  02.04.2026, for the purpose 
+of downloading.  
+           A bidder will be selected (‘Selected Bidder’) based on the ‘Bid Evaluation 
+Methodology’ described in this Tender.  
+           Bidders are advised to study this tender document carefully before submitting their 
+Bids in response to this Tender not ice. Submission of a Bid in response to this notice shall 
+be deemed to have been done after careful study and examination of this Tender document 
+with a full understanding of its terms, conditions and implications.  
+The time, date, and venue details relate d to the pre -bid conference and Bid submission 
+are mentioned in the Data Sheet. Bids that are received after the Bid Submission Deadline 
+shall not be considered.  
+To obtain first-hand information on the assignment, bidders are encouraged to attend the 
+pre-bid meeting. However, attending the pre-bid meeting is optional.  
+ 
+Thanks, and regards, 
+Chief Engineer (IT) TGSRTC 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+--- Page 5 ---
+5 
+ 
+INTRODUCTION 
+TGSRTC hereby invites proposals through GeM Portal from reputed, competent and 
+professional companies, propriety firms for a period of three years, who meet the 
+minimum eligibility criteria as specified in this Additional T erms & Conditions (ATC) 
+document for the “Selection of Service Provider for implementation of Electric Bus 
+Management System (EBMS) Software Services for Management and Monitoring of 
+Operation of 940 Electric Buses inducted under GCC model in TGSRTC” as this 
+document provides information to enable the bidders to understand the broad 
+requirements to submit their bids. 
+The detailed scope of work is provided in Section 5 of this ATC document. 
+Bidders are advised to study Bid document & this ATC document carefully before 
+submitting their proposals in response to the Bid Notice. Submission of a proposal in 
+response to this notice shall be deemed to have been done after careful study and 
+examination of this document with full understanding of its T erms & Conditions. 
+About T elangana State Road Transport Corporation (TGSRTC) 
+Public Transport is one of the most common modes of transport, especially in a 
+developing country like India. TGSRTC is currently operating bus services within 
+Telangana State and to the neighboring States (Andhra Pradesh, Karnataka, 
+Maharashtra, Goa, Tamil Nadu and Chhattisgarh).  
+Some of the key factors about TGSRTC are:  
+            Number of Vehicles 9,072  
+            Regions 11  
+            Depots 97  
+            Bus Stations 364  
+            Zonal Workshops 2  
+            Body Building Workshop 1  
+       Various branded services offered by TGSRTC include:  
+Regular Services operated daily with various levels of comfort, such as Garuda Plus A/c, 
+Rajadhani A/c, Metro luxury A/c, Pushpak  A/c, Super Luxury, Deluxe, Express, 
+Pallevelugu, City Metro Deluxe, City Metro Express and City Ordinary and Electric City 
+Ordinary, Electric Metro Express, Electric Express, Electric Deluxe and Electric Pushpak. 
+Presently , TGSRTC is operating total 13 Electric bus depots, which may be increased with 
+the enhanced quantity of Electric buses. As on date, TGSRTC is operating a total  940 
+Electric Buses which are scheduled to be augmented. 
+ 
+ 
+--- Page 6 ---
+6 
+ 
+Electric Buses Induction Plan : 
+T elangana State Road T ransport Corporation currently has 9072 buses out of which 940 
+are Electric buses.  
+ Indicative Electric Bus Commissioning Schedule is as under: 
+List of existing 13 Electric Bus Depots: 
+S. No. Depot 
+1 Cantonment  
+2 Miyapur-2 
+3 Hyderabad Central University 
+4 Ranigunj -2 
+5 Kukatpally 
+6 KarimNagar-2 
+7 Nizambad-2 
+8 Warangal-2 
+9 Hyderabad/MGBS 
+10 Suryapet 
+11 Nalgonada 
+12 BHEL 
+ 
+ 
+ 
+No. of buses Already inducted / T o be inducted 
+940 buses Already inducted 
+300 buses Scheduled to be inducted by September 2026 
+500 buses Scheduled to be inducted by December 2026 
+600 buses Scheduled to be inducted by April 2027 
+700 buses Scheduled to be inducted by August 2027 
+--- Page 7 ---
+7 
+ 
+Section-1 General Important Information Related to Bid: 
+1. Contract Period:  
+a. Date of Issuance of Contract Order + 2 months for Software Prototype Customization, 
+T esting, UAT & Implementation/Roll-out + 3 years of Operation, Support, and Maintenance 
+from COD. 
+b. TGSRTC may extend the contract period on yearly basis or part thereof till the operation 
+of e-buses under GCC contract, after successful maintenance of initial three years’ contract, 
+on the same rates, terms & conditions. The performance of the EBMS will be considered by 
+TGSRTC for contract extension. 
+c. TGSRTC shall have the option of terminating the contract during the contract period by 
+giving a 30 days notice. 
+ 2. Earnest Money Deposit (EMD): 
+a. The Bid Security (EMD) shall be furnished in Indian National Rupees (INR) only . The 
+Bidders must deposit an earnest money of Rs. 10,00,000/- (Rupees T en Lakhs Only) by 
+means of Account Payee Demand Draft, from a Nationalized / Scheduled bank other 
+than Cooperative bank drawn in favor of “T elangana State Road T ransport Corporation”, 
+Hyderabad. 
+c. No interest shall be payable by TGSRTC on EMD. 
+d. EMD of the unsuccessful bidders will be returned on written request, only after finalization 
+of T enders in all respects. 
+e. The EMD of the successful bidder will be converted as Performance Security. The successful 
+bidder has to submit a DD for the difference amount as Performance Security . 
+f. In the following circumstances EMD shall be forfeited by TGSRTC: 
+i. The EMD will be forfeited if the bidder fails to enter into agreement within specified 
+time.  
+ii. If the bidder does not start the work as per stipulated timelines or withdraws its 
+bids during the period of Bid validity or prior to award of work. 
+iii. If the bidder engages in a corrupt practice, fraudulent practice coercive/collusive 
+practice, undesirable practice or restrictive practice. 
+iv. In case selected bidder fails to submit / furnish the Performance Security within 
+the  prescribed timeline of document. 
+v. In case the Selected Bidder , commits any breach thereof prior to furnishing the    
+Performance Security . 
+--- Page 8 ---
+8 
+ 
+g. The Bidder has to upload the scanned image of the EMD along with the online bid 
+submission. 
+The original EMD shall be submitted at the ATM (Computers) Section, B Block 2nd Floor , IT 
+Department, TGSRTC Bus Bhavan, Musheerabad, Hyderabad, T elangana, on or before the 
+bid submission end date. 
+               
+3. Performance Security 
+a. The selected bidder will be required to furnish performance security @ 5%   of 
+Contract Value in the form of Account Payee Demand Draft, from a Nationalized / 
+Scheduled bank other than Cooperative bank , in favour of “Telangana State Road 
+Transport Corporation”, Hyderabad, payable at Hyderabad, Telangana State. 
+ 
+ b. All charges whatsoever, such as premium, commission, etc., with respect to the 
+Performance Security shall be borne by the selected bidder. 
+  
+c. The Performance Security shall be submitted by the selected bidder within 15 
+days from the date of the award of contract. 
+               
+d. If the selected bidder fails or neglects to observe or perform any of his obligations 
+under the contract, the Performance Security furnished by the selected bidder shall 
+be forfeited by TGSRTC. 
+               
+e. In case of any extension of contract, contract obligation period, the selected 
+bidder shall be   liable to suitably extend the validity of the Performance Security. 
+ 
+f. The Performance Security may be discharged/ returned by TGSRTC after satisfied 
+due performance & obligations of the selected bidder as per the contract Terms & 
+Conditions. However, no interest shall be payable by TGSRTC on the Performance 
+Security. Validity period of Performance Security should be up to 180 days beyond 
+period of contract. 
+ 
+g. TGSRTC shall also be entitled to make recoveries from the bills of selected bidder 
+or from Performance Security, or from any other amount due to the selected vendor , 
+in-line with relevant Penalty Clause. 
+4. Scalability: 
+The number of depots 13 / Electric buses (940) mentioned in the bid document is not fixed, 
+and TGSRTC reserves the right to increase or decrease the number of actual depots/buses 
+intended to be covered under the contract up to 5500 Electric Buses. The system should 
+have the capability of sufficient scalability to accommodate more depots/buses, if any , on 
+mutually agreeable terms and conditions. 
+ 
+--- Page 9 ---
+9 
+ 
+5. Right to T erminate the Process   
+a. TGSRTC may terminate the tender process at any time and without assigning any reason. 
+TGSRTC makes no commitments, express or implied, that this process will result in a 
+business transaction with anyone. 
+b. This tender does not constitute an offer by TGSRTC. The bidder's participation in this 
+process may result in TGSRTC selecting the bidder to engage towards execution of the 
+contract. 
+6. T ermination 
+a.  TGSRTC may terminate the Contract at any time for any reason by giving the Service 
+Provider 30 days prior written notice. Upon receipt of the notice of termination under this 
+clause the Service Provider shall: 
+i. Handover to TGSRTC, Source code ,all data and complete software backup in the 
+format as desired by TGSRTC up to the date of termination; 
+ii. Deliver Knowledge Transfer Training (KTT) to TGSRTC’s selected successor 
+vendor with all documents prepared as of the date of termination in connection 
+with the System. 
+b. The Service Provider should give 90 days’ prior written notice to TGSRTC to terminate 
+the contract. Upon giving of the notice of termination under this clause the Service 
+Provider shall: 
+i. Handover to TGSRTC, Source code,all data and complete software backup in the 
+format as desired by TGSRTC up to the date of termination; 
+ii. Deliver Knowledge Transfer Training (KTT) to TGSRTC’s selected successor 
+vendor with all documents prepared as of the date of termination in connection 
+with the System. 
+c. Upon termination of this Agreement, the Parties will comply with the Exit Management 
+Schedule. 
+d. Exit management schedule: The Service Provider will promptly on the commencement 
+of the exit management period supply the following to TGSRTC or its nominated agency: 
+  
+i. Information relating to the current services rendered. 
+ii. All current and updated data as is reasonably required for TGSRTC 
+transitioning the services to its Replacement vendor in a readily available 
+format nominated by TGSRTC. 
+iii. All other information (including but not limited to documents, records and 
+agreements) relating to the services reasonably necessary to enable 
+TGSRTC, or its Replacement vendor, to carry out with due diligence in order 
+to transition the provision of the Services to TGSRTC (as the case may be). 
+--- Page 10 ---
+10 
+ 
+iv. Before the expiry of the exit management period, the vendor shall deliver 
+to TGSRTC or its nominated agency all new or updated materials, except 
+that the vendor shall be permitted to retain one copy of such materials for 
+archival purposes only. 
+v. Payments during the Exit Management period shall be made in accordance 
+with the Terms of Payment Schedule. 
+ 
+7. T ermination of this Agreement due to bankruptcy of Service Provider  
+TGSRTC may at any time terminate the contract by giving written notice to the bidder, 
+if the bidder becomes bankrupt or otherwise insolvent, provided that such termination 
+will not prejudice or affect any right of action or remedy which has accrued or will 
+accrue thereafter to TGSRTC. 
+ 
+8. Dispute resolution between the buyer and the seller/service provider 
+a. Conciliation: 
+i. The Parties (i.e., the Buyer and the Seller/ Service Provider) undertake that 
+any conflict or dispute that may arise between them shall first be dealt with 
+in the manner stated below, irrespective of any other recourse, which any 
+Party may have in law or in equity. 
+ii. In the event of any conflict or dispute arising out of or in connection with 
+the Contract placed through the GeM Portal, the Parties shall endeavour to 
+settle such disputes amicably. If a dispute is not resolved within 30 (thirty) 
+days after a written notice of any dispute by one Party to the other, the 
+same shall then be resolved through the mechanism of a Dispute Resolution 
+Committee. This Dispute Resolution Committee shall comprise 
+representatives of both the Buyer and the Seller / Service Provider. It shall 
+be chaired by the Primary User of the Buyer organisation/department or any 
+other person as authorised by the Primary User. If the Dispute Resolution 
+Committee is not able to resolve the matter within 30(thirty) days of its 
+formation, the parties can take recourse in accordance with the Law, within 
+the jurisdiction of Hyderabad Courts only. 
+9. Integrity Pact:   
+No sums, in cash or kind, have been paid or shall be paid, by bidder or on its behalf, to any 
+person by way of fees, commission or otherwise for entering into this Agreement or for 
+influencing or attempting to influence any officer or employee of TGSRTC in connection 
+therewith. For this purpose, TGSRTC will sign an integrity pact separately with the Service 
+Provider enclosed with this agreement. 
+Note: Prospective Bidders may visit the IT Department, Bus Bhavan, TGSRTC for any further 
+information/clarification regarding this bid document on prior appointment during working 
+hours till the date of technical bid submission. 
+--- Page 11 ---
+11 
+ 
+Section 2: Eligibility Criteria 
+S.No. Item Description Documentary Evidence 
+1 Registration 
+Status 
+Bidder shall be any ONE of the following: 
+• A company incorporated in India under 
+the Companies Act, 1956 or Companies 
+Act 2013 (as amended to date), and 
+subsequent amendments thereto.  
+• An entity registered under the LLP Act 
+2008 and subsequent amendments 
+thereto. 
+• Partnership firms registered under the 
+Indian Partnership Act, 1932  
+The bidder should have been in operations for 
+the last FIVE years as on the date of 
+publishing of the tender notice (including 
+name change/ mergers or acquisitions).  
+ 
+Certificate of 
+incorporation/registration. 
+2 T urnover The bidder should have an average annual 
+turnover of at least INR 1.5 Crores in the last 3 
+financial years. 
+• Copies of GST & PAN 
+• Certificate from the          
+Statutory Auditor / CA   
+as per format “Form 2”. 
+3 Net worth The bidder should have a positive net worth for 
+the last THREE years as of March 31, 2026 
+Duly certified statement 
+from the auditor for the 
+last 3 financial years as  
+per format “Form 2”. 
+4 Blacklisting / 
+Bankruptcy 
+The Bidder shall not be declared blacklisted or 
+bankrupt, or shall not have any proceeding for 
+bankruptcy , insolvency, for any reason for a 
+particular period of time by any State/Central 
+Government/ PSU/ Autonomous Body (Under any 
+government law) in India as on the last date of 
+submission of the Bid. 
+An undertaking from  
+Authorized Signatory as  
+per format “Form 3” 
+5 Certification The Bidder should have a valid minimum CMMI 
+Level 3 or higher and/or ISO 9001:2008 or higher 
+certificate as on last date of submission of the bid 
+Copy of valid certificate  
+issued to the Bidding  
+Organization by  
+respective authority . 
+--- Page 12 ---
+12 
+ 
+6 Key 
+Resources 
+The bidder shall have at least the following 
+manpower: 
+Project Manager (minimum 2): Management  
+Graduate with minimum 3 years of experience in 
+implementation of Bus Operation Management  
+Software Services System for Buses. 
+MIS reporting Expert (minimum 5): Engineering 
+Graduate with minimum 2 years of work 
+experience in MIS reporting with at least one Bus 
+Operation Management Software Services System 
+for Buses. 
+Signed Resume certified 
+by Company HR 
+ 
+7 Experience 
+in Bus 
+Operation  
+Management 
+Software 
+Services 
+System for  
+operation of 
+Buses 
+The Bidder must have experience of 
+implementing and operating Bus Operation 
+Management Software Services System involving 
+installation, operation and maintenance for Buses 
+in the last 3 years (as on the last date of bid 
+submission) as per following criteria: One single 
+project with minimum fleet size of 1200 buses  
+Or T wo projects with minimum fleet size of 750 
+buses each Or Three projects with minimum 
+fleet size of 600 buses each 
+A qualifying project shall be defined as “A project  
+consisting of implementation, operation and  
+maintenance of Bus Operation Management  
+Software Services System for Buses”. 
+ 
+ Work Order + Completion 
+Certificates from the   
+client; OR Work Order + 
+Phase Completion 
+Certificate (for ongoing 
+projects) from the client 
+8 Solution  
+Demonstration 
+Understanding of the objectives of the project: 
+The extent to which the System Implementer’s 
+approach and work plan respond to the objectives 
+indicated in the Scope of Work.  
+Completeness and responsiveness: The extent 
+to which the proposal responds exhaustively to all 
+the requirements of all the T erms of Reference 
+EBMS functionality and  
+implementation plan as  
+per Scope of Work to be 
+shown & explained  
+through their existing 
+EBMS software before 
+TGSRTC Officials for 
+taking a decision of 
+technical qualification. 
+ 
+ Note: 
+i. All self-certificates shall be duly signed and stamped by authorized signatory of 
+the bidder firm unless specified otherwise the bids shall not be considered for 
+further evaluation. 
+ii. TGSRTC reserves the right to independently verify the documentary evidences   
+including self- certifications submitted by the bidder along with bid. 
+ 
+--- Page 13 ---
+13 
+ 
+Section-3 Payment T erms:  
+Payment by TGSRTC shall be done on a Quarterly basis. The Selected Bidder will 
+submit an invoice in the following quarter for the invoice period up to the 10th day of every 
+quarter. The payment shall only be made for the actual number of buses using EBMS 
+services in the respective Quarter. The payment shall be made on receipt of the invoice, 
+subject to deduction of penalties for noncompliance computed based on the SLA, taxes 
+and other deductions as per the agreement and Government rules and regulations. 
+(a) The selected bidder will complete stabilization process for the buses in the depots 
+within a period of 2 months. Payment will start post stabilization of project & 
+issuance of acceptance certificate. Payment will be made after receiving of 
+invoice. i.e. Go-Live for the identified Depots in phased manner through TGSRTC. 
+ 
+Following steps to be followed:  
+ 1. Vendor will submit Quarterly bills to the IT department, TGSRTC. 
+2. The IT department will verify the bills before processing. 
+3. The Quarterly bills will be compiled and sent to the Accounts department, 
+TGSRTC for audit. 
+4. After audit, approval of competent authority will be sought. 
+5. Accounts Dept. will make the payment to the vendor . 
+6. While submitting the invoices from 2nd Quarter onwards, the Vendor must submit 
+proof of GST payment for the previous payment done by the Corporation.  
+(b)  Payments shall be subject to the application of liquidated damages (for period 
+prior to “Go Live”) or SLA penalties and its adjustments/corrections (for post “Go-
+Live”) as may be provided for in the Agreement and the SLA from the relevant 
+milestone(s). 
+(c) TGSRTC or its nominated agencies shall be responsible for withholding taxes from 
+the amounts due and payable to the Service Provider wherever applicable. The 
+Service Provider shall pay for all other taxes in connection with the Agreement, 
+SLA, scope of work and any other engagement required to be undertaken as a part 
+of the Agreement, including, but not limited to, property , sales, use, excise, value-
+added, goods and services, consumption and other similar taxes or duties. 
+ 
+ 
+ 
+ 
+--- Page 14 ---
+14 
+ 
+Section - 4 SLA : 
+The purpose of this section is to define the performance levels of service that the service 
+provider needs to adhere to during implementation and operation: 
+SLA during Implementation: 
+# Service Level 
+Description 
+Measuring 
+Duration 
+Measurement Penalty Penalty 
+to be 
+imposed 
+at 
+Baseline  
+Minimum 
+Lower  
+Performance 
+Material 
+breach 
+1 Adherence to 
+project 
+timelines 
+Adherence 
+to  
+timelines 
+as  
+defined in 
+the 
+Project 
+timelines, 
+milestones 
+Timelines  
+defined in 
+Project  
+timelines, 
+milestones 
+Delay of Less 
+than or equal  
+to 30 days 
+Delay of 
+Greater 
+than 30 
+days 
+Rs. 10,000 per day of 
+delay from the 
+scheduled completion 
+date for  
+issuance of acceptance 
+certificate  
+and go live for all 
+TGSRTC Buses for  
+lower performance.  
+Rs. 20,000 per day of 
+delay from the 
+scheduled completion 
+date for  
+issuance of acceptance 
+certificate  
+and go live for all 
+TGSRTC Buses for 
+Material breach and /or 
+CE(IT)-TGSRTC can take 
+suitable action 
+including  
+issuance of warning, 
+invoking 
+breach clause etc. 
+At HQ 
+Level 
+SLA during Operation & Maintenance: 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+2 Software 
+availability 
+at  
+Depots 
+Resolution/  
+workaround to 
+be 
+provided within 
+4 working hours 
+by Service 
+provider . 
+Daily Less than 
+20 Hours 
+Between 20 
+hours  
+to 23 Hours 
+24 Hours INR 5000/- per day for 
+Lower Performance. 
+INR 50000/- per day for 
+Material Breach. 
+If Material breach 
+continues for more than 
+3 months, then CE(IT)-
+TGSRTC can take 
+suitable action 
+including  
+issuance of warning,  
+invoking breach clause 
+etc. 
+At HQ 
+Level 
+ Note: Maximum Penalty applicable for above shall not exceed 20% of the ‘billed 
+amount’ submitted by the vendor . 
+--- Page 15 ---
+15 
+ 
+Section-5 Scope of Work 
+The Electric Bus Monitoring System (EBMS) is a web based application software for 
+Management and Monitoring of Operation of Electric Buses inducted/ being inducted in 
+TGSRTC under GCC Model and shall be able to provide the complete information system in 
+real time manner adhering to the services in accordance with the provision of the contracts 
+with the concessionaires. The service provider shall be responsible for Supply , Installation, 
+T esting, Commissioning, Maintenance and Operation support of all software components of 
+EBMS during the entire contract period. Scope of services for EBMS should contain but not 
+limited to following are as follows: 
+1. Stake Holders involved and their obligations: - 
+i. Obligation of Concessionaire:- 
+a. Provide GPS data, CAN data (SOC, Odometer, etc.) and ITS data including  
+IPCCTV Camera, Panic Buttons, and two-way communication to EBMS. 
+b. Provide Charger Data API via CMS to EBMS.  
+c. Support the execution of the EBMS.  
+d. As the EBMS platform will also provide operational and monitoring benefits 
+to the Operators/Concessionaire, including vehicle performance monitoring, 
+safety monitoring, and operational efficiency improvements, the Operators 
+may share a mutually agreed portion of the implementation and operational 
+costs of EBMS, as decided by the Competent Authority, TGSRTC. 
+ii. Obligation of TGSRTC:- 
+a. Provide support in data collection from e-bus operators and execution of the 
+EBMS Project. 
+b. Providing master data for Vehicle, Driver, Conductor, Route/Duties. 
+c. Verifying and Creating Memo in EBMS with the guidance of Vendor  Staff. 
+d. Scheduling / allocating Buses Drivers and Conductors 20 minutes before 
+Schedule Out going time. 
+e. Data entry /AFCS API for ticketing data. 
+f. Approving daily basis Trip wise KMs in Portal. 
+g. Entry of Breakdowns, accident details, any other incidents. 
+h. Data Support for Bus schedules, routes details 
+iii. Obligation of EBMS Software Service provider (Vendor): 
+a. To create Bus Management Software for management and monitoring of 
+Operation of Electric buses. 
+b. To ensure the compliance of all the T&C and SLA prescribed in the respective 
+concessionaire agreement and to process & apply the performance 
+adjustments (damages & penalties, if any) accordingly. 
+c. To make provision for maintaining a database related to operation of Project 
+for each depot and regular reports, as per requirement, on operational 
+performance of all Concessionaires to TGSRTC. 
+--- Page 16 ---
+16 
+ 
+d. To take all the GPS data, CAN data (SOC, Odometer, etc.) and ITS data 
+including IPCCTV Camera, Panic Buttons, and two-way communication from 
+the respective concessionaire for EBMS. 
+e. To take Charging data of buses data through API from the concessionaire. 
+f. Monitoring/tracking of GPS-based Vehicle Tracking of Electric Buses. 
+g. Real-time and historical monitoring of Key Performance Indicators (as per 
+Concessionaire Agreement to be shared with selected vendor). 
+h. Generating related operational reports in effective MIS system as per 
+requirement of TGSRTC in due course.  
+i. Automatic processing of concessionaire bills  
+j. Integration of pre fitted ITS system (i.e. CAN-TCU/VTS & VHMD, camera 
+feed, driver behavior monitoring with EBMS). 
+k. Vendor shall study the complete existing system of TGSRTC and the 
+Concessionaire Agreement of hiring of Electric buses by TGSRTC for 
+understanding the process, collecting all relevant information, material etc.  
+T entative list of functioning requirements is as under: 
+• Allocation of Duty 
+• Trip wise way bill data entry & submission 
+• No. of over speed incidents 
+• Early,late Outgoing/ incoming 
+• Miss bus stop 
+• Trip not start from origin point report 
+• Kms cross verification finalize from memo by TGSRTC employee 
+• KPI on monthly, Quarterly basis 
+• GPS Tracking, Bunching report 
+• Charging data 
+• Camera 
+• Bus Idle report 
+• Infractions report as per agreement 
+ 
+2. EBMS Work Flow:- 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+
+--- Page 17 ---
+17 
+ 
+3.T racking reports of Electric buses:- 
+S. 
+No. 
+Report  
+Category 
+Sub Report  
+Category 
+Utility 
+1 Map  
+T racking  
+Reports 
+ Map Live Live location of all buses on map. 
+ Live T rail Map Live movement of selected bus on map and showing 
+time, speed etc. 
+ History Replay Historical movement of vehicle of data on map with total 
+Kilometers as per selected date & Vehicle number 
+2 Operational 
+Reports 
+T oday’s  
+Journey  
+Report 
+ Shows T odays journey covered by the selected vehicle and    
+showing start time, start location, end time, end location, 
+Kms, Duration & status (running/stop) 
+Journey Report  T otal journey covered by the selected vehicle and  
+showing start time, start location, end time, end  
+location, KMs, Duration & status (running/stop). 
+Idle Report T otal idle time of the selected vehicle and showing idle 
+from, end time, duration, idle location. 
+Diagnostic  
+Report 
+T otal diagnostic details of the selected vehicle data and 
+showing start time, start location, end time, end location, 
+Distance, Odometer , Duration & status (running/stop). 
+Movement 
+Report 
+T otal details of the selected vehicle with second to 
+second, data and showing time and location. 
+Overspeed  
+Report 
+Over speed (to be selected through dashboard) details of 
+selected bus with location and showing date, speed, 
+location and send notification on dashboard. 
+ 
+3 Statistical 
+Reports 
+Current Month 
+Report 
+Kilometers as per GPS for all vehicles for all dates 
+of the selected month. 
+Consolidated 
+Report 
+Consolidated details of selected vehicles. 
+Non-Journey  
+Report 
+Details of non-journey time & location of buses 
+4. Type of Instances for Alerts: (Through Email & Dashboard Notification) 
+a.Panic alerts 
+b.Over Speed (T o be defined by User) 
+c.GPS Breakage 
+d.Idle report 
+e.Route Deviation 
+f. Bunching report (T o be defined by User) 
+g.Harness Removal (Disconnection) 
+ 
+ 
+ 
+--- Page 18 ---
+18 
+ 
+ 5. Business Rules for incidents reporting in EBMS: 
+     The system shall operate in compliance with the business rules of TGSRTC and shall be 
+designed   to accommodate any changes in the business rules. All Business rules for EBMS 
+to be formalized by the vendor in consultation with TGSRTC for the following: - 
+a. Stoppage Geofencing  
+b. T erminal Geofencing  
+c. Depot Geofencing  
+d. Route fencing  
+e. Delay Depot OutGoing time  relaxation  
+f.  Early Depot OutGoing time relaxation  
+g. Every trip start time relaxation 
+h. Route diversion in meters 
+i.  Over speed  
+j.  Over speed critical  
+k. Speed at Geofencing (bus stop) to make it cover 
+l.  T rip Not started from origin  
+m. T rip not completed  
+n. GPS Km of trip +- range  
+o. Same depot OutGoing to same depot Incoming  
+p. No of Duties per day  
+q. no of conductor in single duties 
+r.  no of Drivers in single duties 
+s. No of Duties Hours 
+6. Responsibility Matrix: 
+S. 
+No. 
+Type of activity and work flow for a day Responsibility 
+of Vendor 
+Responsibility 
+of TGSRTC 
+1. One time uploading of Bus, Drivers, Conductors Master Y es  
+2. Regular update of Bus, Drivers, Conductors Master by T raffic 
+Section 
+ Y es 
+3. One-time creation of Bus Stops, Routes, Duties in the system 
+for a depot Y es  
+4. Regular updation/creation of Bus Stops, Routes, Duties  
+in the system for a depot by Regional Managers Office. 
+ 
+Y es 
+5. Duty allocation to buses & operational staff on day to day 
+basis by Depot T raffic section 
+ Y es 
+6. Lodging of infractions for bus condition and driver 
+shortcomings checking at the time of out going of buses in 
+morning shift and entry in the mobile app by Depot 
+Maintenance T eam. 
+ 
+Y es 
+7. T rip wise sale of tickets entry from way bills on daily basis 
+immediately after completion of duty by DC section. 
+ 
+ 
+Y es 
+--- Page 19 ---
+19 
+ 
+8. Lodging & closing of breakdown event in real time by Depot 
+Maintenance T eam. 
+ Y es 
+9. Electric bus charging data entry manually through APP or 
+Excel by Depot Maintenance T eam and later through API 
+from operator . 
+ 
+Y es 
+10. Initial 1st level closing of trip wise kilometers after incoming 
+of bus by T raffic Section and final 2nd level closing after 24 
+hours by Depot Maintenance T eam. 
+ 
+Y es 
+11. Lodging & closing of infractions details on daily basis by 
+Depot Maintenance T eam. 
+ Y es 
+7. Details of infractions reports & formats for billing purpose:- 
+a. Double duty driver report  
+b. Day wise Sch KMs,Optd Kms  
+c. Daily earning report  
+d. KPI report (Monthly , Quarterly)  
+e. Daily cancelled KMs (T otal) 
+f.  Head wise (cancel KMs) 
+g. Daily cancelled KMs type wise  
+h. Incident and penalty report 
+i.   Incident details report 
+j.  Authorized curtailment report  
+k. Unauthorized curtailment report 
+l.  Unauthorized route deviation report  
+m. T rip not started from origin  
+n. Early/ Late trip started from origin Report  
+o. No driver/ no conductor report  
+p. Breakdown report not attended within 2 hrs. 
+q. Breakdown 0.2% (As per article 16.6.3)  
+r. Accident instances report  
+s. Over speed report  
+t. Assured KMs reconciliation report 
+u. service wise infractions report 
+8. Automatic processing of concessionaire bills:- 
+a. Submission of bill by the concessionaire  
+b. Entry of bill in the system  
+c. Payment processing note generated by EBMS  
+d. Auto generation of proposal note along with Show Cause notice by the EBMS  
+system for making payment of actual KMs operated and levying damages/ infraction 
+as per SLA. 
+e. Bill processed at depot level and sent to regional office. 
+--- Page 20 ---
+20 
+ 
+f. Verified bill amount is sanctioned by RM after regional accounts vetting 
+and   sent back to depot. 
+g. Depot to prepare Voucher of vetted amount and sent to accounts 
+department  HQ for releasing the payment. 
+h. Release of payment to Concessionaire(s) through Escrow Account by   
+Accounts Department, HQ. 
+9. Other T erms and Conditions for the Vendor for implementing EBMS 
+9.1 Vendor shall design the user-friendly screens/dashboard with MIS of the portal 
+considering latest designs and make it attractive. 
+9.2 Vendor shall make provision for User level logins to be given to Senior  
+Management, Admin, Regional Managers & all the Electric Bus Depots, etc. as per 
+Scope of Work. 
+9.3 The software shall support minimum 500 concurrent users at a time in view of 
+the operation of number of electric buses. 
+9.4 The portal shall keep the provision for scaling up of the no. of buses and 
+incorporating  more depots. The software shall generate reports instantly . 
+9.5 Back Office Management: 24X7 support services to TGSRTC Users. 
+9.6 Vendor will be responsible for secured hosting of the Web Based Application 
+Software on its own Data Center or on Cloud and backup at Data Recovery (DR) 
+Center with 99% uptime of server from final deployment & implementation date 
+during the entire contract period. Data Centre/Cloud origin must be in India. Cloud 
+shall be of NIC or MietY empaneled. 
+9.7 Web application software must be designed, developed, deployed and        
+maintained according to GoI Guidelines & the Guidelines of IT Dept.TGSRTC. 
+9.8 Vendor will need to get clearance of security audit of the web application       
+software  through CERT-in empaneled agencies. 
+9.9 Data Backup Facility: Vendor shall maintain operational data always live 
+during the entire contract period except tracking data for last Quarter on live 
+server . The data to be provided immediately as and when requested by TGSRTC, 
+for any particular instance, or as a whole. 
+9.10 It shall be the responsibility of the Vendor to capture real-time data from   
+AIS-140 compliant GPS devices installed in Electric Buses from respective 
+concessionaire. 
+9.11 All data generated during the operation period shall be the property of 
+TGSRTC. 
+9.12 Vendor shall be responsible for updating and upgradation (if required) of  all 
+Software for successful operation of the Project during the Contract Period. 
+--- Page 21 ---
+21 
+ 
+9.13 Web application software must be Smart Phone (android & i-phone) 
+Responsive and design shall be compatible to all Smart Phones and browsers with 
+uniform and user friendly presentation of the contents & architecture with clear 
+navigation. 
+9.14 Bug fixing and keeping Web application software secured from all possible 
+cyberattacks and hackers at all time. 
+9.15 Admin Dashboard with the ability to Add/Edit/Delete or create/inactive any 
+user account, Bus details, Employee master etc. (As per format provided by 
+TGSRTC - Manual /Excel uploading). 
+9.16 Mobile App to be provided for Officers / Checking staff for lodging complaints 
+by Officers and issuing Challans by checking staff for the irregularities observed in 
+the operation of electric buses. 
+9.17 The Software should be capable of integrating with other softwares /  
+Applications through API i.e. AFCS, Automatic Passenger counting system, ERP , 
+OPRS etc. 
+9.18 Geofence: Vendor shall create geofence for all stops, terminals, depots and 
+associate alarms for entry/exit to monitor the movement of any bus through any 
+geofence. The vendor shall carry out survey for taking Latitudes & Longitudes of 
+the locations. Shall map the routes on geofence which will provided route 
+deviation alerts as well. 
+9.19 Any third party software, maps etc. required for the EBMS software shall be 
+provided to TGSRTC with perpetual license. 
+9.20 Provide standard commercial off the shelf (COTS) software encouraging use 
+of non-proprietary items. 
+9.21 The Service provider shall allow flexibility and configurability to allow the 
+installed system to be easily modified to accommodate a multi-operator 
+environment including the application of any government policies to be adhered 
+to. 
+9.22 System should be secure to provide protection against fraud, data theft, 
+falsification of data, external threats, false accounting and unauthorized       
+access etc. 
+9.23 The design life period of the system shall be at least 10 years in terms of 
+selected technology , future upgrades, security considerations, scalability and 
+future upgrades in-case required after completion of contract period. 
+9.24 The system shall be based on service-oriented architecture, adopt to non-
+proprietary open standards for seamless integration with existing applications of  
+TGSRTC such as CIS(ERP), Automatic Fare Collection System(AFCS), Vehicle 
+T racking system, etc.  
+--- Page 22 ---
+22 
+ 
+9.25 The service provider shall provide technical assistance during operations and 
+maintain the system during contract period to ensure the performance as per the 
+defined Service Level Agreements (SLAs). 
+9.26 Provide training to officers / officials of TGSRTC to fulfil the requirement. 
+9.27 Prepare, update and submit all documentation required to cover all phases of 
+the scope of work. 
+9.28 Incident Reporting and Management System (IRMS): The service provider 
+shall provide incident reporting and management system (IRMS). The depot staff 
+shall enter/lodge telephonically all incidents related to EBMS in IRMS. The service 
+provider will provide technical support for reported incident through their 
+maintenance and support team. The IRMS system shall also provide capability to 
+assign the incidents to various teams based on set workflow and operating 
+procedures. 
+9.29 Database management system: The functional requirements for this module 
+are as follows: 
+i. Full function, RDBMS supporting SQL. 
+ii. Shall support data integration, data recovery, exceptional handling 
+validation and security. 
+iii. Support parallel processing 
+iv. Shall support complex data structures, multi-user, multi-processing, large 
+transactions. 
+v.  Shall support real-time as well batch mode of operations 
+vi.  Should provide GUI interface for real-time ad-hoc queries, system 
+administration 
+vii.  Shall be proven product for handing large-scale transactions. 
+viii.  Shall maintain historic data for 3 years. This period should be configurable 
+based on TGSRTC’s requirement. 
+ix.  Should provide disk mirroring capability and support user defined archival 
+and purge strategy . 
+x.  Shall support 100% data recovery , commit and rollback based on check- 
+point logic. 
+xi.  Daily database and system backup and restoration of data should comply  
+with the threshold performance requirement values as per standard norms. 
+9.30 Authentication: The functional specifications for this module are as follows: 
+a. All connections to the server from the depot should be securely 
+connected. 
+b. All data exchange should be encrypted between the server and client. 
+c. All active connections should be managed by servers. 
+d. All the configurations with connections should be managed through  
+configuration management. 
+--- Page 23 ---
+23 
+ 
+e. All the devices' login should be centrally authenticated based on the 
+profile configured. 
+f. Should log all credentials of the login details when logging in /off  
+in the system. 
+g. Should be securely hosted with access only to TGSRTC user configuration 
+managers. 
+h. Should be able to create users and profiles based on the devices and 
+functions to be performed. 
+9.31 Application Software Maintenance 
+a. Application support includes, but not limited to, troubleshooting and 
+addressing the functionality, availability and performance issues, 
+implementing the system change requests etc. The Bidder shall keep the 
+application software in good working order; perform changes and upgrades 
+to applications as requested by the TGSRTC team. 
+b. The Bidder shall address all the errors/bugs/gaps in the functionality 
+offered by solution at no additional cost during the contract period. 
+c. All patches and upgrades shall be implemented by the Bidder ensuring 
+customization done in the solution as per the TGSRTC’s requirements are 
+applied. Technical upgrade of the installation to the new version of all 
+components, as and when mandated due to other compliance, security-
+related reasons etc., shall be done by the Bidder at no additional cost to 
+TGSRTC. 
+d. Any changes/upgrades to the software performed during the support phase 
+shall be subject to the comprehensive and integrated testing by the Bidder 
+to ensure that the changes implemented in the system, meets the specified 
+requirements and doesn’t impact any other function of the system. 
+e. Issue a log for the errors and bugs identified in the solution and any change 
+done in the solution shall be maintained by the Bidder and periodically 
+submitted to the TGSRTC. 
+f. In case of critical security patches/alerts, the Bidder shall inform about the 
+same immediately along with his recommendations. The report shall 
+contain Bidder’s  recommendations on update/upgrade, benefits, 
+impact analysis etc. The Bidder  shall need to execute updates/upgrades 
+though formal change management process and update all documentations 
+and Knowledge databases etc. For updates and upgrades, Bidder will carry 
+it out free of cost by following defined process. 
+9.32 DC/ DR related requirements: The functional specifications for this module   
+are as follows: 
+a. The Control Centre System along with other related applications including 
+security components etc. infrastructure shall provide redundant DR system 
+as a fall-back arrangement. 
+--- Page 24 ---
+24 
+ 
+b. In case of emergency or critical situation in Data Centre, data backup 
+procedures from disaster recovery site should be clearly followed. 
+c. All necessary software with required set of licenses shall be installed as per  
+bidders’ assessment. 
+d. A firewall cum gateway shall be installed at DC/DR to protect the entire 
+network from cyber threats. 
+e. Security and safety of the DC/DR is very important. 
+f. The DC and DR services to be obtained on cloud. The bidder is to follow 
+MEITY guidelines for hosting DC/DR on cloud. 
+g. The DR would have the similar specifications as the DC. The required 
+storage may vary depending on the applications / services that are to be 
+hosted at the DR. The DR would be configured in a manner that the critical 
+applications and databases shall be of the same capacity as in the DC, 
+however some of the non-critical applications would be of a lower capacity  
+of the DC. 
+9.33 Reporting requirements The functional specifications for this module are as 
+follows: 
+a. The Bidder should ensure that the system shall provide a facility for 
+generating and viewing online, real-time project and MIS reports for 
+transactions handled during a specified period, transaction density trends 
+for any specified periodicity (hourly, daily, weekly, monthly) and any 
+bottleneck situation creating dependency at any stage. 
+b. The Reporting system and Dynamic Dashboard shall be an integrated 
+system which shall provide user-friendly reporting functionalities for the 
+staff, assessing officers and officials of TGSRTC. 
+c. The Bidder should draw an exhaustive list of reports along with the TGSRTC. 
+Bidder should submit the reports on a regular basis in a mutually decided 
+format and shall develop any other required reports within 07 days of 
+requirement raised by TGSRTC during entire contract period. 
+d. Daily reports 
+i. Daily service wise/ticket /route wise/ summary report (including 
+Sch Kms,OPTD kms) 
+ii. Cause wise Cancellation of all services 
+iii. Driver/conductor  wise  performance &cancellation report 
+iv. Daily ridership summary report 
+v. Shift summary report 
+vi. Aggregated / consolidation reports 
+vii. Operator action reports & Log reports 
+viii. Event, alarms and warning report 
+ix. Maintenance and failure reporting 
+x. Breakdown Rate, Fleet utilization 
+xi. Service wise/drive/conductor/vehicle wise infraction report 
+--- Page 25 ---
+25 
+ 
+xii. SOH & SOC of Batteries 
+xiii. Chargers available position (vacant position) 
+xiv. Income tax deducted report section wise,GST collected from AC bus 
+earnings ,Incentive paid/recovered on performance etc  
+xv. Any other Reports  to be generated as per the requirements of the 
+concerned departments during the project development and 
+implementation stage. 
+e. Weekly reports 
+i. Log of backup and restoration undertaken. 
+ii. Summary of resource utilization of all components 
+iii. Service wise,Route wise, Duty wise and Trip wise,cond/driver wise 
+report 
+f. Monthly reports 
+i. Asset modification report at TGSRTC locations and DC locations.   
+ii. Summary of component wise uptime in the DC sites. 
+iii. Summary of resource utilization of all components in the DC sites  
+iv. Log of preventive / break-fix maintenance undertaken  
+v. Summary of changes undertaken in the DC sites, including major 
+changes like configuration changes, release of  patches, database 
+reorganization, storage reorganization, etc. and minor changes like 
+log truncation, volume expansion, user creation, user password 
+reset, etc. 
+vi. Consolidated SLA / non-conformance report 
+g. Quarterly Reports 
+i. Detection of security vulnerability detection with the available 
+solutions/workarounds for fixing Hacker attacks, Virus attacks, 
+unauthorized access, security threats, etc., with root cause analysis 
+and plan to fix the problems. 
+ii. Any hazards or events like fire, environmental conditions, physical 
+security, etc. at the Data Centers. 
+iii. SLA Reports All type of reporting should be submitted periodically 
+as per SLA  measurement interval to the TGSRTC. 
+          h. Any other Daily ,Weekly ,Monthly ,Yearly (period specific) Reports and existing 
+reports period specific to be generated as per the requirements of the concerned 
+departments during the project development and implementation stage. 
+9.34 Data Entry Screens: Depot wise creation / updation of dashboard screens for bus 
+stops, routes, duties, trips, buses, drivers, conductors, etc. are to be provided   with 
+specific access to the related operators. 
+ 
+ 
+--- Page 26 ---
+26 
+ 
+Section-6 Project timelines, milestones 
+# Milestone Timeline 
+1. Letter of Award / Contract Order T 
+2. EBMS Functionality Report & Implementation plan submission T + 2 weeks 
+3. Liaison with the Concessionaires for obtaining CAN/GPS data  
+using their Raw Data or APIs etc. & Implementation of EBMS 
+T + 4 weeks 
+4. Implementation of EBMS as per defined Scope of Work in a city 
+depot & Conducting UA T by the committee for acceptance of 
+the EBMS COD will be declared after successful conduction of 
+UA T and rollout of EBMS in city depots in phase-1 
+T + 8 weeks 
+5. Phase-1 
+Roll-out of EBMS as per defined Scope of Work in city depots 
+(efforts be made to start from 1st day of the month) 
+T+10 weeks 
+6. Phase-2 
+District depots 
+COD+1 month 
+Note: The implementation plan in phases may vary in terms of depots, no. of buses  
+etc. as per actual induction plan during the contract period, as per the discretion of 
+TGSRTC. 
+Section – 7 Pre- Bid meeting 
+7.1. TGSRTC will conduct a pre-bid meeting to clarify the objectives/scope of the 
+tender in Main Conference Hall, Bus Bhavan, Musheerabad, Hyderabad at 15.00 hrs., 
+on the date mentioned in Gem Portal. 
+7.2.Only two representatives from each firm/company will be allowed to participate 
+in the pre-bid meeting. 
+7.3.All related queries should be sent through email  before the Pre Bid meeting date.  
+7.4.The queries shall be sent to the mail id : atmcomp@tsrtc.telangana.gov .in shall be 
+in the format given hereunder . 
+ 
+ 
+ 
+ 
+--- Page 27 ---
+27 
+ 
+Name of the bidding entity with full address 
+Sl.NO RFP Reference 
+Section/Page Content of RFP requiring clarification Point of clarification 
+required 
+1    
+2    
+3    
+4    
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+--- Page 28 ---
+28 
+ 
+Form 1: Bid submission letter 
+<<On Bidder Letterhead>> 
+                                                                                                                                        Date: 
+To 
+The Chief Engineer(IT), 
+BusBhavan, 
+Musheerabad, Hyderabad. 
+T elangana  State Road T ransport Corporation . 
+Subject: Response to Bid for “Selection of Service Provider for implementation of 
+Electic Bus Management  System (EBMS) Software Services for Management and 
+Monitoring of Operation of Electric Buses being inducted in GCC model in TGSRTC” 
+Dear Sir , 
+1. We hereby request to be qualified with the TGSRTC as a bidder for EBMS against Bid 
+No. < >. I / We declare that all the services shall be performed strictly in accordance with  
+the bid documents  and we agree to all the terms and conditions in the bid & A TC. 
+2. We authorize TGSRTC or their authorized representatives to conduct any investigations 
+to verify the  statements, documents and information submitted and to clarify the 
+financial and technical aspects of this application. For this purpose, we hereby authorize 
+(any public official, engineer , bank, depository , manufacturer , distributor , etc.) or any 
+other person or firm to furnish pertinent information deemed necessary and requested 
+by TGSRTC to verify statements and information provided in this application or regarding 
+our competence and standing. 
+3. The names and positions of persons who may be contacted for further information, if 
+required, are as follows: 
+Name: ________________________________ 
+Designation: ________________________________ 
+T elephone: ________________________________ 
+E-mail id: ________________________________ 
+4. We declare that the statements made, and the information provided in the duly 
+completed application to TGSRTC of our knowledge, are complete, authentic and 
+accurate in every detail. On verification at any time in the future if it is found that 
+information furnished with this application and statements made therein are not true, 
+incomplete or incorrect, we hereby authorize TGSRTC to reject our application. 
+5. We confirm having submitted the information as required by you in Qualification 
+Criteria. In case you require any other further information / documentary proof in this 
+regard before evaluation of our bid, we agree to furnish the same in time to your 
+satisfaction. 
+--- Page 29 ---
+29 
+ 
+6. We undertake, if our proposal is accepted, to provide all the services put forward in 
+the bid document or such features as may subsequently be mutually agreed between us 
+and TGSRTC or its appointed representatives. 
+7. We agree for unconditional acceptance of all the terms and conditions set out in the 
+bid document  and also agree to abide by this bid response for a period of 180 days from 
+the date fixed for bid opening and it shall remain binding upon us with full force and 
+virtue. Till a formal contract is prepared and executed, this bid response, together with 
+your written acceptance thereof in your notification of award, shall constitute a binding 
+contract between us and TGSRTC. 
+8. We hereby declare that in case the contract is awarded to us, we will submit 
+Performance Security equivalent to 5% of total contract value within the stipulated time. 
+9. I/We understand that TGSRTC reserves the right to reject any application without 
+assigning any reason thereof. 
+10. I/We hereby undertake that I/We have not made any payment or illegal 
+gratification to any person/authority connected with the bid process to influence the 
+bid process and have not committed any offence under the Prevention of Corruption 
+Act 1988 in connection with the bid. 
+11. We hereby confirm that our prices include all taxes / GST . We declare that our Bid 
+Price is for the entire scope of the work as specified in the Bid document. These prices 
+are indicated in Commercial Bid submitted as part of the requirements of Bid. 
+12. It is hereby confirmed that I/We are entitled to act on behalf of our company/ firm 
+organization and  empowered to sign this document as well as such other documents, 
+which may be required in this connection. 
+13. We declare that we have read through the Bid document, all related clarifications 
+and corrigendum. 
+Thanking you, 
+Y ours faithfully, 
+(Signature of the Authorized signatory of the Bidder) 
+Name   : 
+Designation  : 
+Contact no         : 
+Email id              : 
+Date    : 
+Company Seal  : 
+Business Address : 
+--- Page 30 ---
+30 
+ 
+Form 2: Financial Capability of the Bidder 
+<<T o be completed by the Bidder >> 
+<<On the letterhead of the Chartered Accountant>> 
+<<T o be submitted along with Audited Financial Statements>> 
+                                                                                                                                        
+Date: 
+T o, 
+The Chief Engineer(IT), 
+Bus Bhavan, 
+Musheerabad, Hyderabad. 
+T elangana  State Road T ransport Corporation . 
+ 
+Dear Sir , 
+We have examined the books of accounts and other relevant records of <<Bidder / 
+consortium Partner Name along with registered address>>. On the basis of such 
+examination and according to the information and explanation given to us, and to the 
+TGSRTC of our knowledge & belief, we hereby certify that the annual turnover for the last 
+three financial years i.e. from FY 2023-24 to FY 2025-26 is as per details given below: 
+Information from Balance Sheets (in Indian Rupees) 
+ 2023-24 2024-25 2025-26 
+Annual Turnover    
+Net-worth    
+(Signature of the Chartered Accountant) 
+Name  : 
+Designation  : 
+Contact no                                      : 
+Email id                                           : 
+Membership Number  : 
+Date  : 
+Company Seal  : 
+Business Address  : 
+--- Page 31 ---
+31 
+ 
+Form 3: Details of Blacklisting/Bankruptcy with any of the Centre/ State Government / 
+Public Sector Units/ Autonomous Bodies 
+<<On the letterhead of the Bidding Organisation>> 
+Date: 
+T o, 
+Chief Engineer(IT), 
+Bus Bhavan, 
+Musheerabad, Hyderabad. 
+T elangana State Road T ransport Corporation . 
+Subject: Declaration for not being Blacklisted/Bankrupt for any of the Centre/ 
+State Government /or Public Sector Units/ Autonomous Bodies 
+Dear Sir , 
+In response to the T ender No: _____________, I/ We hereby declare that presently 
+our Company/Firm ___________________is having unblemished record and is not declared 
+blacklisted/bankrupt for any reason either indefinitely or for a particular period of time by 
+Any Central Government/State/PSU/Autonomous Body . We further declare that presently 
+our Company/ firm __________________is not blacklisted or bankrupt or has any 
+proceeding for bankruptcy , insolvency and not declared ineligible for any reasons by any 
+State/ Central Government/ PSU/ Autonomous Body on the date of Bid Submission. If this 
+declaration is found to be incorrect then without prejudice to any other action that may be 
+taken, my/ our Bid security may be forfeited in full and the bid if any to the extent accepted 
+may be cancelled. 
+Thanking you, 
+Y ours faithfully 
+ 
+(Signature of the Authorized signatory of the Bidding Organization) 
+Name  : 
+Designation  : 
+Contact no                                     : 
+Email id                                          : 
+Date  : 
+Company Seal  : 
+Business Address  : 
+--- Page 32 ---
+32 
+ 
+Form 4: List of Key Personnel 
+<<on Bidder letter head>> 
+S. No Name of Key 
+Personnel 
+Area of Expertise 
+Position/T ask assigned for this  
+job 
+1.    
+2.    
+3.    
+4.    
+5.    
+6.    
+Note: 
+1.Names of only the Key Personnel should be mentioned in the table above. 
+2. One Key Personnel cannot be assigned more than one role and more than one person 
+cannot be proposed for a key role. 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+                                                           
+--- Page 33 ---
+33 
+ 
+INTEGRITY PACT 
+Between T elangana State Road Transport Corporation (TGSRTC) hereinafter referred to as 
+“The Principal” And ( ________________________________________________) hereinafter 
+referred to as "The Bidder/Contractor" 
+ 
+Preamble 
+PRINCIP AL intends to award, under laid-down organisational procedures, contract(s) for 
+___________________________________ package. The PRINCIP AL values full compliance 
+with all relevant laws and regulations, and the principles of economical use of resources, 
+and of fairness and transparency in its relations with its Bidders/Contractors.  
+In order to achieve these goals, The PRINCIP AL will appoint an Independent External Monitor 
+{IEM}, who will monitor the tender process and the execution of the contract for compliance 
+with the principles mentioned above. 
+Section I - Commitments of PRINCIPAL 
+(1) PRINCIP AL commits itself to take all measures necessary to prevent corruption and to 
+observe the following principles: 
+a) No employee of PRINCIP AL, personally or through family members, will in connection with 
+the tender , or the execution of the contract, demand, take a promise for or accept, for 
+him/herself or third person, any material or other benefit which he/she is not legally 
+entitled to. 
+b) PRINCIP AL will, during the tender process treat all Bidder(s) with equity and fairness. 
+PRINCIP AL will in particular , before and during the tender process, provide to all Bidder(s) 
+the same information and will not provide to any Bidder(s) confidential/ additional 
+information through which the Bidder(s) could obtain an advantage in relation to the tender 
+process or the contract execution. 
+(c) PRINCIP AL will exclude from evaluation of Bids its such employee(s) who has any 
+personnel interest in the Companies/Agencies participating in the Bidding /T endering 
+process 
+(2) If Principal obtains information on the conduct of any of its employees which is a criminal 
+offence under the relevant Anti-Corruption Laws of India, or if there be a substantive 
+suspicion in this regard, he will inform its Chief Vigilance Officer and in addition can initiate 
+disciplinary actions under its Rules. 
+Section II - Commitments of the Bidder/Contractor 
+(1) The Bidder/Contractor commits himself to take all measures necessary to prevent 
+corruption. He commits himself to observe the following principles during his participation in 
+the tender process and during the contract execution. 
+--- Page 34 ---
+34 
+ 
+a) The Bidder/Contractor will not, directly or through any other person or firm, offer , 
+promise or give to PRINCIP AL, or to any of PRINCIP AL's employees involved in the tender 
+process or the execution of the contract or to any third person any material or other benefit 
+which he/she is not legally entitled to, in order to obtain in exchange an advantage during 
+the tender process or the execution of the contract.)   
+b) The Bidder/Contractor will not enter with other Bidders into any undisclosed agreement 
+or understanding, whether formal or informal with other bidders/Contractors. This applies 
+in particular to prices, specifications, certifications, subsidiary contracts, submission or non-
+submission of bids or actions to restrict competitiveness or to introduce cartelization in the 
+bidding process. 
+c) The Bidder/Contractor will not commit any offence under the relevant Anti-corruption 
+Laws of India; further , the Bidder/Contractor will not use for illegitimate purposes or for 
+purposes of restrictive competition or personal gain, or pass on to others, any information 
+provided by PRINCIP AL as part of the business relationship, regarding plans, technical 
+proposals and business details, including information contained or transmitted 
+electronically . 
+d)  The Bidder/Contractor of foreign origin shall disclose the name and address of the 
+Agents/representatives in India, if any , involved directly or indirectly in the Bidding. 
+Similarly , the Bidder/Contractor of Indian Nationality shall furnish the name and address of 
+the foreign principals, if any , involved directly or indirectly in the Bidding. 
+e) The Bidder/Contractor will, when presenting his bid, disclose any and all payments he 
+has made, is committed to or intends to make to agate, brokers or any other intermediaries 
+in connection with the award of the contract. 
+(2) The Bidder/Contractor will not instigate third persons to commit offences outlined above 
+or be an accessory to such offences. 
+Section III- Disqualification from tender process and exclusion from future contracts 
+(1) If the Bidder , before contract award, has committed a serious transgression through a 
+violation of Section II or in any other form such as to put his reliability or credibility as Bidder 
+into question, the Principal is entitled to disqualify the Bidders/ Contractors from the tender 
+process or take action as per the procedure mentioned in the "Guidelines on Banning of 
+business dealings" 
+Section IV – Compensation for Damages 
+(1) If the Principal has disqualified the Bidder[s] from the tender process prior to the award 
+according to Section III, the Principal is entitled to demand and recover the 
+damages equivalent to Earnest Money Deposit/ Bid Security . 
+(2) If the Principal has terminated the contract according to section III, or if the Principal is 
+entitled to terminate the contract according to Section III, the Principal shall be entitled to 
+--- Page 35 ---
+35 
+ 
+demand and recover from the Contractor liquidated damages of the Contract value or the 
+amount equivalent to Performance Security . 
+Section V- Previous T ransgression 
+(1)  The Bidder shall declare in his Bid that no previous transgressions occurred in the last 3 
+years with any other Public Sector Undertaking or Government Department that could 
+justify his exclusion from the tender process. 
+(2) If the Bidder makes incorrect statement on this subject, he can be disqualified from the 
+tender process or action can be taken as per the procedure mentioned in "Guidelines on 
+Banning of business dealings”. 
+Section VI - Equal treatment to all Bidders / Contractors 
+(1) The Bidders/Contractors undertake(s) to demand from all subcontractors a commitment 
+in Conformity with this Integrity Pact, and to submit it to the Principal before contract 
+signing. 
+(2) The Principal will enter into agreements with identical conditions as this one with all 
+Bidders, Contractors and Subcontractors. The Principal will disqualify from the tender 
+process all bidders who do not sign this Pact or violate its provisions 
+Section VII – Criminal Charges against violating Bidder(s)/ Contractor(s)/ 
+Subcontractor(s) 
+If PRINCIP AL obtains knowledge of conduct of a Bidder or a Contractor or his subcontractor 
+or of an employee or a representative or an associate of a Bidder or Contractor or his 
+Subcontractor which constitutes corruption, or if PRINCIP AL has substantive suspicion in this 
+regard, PRINCIP AL will inform  the Chief Vigilance Officer (CVO). 
+Section VIII - Independent External Monitor/Monitors 
+(1)  That PRINCIP AL (TGSRTC) has appointed ________________________________ as 
+Independent External Monitors for this Pact. 
+(2) The Monitor is not subject to instructions by the representatives of the parties and 
+performs his functions neutrally and independently . The monitor will have access to all 
+contract documents whenever required. It will be obligatory for him to treat the information 
+and document of the Bidders/Contractors confidential. He reports to the Managing Director 
+TGSRTC. 
+(3) The Bidder(s)/ Contractor(s) accepts that the Monitor has the right to access without 
+restriction to all Project documentation of the Principal including that provided by the 
+Contractor . The Contractor will also grant the Monitor , upon his request and demonstration 
+of a valid interest, unrestricted and unconditional access to his project documentation. The 
+same is applicable to Subcontractors. 
+--- Page 36 ---
+36 
+ 
+(4) The Monitor is under contractual obligation to treat the information and documents of 
+the Bidder(s)/ Contractor(s) with confidentiality . The Monitor has also signed Declaration on 
+Non-Disclosure of Confidential information and of 'Absence of Conflict of Interest. In case of 
+any conflict of interest arising at a later date, the IEM shall inform Managing Director , 
+TGSRTC and recuse himself/herself from that case. 
+(5) The Principal will provide to the Monitor sufficient information. about all meetings 
+among the parties related to the Project provided such meetings could have an impact on 
+the contractual relations between the Principal and the Contractor . The parties offer to the 
+Monitor the option to participate in such meetings. 
+(6) As soon as the Monitor notices, or believes to notice, a violation of this agreement, he 
+will so inform the Management of the Principal and request the Management to discontinue 
+or take corrective action, or to take other relevant action. The monitor can in this regard 
+submit non-binding recommendations. Beyond this, the Monitor has no right to demand 
+from the parties that they act in a specific manner , refrain from action or tolerate action. 
+(7) The Monitor will submit a written report to the VC & MD of TGSRTC within 8 to 10 weeks 
+from the date of reference or intimation to him by the Principal and should the occasion 
+arise, submit proposals for correcting problematic situations. 
+(8) If the Monitor has reported to the VC & MD of TGSRTC, a substantiated suspicion of an 
+offence under relevant IPC/ PC Act, and the Managing Director has not within the reasonable 
+time taken visible action to proceed against such offence or reported it to the Chief 
+Vigilance Officer , the Monitor may also transmit this information directly to the Central 
+Vigilance Commissioner . 
+(9) The word Monitor will include both singular and plural 
+Section IX - Pact Duration 
+This Pact begins when both parties have legally signed it. it expires for the Contractor 12 
+months after the last payment under the contract, and for all other Bidders 6 months after 
+the contract has been awarded. Any violation of the same would entail disqualification of 
+the bidders and exclusion from future business dealings. 
+If any claim is made/ lodged during this time, the same shall be binding and continue to be 
+valid despite the lapse of this pact as specified above, unless it is discharged / determined 
+by VC & MD of TGSRTC. 
+Section X - Other Provisions 
+(1) This agreement is subject to Indian Law . Place of performance and jurisdiction is the 
+Registered Office of the Principal i.e. T elangana State. 
+(2) Changes and supplements as well as termination notices need to be made in writing. Side 
+agreements have not been made. 
+--- Page 37 ---
+37 
+ 
+(3) If the Contractor is a partnership or a consortium. this agreement must be signed by all 
+partners or consortium members. 
+(4) Should one or several provisions of this agreement turn out to be invalid, the remainder 
+of this agreement remains valid. In this case, the parties will strive to come to an agreement 
+to their original intentions. 
+(5) Issues like Warranty / Guarantee etc. shall be outside the purview of lEMs. 
+(6) In the event of any contradiction between the integrity pact and its Annexures, the Clause 
+in the  integrity Pact will prevail. 
+ 
+ 
+ (For & On behalf of PRINCIP AL)                       (For & On behalf of Bidder/Contractor) 
+ 
+(Office Seal)                                                      (Office Seal) 
+ 
+Place: _________________ 
+Date: _____________ 
+Witness 1 :________________________________ 
+(Name & Address) ________________________________ 
+Witness 2 : ________________________________ 
+(Name & Address) ________________________________ 
+-------------------xxxxxxxx----------------- 

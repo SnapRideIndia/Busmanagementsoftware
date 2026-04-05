@@ -4,13 +4,16 @@ import {
   LayoutDashboard, FileText, Bus, Users, MapPin, Zap,
   BarChart3, Calculator, Receipt, FileBarChart, AlertTriangle,
   Settings, LogOut, ChevronLeft, ChevronRight, Menu, IndianRupee, Route,
-  ClipboardList, UsersRound, Shield, Sliders, Scale
+  ClipboardList, UsersRound, Shield, Sliders, Scale,   Warehouse, GitBranch, Milestone,
 } from "lucide-react";
 import { useState } from "react";
 
 const navItems = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/tenders", label: "Tenders", icon: FileText },
+  { to: "/depots", label: "Depots", icon: Warehouse },
+  { to: "/bus-routes", label: "Routes", icon: GitBranch },
+  { to: "/bus-stops", label: "Stops", icon: Milestone },
   { to: "/buses", label: "Bus Master", icon: Bus },
   { to: "/drivers", label: "Drivers", icon: Users },
   { to: "/duties", label: "Duty Roster", icon: ClipboardList },
@@ -26,7 +29,7 @@ const navItems = [
   { to: "/revenue-details", label: "Revenue", icon: IndianRupee },
   { to: "/km-details", label: "KM Tracking", icon: Route },
   { to: "/passenger-details", label: "Passengers", icon: UsersRound },
-  { to: "/business-rules", label: "Rules (GCC)", icon: Sliders },
+  { to: "/business-rules", label: "Business rules", icon: Sliders },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 

@@ -1,5 +1,7 @@
-import { useState, useEffect } from "react";
-import API, { formatApiError } from "../lib/api";
+import { useState, useEffect, useCallback } from "react";
+import API, { formatApiError, buildQuery, unwrapListResponse } from "../lib/api";
+import TablePaginationBar from "../components/TablePaginationBar";
+import AsyncPanel from "../components/AsyncPanel";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
@@ -11,17 +13,34 @@ import { toast } from "sonner";
 export default function SettingsPage() {
   const [settings, setSettings] = useState([]);
   const [editValues, setEditValues] = useState({});
+  const [page, setPage] = useState(1);
+  const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 20 });
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    setLoading(true);
+    setFetchError(null);
     try {
-      const { data } = await API.get("/settings");
-      setSettings(data);
+      const { data } = await API.get("/settings", { params: buildQuery({ page, limit: 20 }) });
+      const u = unwrapListResponse(data);
+      setSettings(u.items);
+      setMeta({ total: u.total, pages: u.pages, limit: u.limit });
       const vals = {};
-      data.forEach((s) => { vals[s.key] = s.value; });
-      setEditValues(vals);
-    } catch {}
-  };
-  useEffect(() => { load(); }, []);
+      u.items.forEach((s) => {
+        vals[s.key] = s.value;
+      });
+      setEditValues((prev) => ({ ...prev, ...vals }));
+    } catch (err) {
+      setFetchError(formatApiError(err.response?.data?.detail) || err.message || "Failed to load settings");
+      setSettings([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [page]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const handleSave = async (key) => {
     try {
@@ -60,8 +79,10 @@ export default function SettingsPage() {
       <Card className="border-gray-200 shadow-sm">
         <CardHeader><CardTitle className="text-base flex items-center gap-2"><Settings size={16} /> System Configuration</CardTitle></CardHeader>
         <CardContent>
+          {fetchError ? <AsyncPanel error={fetchError} onRetry={load} minHeight="min-h-[120px]" /> : null}
+          {!fetchError && loading && settings.length === 0 ? <AsyncPanel loading minHeight="min-h-[200px]" /> : null}
           <div className="space-y-4">
-            {settings.map((s) => (
+            {!fetchError && settings.map((s) => (
               <div key={s.key} className="flex items-center gap-4 p-3 bg-gray-50 rounded-md" data-testid={`setting-${s.key}`}>
                 <div className="flex-1">
                   <Label className="text-sm font-medium">{labelMap[s.key] || s.key}</Label>
@@ -78,7 +99,11 @@ export default function SettingsPage() {
                 </Button>
               </div>
             ))}
+            {!fetchError && !loading && settings.length === 0 ? (
+              <p className="text-center text-gray-500 py-8 text-sm">No settings on this page.</p>
+            ) : null}
           </div>
+          <TablePaginationBar page={page} pages={meta.pages} total={meta.total} limit={meta.limit} onPageChange={setPage} />
         </CardContent>
       </Card>
 

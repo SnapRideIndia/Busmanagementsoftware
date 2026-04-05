@@ -41,9 +41,13 @@
   @apply bg-[#16A34A] text-white hover:bg-[#15803D] transition-colors duration-150 px-4 py-2 rounded-lg text-sm font-medium;
 }
 
-/* Leaflet fix */
+/* Leaflet: keep map layers from competing with app UI (Radix portals use z-[1050]+).
+   Leaflet panes use z-index 400–1000; without isolation they paint above z-50 dialogs/selects. */
 .leaflet-container {
   width: 100%;
   height: 100%;
   border-radius: 0.5rem;
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
 }

@@ -3,10 +3,14 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import Layout from "./components/Layout";
+import RingLoader from "./components/RingLoader";
 import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
 import TenderPage from "./pages/TenderPage";
 import BusPage from "./pages/BusPage";
+import DepotsPage from "./pages/DepotsPage";
+import RoutesPage from "./pages/RoutesPage";
+import StopsPage from "./pages/StopsPage";
 import DriverPage from "./pages/DriverPage";
 import LiveOpsPage from "./pages/LiveOpsPage";
 import EnergyPage from "./pages/EnergyPage";
@@ -28,7 +32,7 @@ function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-[#F8F9FA]">
-      <div className="w-8 h-8 border-3 border-[#134219] border-t-transparent rounded-full animate-spin" />
+      <RingLoader size="lg" label="Signing in…" />
     </div>
   );
   if (!user) return <Navigate to="/login" replace />;
@@ -37,7 +41,11 @@ function ProtectedRoute({ children }) {
 
 function PublicRoute({ children }) {
   const { user, loading } = useAuth();
-  if (loading) return null;
+  if (loading) return (
+    <div className="min-h-screen flex items-center justify-center bg-[#F8F9FA]">
+      <RingLoader label="Loading…" />
+    </div>
+  );
   if (user) return <Navigate to="/dashboard" replace />;
   return children;
 }
@@ -51,6 +59,10 @@ function App() {
           <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
           <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
           <Route path="/tenders" element={<ProtectedRoute><TenderPage /></ProtectedRoute>} />
+          <Route path="/depots" element={<ProtectedRoute><DepotsPage /></ProtectedRoute>} />
+          <Route path="/bus-routes" element={<ProtectedRoute><RoutesPage /></ProtectedRoute>} />
+          <Route path="/bus-stops" element={<ProtectedRoute><StopsPage /></ProtectedRoute>} />
+          <Route path="/routes" element={<Navigate to="/bus-routes" replace />} />
           <Route path="/buses" element={<ProtectedRoute><BusPage /></ProtectedRoute>} />
           <Route path="/drivers" element={<ProtectedRoute><DriverPage /></ProtectedRoute>} />
           <Route path="/live-operations" element={<ProtectedRoute><LiveOpsPage /></ProtectedRoute>} />

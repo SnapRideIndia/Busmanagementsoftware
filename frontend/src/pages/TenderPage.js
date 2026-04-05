@@ -1,5 +1,7 @@
-import { useState, useEffect } from "react";
-import API, { formatApiError } from "../lib/api";
+import { useState, useEffect, useCallback } from "react";
+import API, { formatApiError, buildQuery, unwrapListResponse } from "../lib/api";
+import TablePaginationBar from "../components/TablePaginationBar";
+import TableLoadRows from "../components/TableLoadRows";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
@@ -15,14 +17,32 @@ const empty = { tender_id: "", pk_rate: "", energy_rate: "", subsidy_rate: "0", 
 
 export default function TenderPage() {
   const [tenders, setTenders] = useState([]);
+  const [page, setPage] = useState(1);
+  const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 20 });
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(empty);
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
 
-  const load = async () => {
-    try { const { data } = await API.get("/tenders"); setTenders(data); } catch {}
-  };
-  useEffect(() => { load(); }, []);
+  const load = useCallback(async () => {
+    setLoading(true);
+    setFetchError(null);
+    try {
+      const { data } = await API.get("/tenders", { params: buildQuery({ page, limit: 20 }) });
+      const u = unwrapListResponse(data);
+      setTenders(u.items);
+      setMeta({ total: u.total, pages: u.pages, limit: u.limit });
+    } catch (err) {
+      setFetchError(formatApiError(err.response?.data?.detail) || err.message || "Failed to load tenders");
+      setTenders([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [page]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const handleSave = async () => {
     try {
@@ -72,29 +92,38 @@ export default function TenderPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {tenders.map((t) => (
-                <TableRow key={t.tender_id} className="hover:bg-gray-50" data-testid={`tender-row-${t.tender_id}`}>
-                  <TableCell className="font-mono text-sm font-medium">{t.tender_id}</TableCell>
-                  <TableCell className="text-sm">{t.description}</TableCell>
-                  <TableCell className="text-right font-mono">{t.pk_rate}</TableCell>
-                  <TableCell className="text-right font-mono">{t.energy_rate}</TableCell>
-                  <TableCell className="text-right font-mono">{t.subsidy_rate} ({t.subsidy_type})</TableCell>
-                  <TableCell>
-                    <Badge variant={t.status === "active" ? "default" : "secondary"} className={t.status === "active" ? "bg-green-100 text-green-700 hover:bg-green-100" : ""}>
-                      {t.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <Button variant="ghost" size="icon" onClick={() => openEdit(t)} data-testid={`edit-tender-${t.tender_id}`}><Pencil size={14} /></Button>
-                      <Button variant="ghost" size="icon" onClick={() => handleDelete(t.tender_id)} data-testid={`delete-tender-${t.tender_id}`}><Trash2 size={14} className="text-red-500" /></Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {tenders.length === 0 && <TableRow><TableCell colSpan={7} className="text-center text-gray-400 py-8">No tenders found</TableCell></TableRow>}
+              <TableLoadRows
+                colSpan={7}
+                loading={loading}
+                error={fetchError}
+                onRetry={load}
+                isEmpty={tenders.length === 0}
+                emptyMessage="No tenders found"
+              >
+                {tenders.map((t) => (
+                  <TableRow key={t.tender_id} className="hover:bg-gray-50" data-testid={`tender-row-${t.tender_id}`}>
+                    <TableCell className="font-mono text-sm font-medium">{t.tender_id}</TableCell>
+                    <TableCell className="text-sm">{t.description}</TableCell>
+                    <TableCell className="text-right font-mono">{t.pk_rate}</TableCell>
+                    <TableCell className="text-right font-mono">{t.energy_rate}</TableCell>
+                    <TableCell className="text-right font-mono">{t.subsidy_rate} ({t.subsidy_type})</TableCell>
+                    <TableCell>
+                      <Badge variant={t.status === "active" ? "default" : "secondary"} className={t.status === "active" ? "bg-green-100 text-green-700 hover:bg-green-100" : ""}>
+                        {t.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <Button variant="ghost" size="icon" onClick={() => openEdit(t)} data-testid={`edit-tender-${t.tender_id}`}><Pencil size={14} /></Button>
+                        <Button variant="ghost" size="icon" onClick={() => handleDelete(t.tender_id)} data-testid={`delete-tender-${t.tender_id}`}><Trash2 size={14} className="text-red-500" /></Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableLoadRows>
             </TableBody>
           </Table>
+          <TablePaginationBar page={page} pages={meta.pages} total={meta.total} limit={meta.limit} onPageChange={setPage} />
         </CardContent>
       </Card>
 

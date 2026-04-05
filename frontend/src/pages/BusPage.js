@@ -1,5 +1,7 @@
-import { useState, useEffect } from "react";
-import API, { formatApiError } from "../lib/api";
+import { useState, useEffect, useCallback } from "react";
+import API, { formatApiError, buildQuery, unwrapListResponse, fetchAllPaginated } from "../lib/api";
+import TablePaginationBar from "../components/TablePaginationBar";
+import TableLoadRows from "../components/TableLoadRows";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
@@ -24,14 +26,50 @@ export default function BusPage() {
   const [assignOpen, setAssignOpen] = useState(false);
   const [assignBus, setAssignBus] = useState("");
   const [assignTender, setAssignTender] = useState("");
+  const [filterDepot, setFilterDepot] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+  const [fleetDepots, setFleetDepots] = useState([]);
+  const [page, setPage] = useState(1);
+  const [listMeta, setListMeta] = useState({ total: 0, pages: 1, limit: 20 });
+  const [allBusesForAssign, setAllBusesForAssign] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
 
-  const load = async () => {
+  useEffect(() => {
+    (async () => {
+      try {
+        const depots = await fetchAllPaginated("/depots", {});
+        setFleetDepots(depots.map((d) => d.name).filter(Boolean).sort());
+      } catch {
+        setFleetDepots([]);
+      }
+    })();
+  }, []);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setFetchError(null);
     try {
-      const [b, t] = await Promise.all([API.get("/buses"), API.get("/tenders")]);
-      setBuses(b.data); setTenders(t.data);
-    } catch {}
-  };
-  useEffect(() => { load(); }, []);
+      const [b, allBuses, tenderRows] = await Promise.all([
+        API.get("/buses", { params: buildQuery({ depot: filterDepot, status: filterStatus, page, limit: 20 }) }),
+        fetchAllPaginated("/buses", {}),
+        fetchAllPaginated("/tenders", {}),
+      ]);
+      const bu = unwrapListResponse(b.data);
+      setBuses(bu.items);
+      setListMeta({ total: bu.total, pages: bu.pages, limit: bu.limit });
+      setTenders(tenderRows);
+      setAllBusesForAssign(allBuses);
+    } catch (err) {
+      setFetchError(formatApiError(err.response?.data?.detail) || err.message || "Failed to load buses");
+      setBuses([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [filterDepot, filterStatus, page]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const handleSave = async () => {
     try {
@@ -76,6 +114,30 @@ export default function BusPage() {
         </div>
       </div>
 
+      <div className="flex flex-wrap gap-3 mb-4 items-end">
+        <div className="space-y-1">
+          <label className="text-xs font-medium uppercase text-gray-500">Depot</label>
+          <Select value={filterDepot || "all"} onValueChange={(v) => { setFilterDepot(v === "all" ? "" : v); setPage(1); }}>
+            <SelectTrigger className="w-44"><SelectValue placeholder="All Depots" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Depots</SelectItem>
+              {fleetDepots.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium uppercase text-gray-500">Status</label>
+          <Select value={filterStatus || "all"} onValueChange={(v) => { setFilterStatus(v === "all" ? "" : v); setPage(1); }}>
+            <SelectTrigger className="w-36"><SelectValue placeholder="All" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="active">active</SelectItem>
+              <SelectItem value="inactive">inactive</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
       <Card className="border-gray-200 shadow-sm">
         <CardContent className="p-0">
           <Table>
@@ -85,31 +147,40 @@ export default function BusPage() {
               <TableHead>Status</TableHead><TableHead className="text-right">Actions</TableHead>
             </TableRow></TableHeader>
             <TableBody>
-              {buses.map((b) => (
-                <TableRow key={b.bus_id} className="hover:bg-gray-50" data-testid={`bus-row-${b.bus_id}`}>
-                  <TableCell className="font-mono font-medium">{b.bus_id}</TableCell>
-                  <TableCell>{busTypeLabel(b.bus_type)}</TableCell>
-                  <TableCell className="font-mono">{b.capacity}</TableCell>
-                  <TableCell className="font-mono text-sm">{b.tender_id || "-"}</TableCell>
-                  <TableCell>{b.depot || "-"}</TableCell>
-                  <TableCell className="font-mono">{b.kwh_per_km}</TableCell>
-                  <TableCell>
-                    <Badge className={b.status === "active" ? "bg-green-100 text-green-700 hover:bg-green-100" : b.status === "maintenance" ? "bg-yellow-100 text-yellow-700 hover:bg-yellow-100" : "bg-gray-100 text-gray-600 hover:bg-gray-100"}>
-                      {b.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <Button variant="ghost" size="icon" onClick={() => viewDetail(b.bus_id)} data-testid={`view-bus-${b.bus_id}`}><Eye size={14} /></Button>
-                      <Button variant="ghost" size="icon" onClick={() => { setForm(b); setEditing(b.bus_id); setOpen(true); }} data-testid={`edit-bus-${b.bus_id}`}><Pencil size={14} /></Button>
-                      <Button variant="ghost" size="icon" onClick={() => handleDelete(b.bus_id)} data-testid={`delete-bus-${b.bus_id}`}><Trash2 size={14} className="text-red-500" /></Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {buses.length === 0 && <TableRow><TableCell colSpan={8} className="text-center text-gray-400 py-8">No buses found</TableCell></TableRow>}
+              <TableLoadRows
+                colSpan={8}
+                loading={loading}
+                error={fetchError}
+                onRetry={load}
+                isEmpty={buses.length === 0}
+                emptyMessage="No buses found"
+              >
+                {buses.map((b) => (
+                  <TableRow key={b.bus_id} className="hover:bg-gray-50" data-testid={`bus-row-${b.bus_id}`}>
+                    <TableCell className="font-mono font-medium">{b.bus_id}</TableCell>
+                    <TableCell>{busTypeLabel(b.bus_type)}</TableCell>
+                    <TableCell className="font-mono">{b.capacity}</TableCell>
+                    <TableCell className="font-mono text-sm">{b.tender_id || "-"}</TableCell>
+                    <TableCell>{b.depot || "-"}</TableCell>
+                    <TableCell className="font-mono">{b.kwh_per_km}</TableCell>
+                    <TableCell>
+                      <Badge className={b.status === "active" ? "bg-green-100 text-green-700 hover:bg-green-100" : b.status === "maintenance" ? "bg-yellow-100 text-yellow-700 hover:bg-yellow-100" : "bg-gray-100 text-gray-600 hover:bg-gray-100"}>
+                        {b.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <Button variant="ghost" size="icon" onClick={() => viewDetail(b.bus_id)} data-testid={`view-bus-${b.bus_id}`}><Eye size={14} /></Button>
+                        <Button variant="ghost" size="icon" onClick={() => { setForm(b); setEditing(b.bus_id); setOpen(true); }} data-testid={`edit-bus-${b.bus_id}`}><Pencil size={14} /></Button>
+                        <Button variant="ghost" size="icon" onClick={() => handleDelete(b.bus_id)} data-testid={`delete-bus-${b.bus_id}`}><Trash2 size={14} className="text-red-500" /></Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableLoadRows>
             </TableBody>
           </Table>
+          <TablePaginationBar page={page} pages={listMeta.pages} total={listMeta.total} limit={listMeta.limit} onPageChange={setPage} />
         </CardContent>
       </Card>
 
@@ -177,7 +248,7 @@ export default function BusPage() {
               <Label>Bus</Label>
               <Select value={assignBus} onValueChange={setAssignBus}>
                 <SelectTrigger data-testid="assign-bus-select"><SelectValue placeholder="Select bus" /></SelectTrigger>
-                <SelectContent>{buses.map((b) => <SelectItem key={b.bus_id} value={b.bus_id}>{b.bus_id}</SelectItem>)}</SelectContent>
+                <SelectContent>{allBusesForAssign.map((b) => <SelectItem key={b.bus_id} value={b.bus_id}>{b.bus_id}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div className="space-y-2">

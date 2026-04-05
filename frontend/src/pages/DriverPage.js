@@ -1,5 +1,7 @@
-import { useState, useEffect } from "react";
-import API, { formatApiError } from "../lib/api";
+import { useState, useEffect, useCallback } from "react";
+import API, { formatApiError, buildQuery, unwrapListResponse, fetchAllPaginated, messageFromAxiosError } from "../lib/api";
+import TablePaginationBar from "../components/TablePaginationBar";
+import TableLoadRows from "../components/TableLoadRows";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
@@ -24,14 +26,59 @@ export default function DriverPage() {
   const [assignOpen, setAssignOpen] = useState(false);
   const [assignDriver, setAssignDriver] = useState("");
   const [assignBus, setAssignBus] = useState("");
+  const [filterDepot, setFilterDepot] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+  const [page, setPage] = useState(1);
+  const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 20 });
+  const [depotNames, setDepotNames] = useState([]);
+  const [allDriversForAssign, setAllDriversForAssign] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
 
-  const load = async () => {
+  useEffect(() => {
+    (async () => {
+      try {
+        const depots = await fetchAllPaginated("/depots", {});
+        setDepotNames(depots.map((x) => x.name).filter(Boolean).sort());
+      } catch {
+        setDepotNames([]);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const drivers = await fetchAllPaginated("/drivers", {});
+        setAllDriversForAssign(drivers);
+      } catch {
+        setAllDriversForAssign([]);
+      }
+    })();
+  }, []);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setFetchError(null);
     try {
-      const [d, b] = await Promise.all([API.get("/drivers"), API.get("/buses")]);
-      setDrivers(d.data); setBuses(b.data);
-    } catch {}
-  };
-  useEffect(() => { load(); }, []);
+      const [d, busItems] = await Promise.all([
+        API.get("/drivers", { params: buildQuery({ depot: filterDepot, status: filterStatus, page, limit: 20 }) }),
+        fetchAllPaginated("/buses", {}),
+      ]);
+      const du = unwrapListResponse(d.data);
+      setDrivers(du.items);
+      setMeta({ total: du.total, pages: du.pages, limit: du.limit });
+      setBuses(busItems);
+    } catch (err) {
+      setFetchError(messageFromAxiosError(err, "Failed to load drivers"));
+      setDrivers([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [filterDepot, filterStatus, page]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const handleSave = async () => {
     try {
@@ -71,6 +118,32 @@ export default function DriverPage() {
         </div>
       </div>
 
+      <div className="flex flex-wrap gap-3 mb-4 items-end">
+        <div className="space-y-1">
+          <label className="text-xs font-medium uppercase text-gray-500">Depot (by assigned bus)</label>
+          <Select value={filterDepot || "all"} onValueChange={(v) => { setFilterDepot(v === "all" ? "" : v); setPage(1); }}>
+            <SelectTrigger className="w-48"><SelectValue placeholder="All Depots" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Depots</SelectItem>
+              {depotNames.map((d) => (
+                <SelectItem key={d} value={d}>{d}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium uppercase text-gray-500">Status</label>
+          <Select value={filterStatus || "all"} onValueChange={(v) => { setFilterStatus(v === "all" ? "" : v); setPage(1); }}>
+            <SelectTrigger className="w-36"><SelectValue placeholder="All" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="active">active</SelectItem>
+              <SelectItem value="inactive">inactive</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
       <Card className="border-gray-200 shadow-sm">
         <CardContent className="p-0">
           <Table>
@@ -79,30 +152,39 @@ export default function DriverPage() {
               <TableHead>Bus</TableHead><TableHead>Score</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Actions</TableHead>
             </TableRow></TableHeader>
             <TableBody>
-              {drivers.map((d) => (
-                <TableRow key={d.license_number} className="hover:bg-gray-50" data-testid={`driver-row-${d.license_number}`}>
-                  <TableCell className="font-medium">{d.name}</TableCell>
-                  <TableCell className="font-mono text-sm">{d.license_number}</TableCell>
-                  <TableCell>{d.phone || "-"}</TableCell>
-                  <TableCell className="font-mono">{d.bus_id || "-"}</TableCell>
-                  <TableCell>
-                    <span className={`font-mono font-medium ${d.performance_score >= 90 ? "text-green-600" : d.performance_score >= 70 ? "text-yellow-600" : "text-red-600"}`}>
-                      {d.performance_score?.toFixed(1)}
-                    </span>
-                  </TableCell>
-                  <TableCell><Badge className={d.status === "active" ? "bg-green-100 text-green-700 hover:bg-green-100" : "bg-gray-100 text-gray-600 hover:bg-gray-100"}>{d.status}</Badge></TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <Button variant="ghost" size="icon" onClick={() => viewPerf(d.license_number)} data-testid={`perf-driver-${d.license_number}`}><BarChart3 size={14} /></Button>
-                      <Button variant="ghost" size="icon" onClick={() => { setForm(d); setEditing(d.license_number); setOpen(true); }} data-testid={`edit-driver-${d.license_number}`}><Pencil size={14} /></Button>
-                      <Button variant="ghost" size="icon" onClick={() => handleDelete(d.license_number)} data-testid={`delete-driver-${d.license_number}`}><Trash2 size={14} className="text-red-500" /></Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {drivers.length === 0 && <TableRow><TableCell colSpan={7} className="text-center text-gray-400 py-8">No drivers found</TableCell></TableRow>}
+              <TableLoadRows
+                colSpan={7}
+                loading={loading}
+                error={fetchError}
+                onRetry={load}
+                isEmpty={drivers.length === 0}
+                emptyMessage="No drivers found"
+              >
+                {drivers.map((d) => (
+                  <TableRow key={d.license_number} className="hover:bg-gray-50" data-testid={`driver-row-${d.license_number}`}>
+                    <TableCell className="font-medium">{d.name}</TableCell>
+                    <TableCell className="font-mono text-sm">{d.license_number}</TableCell>
+                    <TableCell>{d.phone || "-"}</TableCell>
+                    <TableCell className="font-mono">{d.bus_id || "-"}</TableCell>
+                    <TableCell>
+                      <span className={`font-mono font-medium ${d.performance_score >= 90 ? "text-green-600" : d.performance_score >= 70 ? "text-yellow-600" : "text-red-600"}`}>
+                        {d.performance_score?.toFixed(1)}
+                      </span>
+                    </TableCell>
+                    <TableCell><Badge className={d.status === "active" ? "bg-green-100 text-green-700 hover:bg-green-100" : "bg-gray-100 text-gray-600 hover:bg-gray-100"}>{d.status}</Badge></TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <Button variant="ghost" size="icon" onClick={() => viewPerf(d.license_number)} data-testid={`perf-driver-${d.license_number}`}><BarChart3 size={14} /></Button>
+                        <Button variant="ghost" size="icon" onClick={() => { setForm(d); setEditing(d.license_number); setOpen(true); }} data-testid={`edit-driver-${d.license_number}`}><Pencil size={14} /></Button>
+                        <Button variant="ghost" size="icon" onClick={() => handleDelete(d.license_number)} data-testid={`delete-driver-${d.license_number}`}><Trash2 size={14} className="text-red-500" /></Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableLoadRows>
             </TableBody>
           </Table>
+          <TablePaginationBar page={page} pages={meta.pages} total={meta.total} limit={meta.limit} onPageChange={setPage} />
         </CardContent>
       </Card>
 
@@ -153,7 +235,7 @@ export default function DriverPage() {
               <Label>Driver</Label>
               <Select value={assignDriver} onValueChange={setAssignDriver}>
                 <SelectTrigger data-testid="assign-driver-select"><SelectValue placeholder="Select driver" /></SelectTrigger>
-                <SelectContent>{drivers.map((d) => <SelectItem key={d.license_number} value={d.license_number}>{d.name} ({d.license_number})</SelectItem>)}</SelectContent>
+                <SelectContent>{allDriversForAssign.map((d) => <SelectItem key={d.license_number} value={d.license_number}>{d.name} ({d.license_number})</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div className="space-y-2">

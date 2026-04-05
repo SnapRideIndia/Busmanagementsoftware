@@ -1,5 +1,8 @@
-import { useState, useEffect } from "react";
-import API, { formatApiError } from "../lib/api";
+import { useState, useEffect, useCallback } from "react";
+import API, { formatApiError, buildQuery, unwrapListResponse, fetchAllPaginated, getBackendOrigin } from "../lib/api";
+import TablePaginationBar from "../components/TablePaginationBar";
+import TableLoadRows from "../components/TableLoadRows";
+import { formatDateIN } from "../lib/dates";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
@@ -7,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { Badge } from "../components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Receipt, FileText, Download, Eye, IndianRupee } from "lucide-react";
 import { toast } from "sonner";
 
@@ -17,11 +21,53 @@ export default function BillingPage() {
   const [selected, setSelected] = useState(null);
   const [form, setForm] = useState({ period_start: "", period_end: "", depot: "" });
   const [generating, setGenerating] = useState(false);
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
+  const [filterDepot, setFilterDepot] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+  const [depotNames, setDepotNames] = useState([]);
+  const [page, setPage] = useState(1);
+  const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 20 });
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
 
-  const load = async () => {
-    try { const { data } = await API.get("/billing"); setInvoices(data); } catch {}
-  };
-  useEffect(() => { load(); }, []);
+  const load = useCallback(async () => {
+    setLoading(true);
+    setFetchError(null);
+    try {
+      const { data } = await API.get("/billing", {
+        params: buildQuery({
+          date_from: filterFrom,
+          date_to: filterTo,
+          depot: filterDepot,
+          status: filterStatus,
+          page,
+          limit: 20,
+        }),
+      });
+      const u = unwrapListResponse(data);
+      setInvoices(u.items);
+      setMeta({ total: u.total, pages: u.pages, limit: u.limit });
+    } catch (err) {
+      setFetchError(formatApiError(err.response?.data?.detail) || err.message || "Failed to load invoices");
+      setInvoices([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [filterFrom, filterTo, filterDepot, filterStatus, page]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const depots = await fetchAllPaginated("/depots", {});
+        setDepotNames(depots.map((d) => d.name).filter(Boolean).sort());
+      } catch {
+        setDepotNames([]);
+      }
+    })();
+  }, []);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const handleGenerate = async () => {
     if (!form.period_start || !form.period_end) { toast.error("Select period"); return; }
@@ -40,10 +86,12 @@ export default function BillingPage() {
   };
 
   const exportPdf = (id) => {
-    window.open(`${process.env.REACT_APP_BACKEND_URL}/api/billing/${id}/export-pdf`, "_blank");
+    const o = getBackendOrigin();
+    window.open(`${o || ""}/api/billing/${id}/export-pdf`, "_blank");
   };
   const exportExcel = (id) => {
-    window.open(`${process.env.REACT_APP_BACKEND_URL}/api/billing/${id}/export-excel`, "_blank");
+    const o = getBackendOrigin();
+    window.open(`${o || ""}/api/billing/${id}/export-excel`, "_blank");
   };
 
   return (
@@ -55,6 +103,44 @@ export default function BillingPage() {
         </Button>
       </div>
 
+      <Card className="border-gray-200 shadow-sm mb-4">
+        <CardContent className="p-4 flex flex-wrap gap-3 items-end">
+          <div className="space-y-1">
+            <label className="text-xs font-medium uppercase text-gray-500">Period from</label>
+            <Input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} className="w-40" data-testid="billing-filter-from" />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium uppercase text-gray-500">Period to</label>
+            <Input type="date" value={filterTo} onChange={(e) => setFilterTo(e.target.value)} className="w-40" data-testid="billing-filter-to" />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium uppercase text-gray-500">Depot</label>
+            <Select value={filterDepot || "all"} onValueChange={(v) => { setFilterDepot(v === "all" ? "" : v); setPage(1); }}>
+              <SelectTrigger className="w-44" data-testid="billing-filter-depot"><SelectValue placeholder="All" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Depots</SelectItem>
+                {depotNames.map((d) => (
+                  <SelectItem key={d} value={d}>{d}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium uppercase text-gray-500">Status</label>
+            <Select value={filterStatus || "all"} onValueChange={(v) => { setFilterStatus(v === "all" ? "" : v); setPage(1); }}>
+              <SelectTrigger className="w-36" data-testid="billing-filter-status"><SelectValue placeholder="All" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="draft">draft</SelectItem>
+                <SelectItem value="submitted">submitted</SelectItem>
+                <SelectItem value="paid">paid</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <Button type="button" variant="outline" size="sm" onClick={() => { setFilterFrom(""); setFilterTo(""); setFilterDepot(""); setFilterStatus(""); setPage(1); }}>Clear filters</Button>
+        </CardContent>
+      </Card>
+
       <Card className="border-gray-200 shadow-sm">
         <CardContent className="p-0">
           <Table>
@@ -65,10 +151,18 @@ export default function BillingPage() {
               <TableHead>Status</TableHead><TableHead className="text-right">Actions</TableHead>
             </TableRow></TableHeader>
             <TableBody>
-              {invoices.map((inv) => (
+              <TableLoadRows
+                colSpan={9}
+                loading={loading}
+                error={fetchError}
+                onRetry={load}
+                isEmpty={invoices.length === 0}
+                emptyMessage="No invoices yet. Generate one to get started."
+              >
+                {invoices.map((inv) => (
                 <TableRow key={inv.invoice_id} className="hover:bg-gray-50" data-testid={`invoice-row-${inv.invoice_id}`}>
                   <TableCell className="font-mono font-medium text-[#C8102E]">{inv.invoice_id}</TableCell>
-                  <TableCell className="text-sm">{inv.period_start} - {inv.period_end}</TableCell>
+                  <TableCell className="text-sm">{formatDateIN(inv.period_start)} – {formatDateIN(inv.period_end)}</TableCell>
                   <TableCell>{inv.depot}</TableCell>
                   <TableCell className="text-right font-mono">{inv.base_payment?.toLocaleString()}</TableCell>
                   <TableCell className="text-right font-mono text-blue-600">{inv.energy_adjustment?.toLocaleString()}</TableCell>
@@ -83,10 +177,11 @@ export default function BillingPage() {
                     </div>
                   </TableCell>
                 </TableRow>
-              ))}
-              {invoices.length === 0 && <TableRow><TableCell colSpan={9} className="text-center text-gray-400 py-8">No invoices yet. Generate one to get started.</TableCell></TableRow>}
+                ))}
+              </TableLoadRows>
             </TableBody>
           </Table>
+          <TablePaginationBar page={page} pages={meta.pages} total={meta.total} limit={meta.limit} onPageChange={setPage} />
         </CardContent>
       </Card>
 
