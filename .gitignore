@@ -82,14 +82,8 @@ memory/test_credentials.md
 android-sdk/frontend/node_modules/.cache/default-development/1.pack
 frontend/node_modules/.cache/default-development/3.pack
 frontend/node_modules/.cache/default-development/1.pack
--e 
-# Environment files
-*.env
-*.env.*
+# Environment files are managed by the deployment system
 frontend/node_modules/.cache/default-development/8.pack
 frontend/node_modules/.cache/default-development/10.pack
--e 
-# Environment files
-*.env
-*.env.*
+# Environment files are managed by the deployment system
 frontend/node_modules/.cache/default-development/14.pack

@@ -308,53 +308,53 @@ async def get_dashboard(date_from: str = "", date_to: str = "", depot: str = "",
     query = {}
     if depot:
         query["depot"] = depot
-    buses = await db.buses.find(query, {"_id": 0}).to_list(1000)
+    # Buses — only needed fields
+    buses = await db.buses.find(query, {"_id": 0, "bus_id": 1, "status": 1, "depot": 1}).to_list(1000)
     total_buses = len(buses)
     active_buses = len([b for b in buses if b.get("status") == "active"])
-    drivers = await db.drivers.find({}, {"_id": 0}).to_list(1000)
-    total_drivers = len(drivers)
-    active_drivers = len([d for d in drivers if d.get("status") == "active"])
-    trip_query = {}
+    # Drivers — count only
+    total_drivers = await db.drivers.count_documents({})
+    active_drivers = await db.drivers.count_documents({"status": "active"})
+    # Trips — aggregation for totals + chart
+    trip_match = {}
     if date_from and date_to:
-        trip_query["date"] = {"$gte": date_from, "$lte": date_to}
+        trip_match["date"] = {"$gte": date_from, "$lte": date_to}
     elif date_from:
-        trip_query["date"] = {"$gte": date_from}
-    trips = await db.trip_data.find(trip_query, {"_id": 0}).to_list(10000)
-    total_km = sum(t.get("actual_km", 0) for t in trips)
-    scheduled_km = sum(t.get("scheduled_km", 0) for t in trips)
-    energy_query = {}
+        trip_match["date"] = {"$gte": date_from}
+    trip_agg = await db.trip_data.aggregate([
+        {"$match": trip_match},
+        {"$group": {"_id": "$date", "actual_km": {"$sum": "$actual_km"}, "scheduled_km": {"$sum": "$scheduled_km"}}}
+    ]).to_list(500)
+    total_km = sum(d["actual_km"] for d in trip_agg)
+    scheduled_km = sum(d["scheduled_km"] for d in trip_agg)
+    km_chart = sorted([{"date": d["_id"], "actual_km": d["actual_km"], "scheduled_km": d["scheduled_km"]} for d in trip_agg], key=lambda x: x["date"])[-30:]
+    # Energy — aggregation
+    energy_match = {}
     if date_from and date_to:
-        energy_query["date"] = {"$gte": date_from, "$lte": date_to}
-    energy = await db.energy_data.find(energy_query, {"_id": 0}).to_list(10000)
-    total_energy = sum(e.get("units_charged", 0) for e in energy)
-    incidents = await db.incidents.find({"status": {"$ne": "resolved"}}, {"_id": 0}).to_list(1000)
-    active_incidents = len(incidents)
-    billings = await db.billing.find({}, {"_id": 0}).to_list(100)
-    total_revenue = sum(b.get("final_payable", 0) for b in billings)
-    # Ticket revenue
-    rev_query = {}
+        energy_match["date"] = {"$gte": date_from, "$lte": date_to}
+    energy_agg = await db.energy_data.aggregate([
+        {"$match": energy_match},
+        {"$group": {"_id": "$date", "units": {"$sum": "$units_charged"}}}
+    ]).to_list(500)
+    total_energy = sum(d["units"] for d in energy_agg)
+    energy_chart = sorted([{"date": d["_id"], "units": d["units"]} for d in energy_agg], key=lambda x: x["date"])[-30:]
+    # Incidents — count only
+    active_incidents = await db.incidents.count_documents({"status": {"$ne": "resolved"}})
+    # Billing — aggregation
+    billing_agg = await db.billing.aggregate([
+        {"$group": {"_id": None, "total": {"$sum": "$final_payable"}}}
+    ]).to_list(1)
+    total_revenue = billing_agg[0]["total"] if billing_agg else 0
+    # Revenue — aggregation
+    rev_match = {}
     if date_from and date_to:
-        rev_query["date"] = {"$gte": date_from, "$lte": date_to}
-    rev_data = await db.revenue_data.find(rev_query, {"_id": 0}).to_list(10000)
-    total_ticket_revenue = sum(r.get("revenue_amount", 0) for r in rev_data)
-    total_passengers = sum(r.get("passengers", 0) for r in rev_data)
-    # Daily KM chart data
-    daily_km = {}
-    for t in trips:
-        d = t.get("date", "")
-        if d not in daily_km:
-            daily_km[d] = {"date": d, "actual_km": 0, "scheduled_km": 0}
-        daily_km[d]["actual_km"] += t.get("actual_km", 0)
-        daily_km[d]["scheduled_km"] += t.get("scheduled_km", 0)
-    km_chart = sorted(daily_km.values(), key=lambda x: x["date"])[-30:]
-    # Energy chart
-    daily_energy = {}
-    for e in energy:
-        d = e.get("date", "")
-        if d not in daily_energy:
-            daily_energy[d] = {"date": d, "units": 0}
-        daily_energy[d]["units"] += e.get("units_charged", 0)
-    energy_chart = sorted(daily_energy.values(), key=lambda x: x["date"])[-30:]
+        rev_match["date"] = {"$gte": date_from, "$lte": date_to}
+    rev_agg = await db.revenue_data.aggregate([
+        {"$match": rev_match},
+        {"$group": {"_id": None, "revenue": {"$sum": "$revenue_amount"}, "passengers": {"$sum": "$passengers"}}}
+    ]).to_list(1)
+    total_ticket_revenue = rev_agg[0]["revenue"] if rev_agg else 0
+    total_passengers = rev_agg[0]["passengers"] if rev_agg else 0
     # Depot list
     depots = list(set(b.get("depot", "") for b in buses if b.get("depot")))
     return {
@@ -581,7 +581,7 @@ async def list_energy(date_from: str = "", date_to: str = "", bus_id: str = "", 
         query["bus_id"] = bus_id
     if date_from and date_to:
         query["date"] = {"$gte": date_from, "$lte": date_to}
-    data = await db.energy_data.find(query, {"_id": 0}).to_list(10000)
+    data = await db.energy_data.find(query, {"_id": 0}).to_list(3000)
     return data
 
 @api.post("/energy")
@@ -597,10 +597,10 @@ async def energy_report(date_from: str = "", date_to: str = "", user: dict = Dep
     query = {}
     if date_from and date_to:
         query["date"] = {"$gte": date_from, "$lte": date_to}
-    data = await db.energy_data.find(query, {"_id": 0}).to_list(10000)
+    data = await db.energy_data.find(query, {"_id": 0}).to_list(3000)
     buses = await db.buses.find({}, {"_id": 0}).to_list(1000)
     bus_map = {b["bus_id"]: b for b in buses}
-    trips = await db.trip_data.find(query, {"_id": 0}).to_list(10000)
+    trips = await db.trip_data.find(query, {"_id": 0}).to_list(3000)
     bus_km = {}
     for t in trips:
         bid = t.get("bus_id", "")
@@ -648,8 +648,8 @@ async def get_kpi(date_from: str = "", date_to: str = "", user: dict = Depends(g
     query = {}
     if date_from and date_to:
         query["date"] = {"$gte": date_from, "$lte": date_to}
-    trips = await db.trip_data.find(query, {"_id": 0}).to_list(10000)
-    energy = await db.energy_data.find(query, {"_id": 0}).to_list(10000)
+    trips = await db.trip_data.find(query, {"_id": 0}).to_list(3000)
+    energy = await db.energy_data.find(query, {"_id": 0}).to_list(3000)
     buses = await db.buses.find({}, {"_id": 0}).to_list(1000)
     incidents = await db.incidents.find({}, {"_id": 0}).to_list(1000)
     total_scheduled = sum(t.get("scheduled_km", 0) for t in trips)
@@ -706,7 +706,7 @@ async def delete_rule(rule_id: str, user: dict = Depends(get_current_user)):
 @api.post("/deductions/apply")
 async def apply_deductions(period_start: str = Query(...), period_end: str = Query(...), user: dict = Depends(get_current_user)):
     rules = await db.deduction_rules.find({"active": True}, {"_id": 0}).to_list(100)
-    trips = await db.trip_data.find({"date": {"$gte": period_start, "$lte": period_end}}, {"_id": 0}).to_list(10000)
+    trips = await db.trip_data.find({"date": {"$gte": period_start, "$lte": period_end}}, {"_id": 0}).to_list(3000)
     tenders = await db.tenders.find({}, {"_id": 0}).to_list(100)
     tender_map = {t["tender_id"]: t for t in tenders}
     buses = await db.buses.find({}, {"_id": 0}).to_list(1000)
@@ -770,11 +770,11 @@ async def generate_invoice(req: BillingGenerateReq, user: dict = Depends(get_cur
     trip_query = {"date": {"$gte": period_start, "$lte": period_end}}
     if bus_ids:
         trip_query["bus_id"] = {"$in": bus_ids}
-    trips = await db.trip_data.find(trip_query, {"_id": 0}).to_list(10000)
+    trips = await db.trip_data.find(trip_query, {"_id": 0}).to_list(3000)
     energy_query = {"date": {"$gte": period_start, "$lte": period_end}}
     if bus_ids:
         energy_query["bus_id"] = {"$in": bus_ids}
-    energy = await db.energy_data.find(energy_query, {"_id": 0}).to_list(10000)
+    energy = await db.energy_data.find(energy_query, {"_id": 0}).to_list(3000)
     # Step 1: Total KM
     total_km = sum(t.get("actual_km", 0) for t in trips)
     scheduled_km = sum(t.get("scheduled_km", 0) for t in trips)
@@ -980,10 +980,10 @@ async def generate_report(report_type: str = "operations", date_from: str = "", 
     if date_from and date_to:
         query["date"] = {"$gte": date_from, "$lte": date_to}
     if report_type == "operations":
-        trips = await db.trip_data.find(query, {"_id": 0}).to_list(10000)
+        trips = await db.trip_data.find(query, {"_id": 0}).to_list(3000)
         return {"type": "operations", "data": trips, "count": len(trips)}
     elif report_type == "energy":
-        data = await db.energy_data.find(query, {"_id": 0}).to_list(10000)
+        data = await db.energy_data.find(query, {"_id": 0}).to_list(3000)
         return {"type": "energy", "data": data, "count": len(data)}
     elif report_type == "incidents":
         data = await db.incidents.find({}, {"_id": 0}).to_list(1000)
@@ -999,10 +999,10 @@ async def download_report(report_type: str = "operations", date_from: str = "", 
     if date_from and date_to:
         query["date"] = {"$gte": date_from, "$lte": date_to}
     if report_type == "operations":
-        data = await db.trip_data.find(query, {"_id": 0}).to_list(10000)
+        data = await db.trip_data.find(query, {"_id": 0}).to_list(3000)
         cols = ["bus_id", "driver_id", "date", "scheduled_km", "actual_km"]
     elif report_type == "energy":
-        data = await db.energy_data.find(query, {"_id": 0}).to_list(10000)
+        data = await db.energy_data.find(query, {"_id": 0}).to_list(3000)
         cols = ["bus_id", "date", "units_charged", "tariff_rate"]
     elif report_type == "incidents":
         data = await db.incidents.find({}, {"_id": 0}).to_list(1000)
@@ -1108,7 +1108,7 @@ async def get_revenue_details(
         query["bus_id"] = bus_id
     if date_from and date_to:
         query["date"] = {"$gte": date_from, "$lte": date_to}
-    data = await db.revenue_data.find(query, {"_id": 0}).to_list(50000)
+    data = await db.revenue_data.find(query, {"_id": 0}).to_list(5000)
     buses = await db.buses.find({}, {"_id": 0}).to_list(1000)
     bus_map = {b["bus_id"]: b for b in buses}
     depots_list = list(set(b.get("depot", "") for b in buses if b.get("depot")))
@@ -1175,7 +1175,7 @@ async def get_km_details(
             query["bus_id"] = {"$in": depot_buses}
     if date_from and date_to:
         query["date"] = {"$gte": date_from, "$lte": date_to}
-    trips = await db.trip_data.find(query, {"_id": 0}).to_list(50000)
+    trips = await db.trip_data.find(query, {"_id": 0}).to_list(5000)
     for t in trips:
         t["depot"] = bus_map.get(t.get("bus_id"), {}).get("depot", "")
         t["source"] = "GPS API"
@@ -1329,7 +1329,7 @@ async def get_passenger_details(
         query["route"] = route
     if date_from and date_to:
         query["date"] = {"$gte": date_from, "$lte": date_to}
-    data = await db.revenue_data.find(query, {"_id": 0}).to_list(50000)
+    data = await db.revenue_data.find(query, {"_id": 0}).to_list(5000)
     buses = await db.buses.find({}, {"_id": 0}).to_list(1000)
     bus_map = {b["bus_id"]: b for b in buses}
     depots_list = list(set(b.get("depot", "") for b in buses if b.get("depot")))
@@ -1471,7 +1471,7 @@ async def gcc_kpi_engine(period_start: str = "", period_end: str = "", depot: st
     trip_q = {}
     if period_start and period_end:
         trip_q["date"] = {"$gte": period_start, "$lte": period_end}
-    trips = await db.trip_data.find(trip_q, {"_id": 0}).to_list(10000)
+    trips = await db.trip_data.find(trip_q, {"_id": 0}).to_list(3000)
     bus_q = {"status": "active"}
     if depot:
         bus_q["depot"] = depot
@@ -1510,7 +1510,7 @@ async def compute_fee_pk(period_start: str = "", period_end: str = "", depot: st
         trip_q["date"] = {"$gte": period_start, "$lte": period_end}
     if bus_ids:
         trip_q["bus_id"] = {"$in": bus_ids}
-    trips = await db.trip_data.find(trip_q, {"_id": 0}).to_list(10000)
+    trips = await db.trip_data.find(trip_q, {"_id": 0}).to_list(3000)
     # Per-bus computation
     bus_data = {}
     for t in trips:
