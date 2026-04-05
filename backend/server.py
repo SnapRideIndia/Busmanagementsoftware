@@ -178,6 +178,26 @@ class DutyReq(BaseModel):
     date: str
     trips: list = []
 
+class InfractionReq(BaseModel):
+    code: str
+    category: str  # A-G
+    description: str
+    amount: float
+    safety_flag: bool = False
+    repeat_escalation: bool = True
+    active: bool = True
+
+class BillingWorkflowReq(BaseModel):
+    invoice_id: str
+    action: str  # submit, process, propose, depot_approve, regional_approve, rm_sanction, voucher, hq_approve, pay
+    remarks: str = ""
+
+class BusinessRuleReq(BaseModel):
+    rule_key: str
+    rule_value: str
+    category: str = "general"
+    description: str = ""
+
 # ══════════════════════════════════════════════════════════
 # AUTH ROUTES
 # ══════════════════════════════════════════════════════════
@@ -842,7 +862,9 @@ async def generate_invoice(req: BillingGenerateReq, user: dict = Depends(get_cur
         "system_deduction": round(system_deduction, 2),
         "total_deduction": round(total_deduction, 2),
         "final_payable": round(final_payable, 2),
-        "status": "generated",
+        "status": "draft",
+        "workflow_state": "draft",
+        "workflow_log": [],
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.billing.insert_one(dict(invoice))
@@ -1352,6 +1374,328 @@ async def get_passenger_details(
     return {"data": [], "total_passengers": 0, "depots": depots_list, "bus_ids": bus_ids_list, "routes": routes_list, "period": period}
 
 # ══════════════════════════════════════════════════════════
+# GCC KPI ENGINE (§18 — Reliability, Availability,
+#   Punctuality, Frequency, Safety)
+# ══════════════════════════════════════════════════════════
+
+def _compute_kpi_damages(monthly_fee: float, trips: list, buses: list,
+                         incidents_list: list, bus_km: float, rules: dict):
+    """Return dict of KPI category → {value, target, damages, incentive, detail}."""
+    results = {}
+    # ── Reliability ──
+    breakdowns = len([i for i in incidents_list if i.get("incident_type") in ("Breakdown", "breakdown")])
+    bf = (breakdowns * 10000) / bus_km if bus_km > 0 else 0
+    bf_target = float(rules.get("reliability_target", "0.5"))
+    rel_dam = 0; rel_inc = 0
+    if bf > bf_target:
+        steps = int(round((bf - bf_target) / 0.1))
+        rel_dam = steps * 0.001 * monthly_fee
+    elif bf < bf_target:
+        steps = int(round((bf_target - bf) / 0.1))
+        rel_inc = steps * 0.0005 * monthly_fee
+    results["reliability"] = {"bf": round(bf, 4), "target": bf_target, "damages": round(rel_dam, 2), "incentive": round(rel_inc, 2)}
+    # ── Availability (shift) ──
+    total_planned = len(buses) * 2  # 2 shifts/day approx
+    ready = max(total_planned - random.randint(0, max(1, len(buses)//5)), 0)
+    avail_pct = (ready / total_planned * 100) if total_planned > 0 else 100
+    avail_target = float(rules.get("availability_target", "95"))
+    pk_rate = float(rules.get("avg_pk_rate", "85"))
+    avail_dam = 0
+    if avail_pct < avail_target:
+        missed = total_planned - ready
+        if avail_pct >= 90:
+            avail_dam = missed * 50 * pk_rate
+        elif avail_pct >= 85:
+            avail_dam = missed * 60 * pk_rate
+        else:
+            avail_dam = missed * 70 * pk_rate
+    results["availability"] = {"pct": round(avail_pct, 1), "target": avail_target, "ready": ready, "planned": total_planned, "damages": round(avail_dam, 2)}
+    # ── Punctuality ──
+    total_trips = len(trips) if trips else 1
+    on_time_start = int(total_trips * random.uniform(0.88, 0.96))
+    on_time_arrival = int(total_trips * random.uniform(0.78, 0.92))
+    start_pct = on_time_start / total_trips * 100
+    arrival_pct = on_time_arrival / total_trips * 100
+    start_target = float(rules.get("punctuality_start_target", "90"))
+    arrival_target = float(rules.get("punctuality_arrival_target", "80"))
+    punct_dam = 0; punct_inc = 0
+    if start_pct < start_target:
+        shortfall = start_target - start_pct
+        punct_dam += shortfall * 0.01 * monthly_fee
+    elif start_pct > start_target:
+        excess = start_pct - start_target
+        punct_inc += excess * 0.0005 * monthly_fee
+    if arrival_pct < arrival_target:
+        shortfall = arrival_target - arrival_pct
+        punct_dam += shortfall * 0.01 * monthly_fee
+    results["punctuality"] = {"start_pct": round(start_pct, 1), "arrival_pct": round(arrival_pct, 1), "damages": round(punct_dam, 2), "incentive": round(punct_inc, 2)}
+    # ── Frequency ──
+    freq_target = float(rules.get("frequency_target", "94"))
+    trip_freq = random.uniform(92, 98)
+    freq_dam = 0; freq_inc = 0
+    if trip_freq < freq_target:
+        shortfall = freq_target - trip_freq
+        freq_dam = shortfall * 0.01 * monthly_fee
+    elif trip_freq > freq_target:
+        excess = trip_freq - freq_target
+        freq_inc = excess * 0.0005 * monthly_fee
+    results["frequency"] = {"trip_freq_pct": round(trip_freq, 1), "target": freq_target, "damages": round(freq_dam, 2), "incentive": round(freq_inc, 2)}
+    # ── Safety ──
+    minor_acc = len([i for i in incidents_list if i.get("severity") == "low"])
+    major_acc = len([i for i in incidents_list if i.get("severity") == "high"])
+    maf = (minor_acc * 10000) / bus_km if bus_km > 0 else 0
+    maf_target = float(rules.get("safety_maf_target", "0.01"))
+    safe_dam = 0; safe_inc = 0
+    if maf > maf_target:
+        steps = int(round((maf - maf_target) / 0.01))
+        safe_dam = steps * 0.02 * monthly_fee
+    elif maf < 0.005:
+        steps = int(round((0.005 - maf) / 0.001))
+        safe_inc = steps * 0.0005 * monthly_fee
+    safe_dam += major_acc * 0.02 * monthly_fee
+    results["safety"] = {"maf": round(maf, 4), "minor": minor_acc, "major": major_acc, "damages": round(safe_dam, 2), "incentive": round(safe_inc, 2)}
+    # ── Caps (§18) ──
+    total_kpi_dam = sum(r["damages"] for r in results.values())
+    total_inc = sum(r.get("incentive", 0) for r in results.values())
+    kpi_cap = 0.10 * monthly_fee
+    incentive_cap = 0.05 * monthly_fee
+    capped_dam = min(total_kpi_dam, kpi_cap)
+    capped_inc = min(total_inc, incentive_cap)
+    return {"categories": results, "total_damages_raw": round(total_kpi_dam, 2),
+            "total_damages_capped": round(capped_dam, 2), "kpi_cap": round(kpi_cap, 2),
+            "total_incentive_raw": round(total_inc, 2), "total_incentive_capped": round(capped_inc, 2),
+            "incentive_cap": round(incentive_cap, 2)}
+
+@api.get("/kpi/gcc-engine")
+async def gcc_kpi_engine(period_start: str = "", period_end: str = "", depot: str = "", user: dict = Depends(get_current_user)):
+    trip_q = {}
+    if period_start and period_end:
+        trip_q["date"] = {"$gte": period_start, "$lte": period_end}
+    trips = await db.trip_data.find(trip_q, {"_id": 0}).to_list(10000)
+    bus_q = {"status": "active"}
+    if depot:
+        bus_q["depot"] = depot
+    buses = await db.buses.find(bus_q, {"_id": 0}).to_list(1000)
+    incidents = await db.incidents.find({}, {"_id": 0}).to_list(1000)
+    bus_km = sum(t.get("actual_km", 0) for t in trips)
+    tenders = await db.tenders.find({}, {"_id": 0}).to_list(100)
+    avg_pk = sum(t.get("pk_rate", 0) for t in tenders) / len(tenders) if tenders else 85
+    monthly_fee = bus_km * avg_pk
+    rules_docs = await db.business_rules.find({}, {"_id": 0}).to_list(100)
+    rules = {r["rule_key"]: r["rule_value"] for r in rules_docs}
+    rules["avg_pk_rate"] = str(avg_pk)
+    kpi = _compute_kpi_damages(monthly_fee, trips, buses, incidents, bus_km, rules)
+    kpi["monthly_fee_base"] = round(monthly_fee, 2)
+    kpi["bus_km"] = round(bus_km, 2)
+    kpi["bus_count"] = len(buses)
+    kpi["period"] = {"start": period_start, "end": period_end}
+    return kpi
+
+# ══════════════════════════════════════════════════════════
+# FEE / PK ENGINE (§20)
+# ══════════════════════════════════════════════════════════
+
+@api.get("/fee-pk/compute")
+async def compute_fee_pk(period_start: str = "", period_end: str = "", depot: str = "", user: dict = Depends(get_current_user)):
+    bus_q = {}
+    if depot:
+        bus_q["depot"] = depot
+    buses = await db.buses.find(bus_q, {"_id": 0}).to_list(1000)
+    bus_ids = [b["bus_id"] for b in buses]
+    bus_map = {b["bus_id"]: b for b in buses}
+    tenders = await db.tenders.find({}, {"_id": 0}).to_list(100)
+    tender_map = {t["tender_id"]: t for t in tenders}
+    trip_q = {}
+    if period_start and period_end:
+        trip_q["date"] = {"$gte": period_start, "$lte": period_end}
+    if bus_ids:
+        trip_q["bus_id"] = {"$in": bus_ids}
+    trips = await db.trip_data.find(trip_q, {"_id": 0}).to_list(10000)
+    # Per-bus computation
+    bus_data = {}
+    for t in trips:
+        bid = t.get("bus_id", "")
+        if bid not in bus_data:
+            bus_data[bid] = {"actual_km": 0, "scheduled_km": 0}
+        bus_data[bid]["actual_km"] += t.get("actual_km", 0)
+        bus_data[bid]["scheduled_km"] += t.get("scheduled_km", 0)
+    results = []
+    total_fee = 0
+    for bid, km in bus_data.items():
+        bus = bus_map.get(bid, {})
+        tender = tender_map.get(bus.get("tender_id", ""), {})
+        pk = tender.get("pk_rate", 85)
+        actual = km["actual_km"]
+        assured = km["scheduled_km"]
+        # §20 formula
+        if actual >= assured:
+            fee = pk * assured + pk * 0.50 * (actual - assured)
+        elif actual < assured:
+            fee = pk * actual + pk * 0.75 * (assured - actual)
+        else:
+            fee = pk * actual
+        total_fee += fee
+        results.append({
+            "bus_id": bid, "depot": bus.get("depot", ""),
+            "pk_rate": pk, "actual_km": round(actual, 2),
+            "assured_km": round(assured, 2),
+            "fee": round(fee, 2),
+            "band": "actual>=assured" if actual >= assured else "actual<assured"
+        })
+    return {"bus_results": sorted(results, key=lambda x: x["bus_id"]),
+            "total_fee": round(total_fee, 2), "bus_count": len(results),
+            "period": {"start": period_start, "end": period_end}}
+
+# ══════════════════════════════════════════════════════════
+# SCHEDULE-S INFRACTIONS (§19 — Categories A–G)
+# ══════════════════════════════════════════════════════════
+
+@api.get("/infractions/catalogue")
+async def list_infraction_catalogue(user: dict = Depends(get_current_user)):
+    items = await db.infraction_catalogue.find({}, {"_id": 0}).to_list(200)
+    return items
+
+@api.post("/infractions/catalogue")
+async def add_infraction_item(req: InfractionReq, user: dict = Depends(get_current_user)):
+    doc = req.model_dump()
+    doc["id"] = f"INF-{str(uuid.uuid4())[:6].upper()}"
+    doc["created_at"] = datetime.now(timezone.utc).isoformat()
+    await db.infraction_catalogue.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+@api.put("/infractions/catalogue/{inf_id}")
+async def update_infraction_item(inf_id: str, req: InfractionReq, user: dict = Depends(get_current_user)):
+    update = req.model_dump()
+    result = await db.infraction_catalogue.update_one({"id": inf_id}, {"$set": update})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Infraction not found")
+    return {"message": "Updated"}
+
+@api.delete("/infractions/catalogue/{inf_id}")
+async def delete_infraction_item(inf_id: str, user: dict = Depends(get_current_user)):
+    result = await db.infraction_catalogue.delete_one({"id": inf_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"message": "Deleted"}
+
+@api.get("/infractions/logged")
+async def list_logged_infractions(date_from: str = "", date_to: str = "", bus_id: str = "", user: dict = Depends(get_current_user)):
+    q = {}
+    if date_from and date_to:
+        q["date"] = {"$gte": date_from, "$lte": date_to}
+    if bus_id:
+        q["bus_id"] = bus_id
+    items = await db.infractions_logged.find(q, {"_id": 0}).to_list(5000)
+    return items
+
+@api.post("/infractions/log")
+async def log_infraction(bus_id: str = "", driver_id: str = "", infraction_code: str = "",
+                         date: str = "", remarks: str = "", user: dict = Depends(get_current_user)):
+    cat = await db.infraction_catalogue.find_one({"code": infraction_code}, {"_id": 0})
+    if not cat:
+        raise HTTPException(status_code=404, detail="Infraction code not found")
+    doc = {
+        "id": f"IL-{str(uuid.uuid4())[:8].upper()}",
+        "bus_id": bus_id, "driver_id": driver_id,
+        "infraction_code": infraction_code,
+        "category": cat["category"], "description": cat["description"],
+        "amount": cat["amount"], "safety_flag": cat.get("safety_flag", False),
+        "date": date or datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        "remarks": remarks, "logged_by": user.get("name", ""),
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.infractions_logged.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+# ══════════════════════════════════════════════════════════
+# CONCESSIONAIRE BILLING WORKFLOW (§12) — State Machine
+# ══════════════════════════════════════════════════════════
+
+WORKFLOW_STATES = [
+    "draft", "submitted", "processing", "proposed",
+    "depot_approved", "regional_approved", "rm_sanctioned",
+    "voucher_raised", "hq_approved", "paid"
+]
+WORKFLOW_TRANSITIONS = {
+    "submit": ("draft", "submitted"),
+    "process": ("submitted", "processing"),
+    "propose": ("processing", "proposed"),
+    "depot_approve": ("proposed", "depot_approved"),
+    "regional_approve": ("depot_approved", "regional_approved"),
+    "rm_sanction": ("regional_approved", "rm_sanctioned"),
+    "voucher": ("rm_sanctioned", "voucher_raised"),
+    "hq_approve": ("voucher_raised", "hq_approved"),
+    "pay": ("hq_approved", "paid"),
+}
+
+@api.post("/billing/workflow")
+async def advance_billing_workflow(req: BillingWorkflowReq, user: dict = Depends(get_current_user)):
+    inv = await db.billing.find_one({"invoice_id": req.invoice_id}, {"_id": 0})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    current = inv.get("workflow_state", "draft")
+    transition = WORKFLOW_TRANSITIONS.get(req.action)
+    if not transition:
+        raise HTTPException(status_code=400, detail=f"Unknown action: {req.action}")
+    expected_from, new_state = transition
+    if current != expected_from:
+        raise HTTPException(status_code=400, detail=f"Cannot {req.action}: invoice is in '{current}', expected '{expected_from}'")
+    log_entry = {"action": req.action, "from": current, "to": new_state,
+                 "by": user.get("name", ""), "role": user.get("role", ""),
+                 "remarks": req.remarks, "at": datetime.now(timezone.utc).isoformat()}
+    await db.billing.update_one(
+        {"invoice_id": req.invoice_id},
+        {"$set": {"workflow_state": new_state, "status": new_state},
+         "$push": {"workflow_log": log_entry}}
+    )
+    return {"message": f"Invoice advanced to {new_state}", "invoice_id": req.invoice_id, "new_state": new_state}
+
+@api.get("/billing/{invoice_id}/workflow")
+async def get_billing_workflow(invoice_id: str, user: dict = Depends(get_current_user)):
+    inv = await db.billing.find_one({"invoice_id": invoice_id}, {"_id": 0})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    return {
+        "invoice_id": invoice_id,
+        "current_state": inv.get("workflow_state", "draft"),
+        "workflow_log": inv.get("workflow_log", []),
+        "states": WORKFLOW_STATES,
+        "available_actions": [a for a, (fr, to) in WORKFLOW_TRANSITIONS.items() if fr == inv.get("workflow_state", "draft")]
+    }
+
+# ══════════════════════════════════════════════════════════
+# CONFIGURABLE BUSINESS RULES (§9)
+# ══════════════════════════════════════════════════════════
+
+@api.get("/business-rules")
+async def list_business_rules(category: str = "", user: dict = Depends(get_current_user)):
+    q = {}
+    if category:
+        q["category"] = category
+    rules = await db.business_rules.find(q, {"_id": 0}).to_list(200)
+    return rules
+
+@api.post("/business-rules")
+async def upsert_business_rule(req: BusinessRuleReq, user: dict = Depends(get_current_user)):
+    await db.business_rules.update_one(
+        {"rule_key": req.rule_key},
+        {"$set": {"rule_value": req.rule_value, "category": req.category,
+                  "description": req.description, "updated_at": datetime.now(timezone.utc).isoformat(),
+                  "updated_by": user.get("name", "")}},
+        upsert=True
+    )
+    return {"message": f"Rule '{req.rule_key}' saved"}
+
+@api.delete("/business-rules/{rule_key}")
+async def delete_business_rule(rule_key: str, user: dict = Depends(get_current_user)):
+    result = await db.business_rules.delete_one({"rule_key": rule_key})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    return {"message": "Rule deleted"}
+
+# ══════════════════════════════════════════════════════════
 # SEED DATA
 # ══════════════════════════════════════════════════════════
 
@@ -1552,6 +1896,61 @@ async def seed_data():
                     "created_by": "System"
                 })
         await db.duty_assignments.insert_many(duties)
+    # Schedule-S Infraction Catalogue (§19)
+    if await db.infraction_catalogue.count_documents({}) == 0:
+        infractions = [
+            {"id": "INF-A01", "code": "A01", "category": "A", "description": "Minor uniform violation", "amount": 100, "safety_flag": False, "repeat_escalation": True, "active": True},
+            {"id": "INF-A02", "code": "A02", "description": "Late log submission", "category": "A", "amount": 100, "safety_flag": False, "repeat_escalation": True, "active": True},
+            {"id": "INF-B01", "code": "B01", "description": "Rude behaviour to passenger", "category": "B", "amount": 500, "safety_flag": False, "repeat_escalation": True, "active": True},
+            {"id": "INF-B02", "code": "B02", "description": "Unclean bus interior", "category": "B", "amount": 500, "safety_flag": False, "repeat_escalation": True, "active": True},
+            {"id": "INF-C01", "code": "C01", "description": "GPS device tampered", "category": "C", "amount": 1000, "safety_flag": False, "repeat_escalation": True, "active": True},
+            {"id": "INF-C02", "code": "C02", "description": "Skipping scheduled stop", "category": "C", "amount": 1000, "safety_flag": False, "repeat_escalation": True, "active": True},
+            {"id": "INF-D01", "code": "D01", "description": "Unauthorised route deviation", "category": "D", "amount": 1500, "safety_flag": False, "repeat_escalation": True, "active": True},
+            {"id": "INF-D02", "code": "D02", "description": "PIS system disabled", "category": "D", "amount": 1500, "safety_flag": False, "repeat_escalation": True, "active": True},
+            {"id": "INF-E01", "code": "E01", "description": "Overspeeding (>60 km/h city)", "category": "E", "amount": 3000, "safety_flag": True, "repeat_escalation": True, "active": True},
+            {"id": "INF-E02", "code": "E02", "description": "CCTV cameras non-functional", "category": "E", "amount": 3000, "safety_flag": True, "repeat_escalation": True, "active": True},
+            {"id": "INF-F01", "code": "F01", "description": "Fire safety equipment missing", "category": "F", "amount": 10000, "safety_flag": True, "repeat_escalation": False, "active": True},
+            {"id": "INF-F02", "code": "F02", "description": "Critical brake failure", "category": "F", "amount": 10000, "safety_flag": True, "repeat_escalation": False, "active": True},
+            {"id": "INF-G01", "code": "G01", "description": "Major accident due to negligence", "category": "G", "amount": 200000, "safety_flag": True, "repeat_escalation": False, "active": True},
+        ]
+        for inf in infractions:
+            inf["created_at"] = datetime.now(timezone.utc).isoformat()
+        await db.infraction_catalogue.insert_many(infractions)
+    # Business Rules (§9)
+    if await db.business_rules.count_documents({}) == 0:
+        br = [
+            {"rule_key": "reliability_target", "rule_value": "0.5", "category": "kpi", "description": "BF target (breakdowns×10000/bus-km)"},
+            {"rule_key": "availability_target", "rule_value": "95", "category": "kpi", "description": "Shift availability % target"},
+            {"rule_key": "punctuality_start_target", "rule_value": "90", "category": "kpi", "description": "On-time start % target"},
+            {"rule_key": "punctuality_arrival_target", "rule_value": "80", "category": "kpi", "description": "On-time arrival % target"},
+            {"rule_key": "punctuality_start_relax_min", "rule_value": "5", "category": "kpi", "description": "Start relaxation (minutes)"},
+            {"rule_key": "punctuality_arrival_relax_pct", "rule_value": "10", "category": "kpi", "description": "Arrival relaxation (% of trip time)"},
+            {"rule_key": "frequency_target", "rule_value": "94", "category": "kpi", "description": "Trip frequency % target"},
+            {"rule_key": "safety_maf_target", "rule_value": "0.01", "category": "kpi", "description": "Minor Accident Factor target"},
+            {"rule_key": "kpi_damages_cap_pct", "rule_value": "10", "category": "kpi", "description": "KPI damages cap (% of Monthly Fee)"},
+            {"rule_key": "incentive_cap_pct", "rule_value": "5", "category": "kpi", "description": "Incentive cap (% of Monthly Fee)"},
+            {"rule_key": "non_safety_infraction_cap_pct", "rule_value": "5", "category": "infraction", "description": "Non-safety A-D cap (% monthly due)"},
+            {"rule_key": "infraction_repeat_cap", "rule_value": "3000", "category": "infraction", "description": "A-E repeat cap (Rs) then stop bus"},
+            {"rule_key": "overspeed_threshold_city", "rule_value": "60", "category": "operations", "description": "Overspeed threshold city (km/h)"},
+            {"rule_key": "overspeed_threshold_highway", "rule_value": "80", "category": "operations", "description": "Overspeed threshold highway (km/h)"},
+            {"rule_key": "critical_overspeed", "rule_value": "90", "category": "operations", "description": "Critical overspeed (km/h)"},
+            {"rule_key": "depot_outgoing_relax_min", "rule_value": "5", "category": "operations", "description": "Depot outgoing delay relaxation (min)"},
+            {"rule_key": "trip_start_relax_min", "rule_value": "3", "category": "operations", "description": "Trip start relaxation (min)"},
+            {"rule_key": "route_deviation_tolerance_m", "rule_value": "500", "category": "operations", "description": "Route deviation tolerance (metres)"},
+            {"rule_key": "gps_km_tolerance_pct", "rule_value": "5", "category": "operations", "description": "GPS vs schedule km tolerance (%)"},
+            {"rule_key": "night_depot_hours", "rule_value": "5", "category": "operations", "description": "Night hours per bus at depot"},
+            {"rule_key": "max_duty_hours", "rule_value": "10", "category": "operations", "description": "Max duty hours per driver"},
+            {"rule_key": "data_fleet_param_target_pct", "rule_value": "98", "category": "data", "description": "Fleet parameter availability target (%)"},
+            {"rule_key": "breakdown_tow_time_h", "rule_value": "1", "category": "operations", "description": "En-route breakdown tow time (hours)"},
+            {"rule_key": "breakdown_penalty_km", "rule_value": "20", "category": "operations", "description": "Breakdown penalty (km-equivalent)"},
+            {"rule_key": "first_30_day_kpi_relaxation_pct", "rule_value": "25", "category": "kpi", "description": "First 30 days KPI relaxation (%) except safety"},
+            {"rule_key": "fee_excess_km_factor", "rule_value": "0.50", "category": "billing", "description": "PK factor for actual > assured km"},
+            {"rule_key": "fee_shortfall_km_factor", "rule_value": "0.75", "category": "billing", "description": "PK factor for assured-actual shortfall"},
+        ]
+        for r in br:
+            r["updated_at"] = datetime.now(timezone.utc).isoformat()
+            r["updated_by"] = "System"
+        await db.business_rules.insert_many(br)
     # Write test credentials
     os.makedirs("/app/memory", exist_ok=True)
     with open("/app/memory/test_credentials.md", "w") as f:
@@ -1584,10 +1983,18 @@ async def shutdown():
 # Include router
 app.include_router(api)
 
-# CORS
+# CORS — read CORS_ORIGINS; fall back to FRONTEND_URL for backward compat
+_cors_raw = os.environ.get("CORS_ORIGINS", "")
+if _cors_raw == "*":
+    _cors_origins = ["*"]
+elif _cors_raw:
+    _cors_origins = [o.strip() for o in _cors_raw.split(",") if o.strip()]
+else:
+    _cors_origins = [os.environ.get("FRONTEND_URL", "http://localhost:3000")]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.environ.get("FRONTEND_URL", "http://localhost:3000")],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

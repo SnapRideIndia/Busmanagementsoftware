@@ -20,6 +20,9 @@ import RevenueDetailPage from "./pages/RevenueDetailPage";
 import KmDetailPage from "./pages/KmDetailPage";
 import DutyPage from "./pages/DutyPage";
 import PassengerDetailPage from "./pages/PassengerDetailPage";
+import InfractionsPage from "./pages/InfractionsPage";
+import BusinessRulesPage from "./pages/BusinessRulesPage";
+import GccKpiPage from "./pages/GccKpiPage";
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -62,6 +65,9 @@ function App() {
           <Route path="/km-details" element={<ProtectedRoute><KmDetailPage /></ProtectedRoute>} />
           <Route path="/duties" element={<ProtectedRoute><DutyPage /></ProtectedRoute>} />
           <Route path="/passenger-details" element={<ProtectedRoute><PassengerDetailPage /></ProtectedRoute>} />
+          <Route path="/infractions" element={<ProtectedRoute><InfractionsPage /></ProtectedRoute>} />
+          <Route path="/business-rules" element={<ProtectedRoute><BusinessRulesPage /></ProtectedRoute>} />
+          <Route path="/gcc-kpi" element={<ProtectedRoute><GccKpiPage /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </BrowserRouter>

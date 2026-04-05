@@ -4,7 +4,7 @@ import {
   LayoutDashboard, FileText, Bus, Users, MapPin, Zap,
   BarChart3, Calculator, Receipt, FileBarChart, AlertTriangle,
   Settings, LogOut, ChevronLeft, ChevronRight, Menu, IndianRupee, Route,
-  ClipboardList, UsersRound
+  ClipboardList, UsersRound, Shield, Sliders, Scale
 } from "lucide-react";
 import { useState } from "react";
 
@@ -18,12 +18,15 @@ const navItems = [
   { to: "/energy", label: "Energy", icon: Zap },
   { to: "/kpi", label: "KPI", icon: BarChart3 },
   { to: "/deductions", label: "Deductions", icon: Calculator },
+  { to: "/infractions", label: "Infractions", icon: Scale },
+  { to: "/gcc-kpi", label: "GCC KPI", icon: Shield },
   { to: "/billing", label: "Billing", icon: Receipt },
   { to: "/reports", label: "Reports", icon: FileBarChart },
   { to: "/incidents", label: "Incidents", icon: AlertTriangle },
   { to: "/revenue-details", label: "Revenue", icon: IndianRupee },
   { to: "/km-details", label: "KM Tracking", icon: Route },
   { to: "/passenger-details", label: "Passengers", icon: UsersRound },
+  { to: "/business-rules", label: "Rules (GCC)", icon: Sliders },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 

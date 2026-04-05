@@ -726,6 +726,312 @@ class BusManagementTester:
         
         return success and success2 and success3 and success4 and success5 and success6
 
+    def test_gcc_kpi_engine(self):
+        """Test new GCC KPI Engine (§18) API endpoints"""
+        print("\n🛡️ Testing GCC KPI Engine APIs...")
+        
+        # Test basic GCC KPI computation
+        success, response = self.run_test(
+            "GCC KPI Engine - Basic",
+            "GET",
+            "kpi/gcc-engine",
+            200
+        )
+        if success:
+            print(f"   Monthly fee base: Rs.{response.get('monthly_fee_base', 0):,.2f}")
+            print(f"   Total damages (capped): Rs.{response.get('total_damages_capped', 0):,.2f}")
+            print(f"   Total incentives (capped): Rs.{response.get('total_incentive_capped', 0):,.2f}")
+            categories = response.get('categories', {})
+            print(f"   KPI categories found: {len(categories)}")
+            for cat_name, cat_data in categories.items():
+                print(f"     {cat_name}: damages Rs.{cat_data.get('damages', 0)}, incentive Rs.{cat_data.get('incentive', 0)}")
+        
+        # Test with date range
+        today = datetime.now().strftime("%Y-%m-%d")
+        week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+        success2, _ = self.run_test(
+            "GCC KPI Engine - Date Range",
+            "GET",
+            "kpi/gcc-engine",
+            200,
+            params={"period_start": week_ago, "period_end": today}
+        )
+        
+        return success and success2
+
+    def test_fee_pk_engine(self):
+        """Test new Fee/PK Engine (§20) API endpoints"""
+        print("\n💰 Testing Fee/PK Engine APIs...")
+        
+        # Test basic Fee/PK computation
+        success, response = self.run_test(
+            "Fee/PK Engine - Basic",
+            "GET",
+            "fee-pk/compute",
+            200
+        )
+        if success:
+            print(f"   Total fee: Rs.{response.get('total_fee', 0):,.2f}")
+            print(f"   Bus count: {response.get('bus_count', 0)}")
+            bus_results = response.get('bus_results', [])
+            print(f"   Bus calculations: {len(bus_results)}")
+            for bus in bus_results[:3]:  # Show first 3
+                print(f"     {bus.get('bus_id')}: {bus.get('band')} - Rs.{bus.get('fee', 0):,.2f}")
+        
+        # Test with date range
+        today = datetime.now().strftime("%Y-%m-%d")
+        week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+        success2, _ = self.run_test(
+            "Fee/PK Engine - Date Range",
+            "GET",
+            "fee-pk/compute",
+            200,
+            params={"period_start": week_ago, "period_end": today}
+        )
+        
+        return success and success2
+
+    def test_infractions_management(self):
+        """Test new Schedule-S Infractions (§19) API endpoints"""
+        print("\n⚖️ Testing Infractions Management APIs...")
+        
+        # Test get infractions catalogue
+        success, catalogue = self.run_test(
+            "Infractions - Get Catalogue",
+            "GET",
+            "infractions/catalogue",
+            200
+        )
+        if success:
+            print(f"   Catalogue items: {len(catalogue)}")
+            categories = set(item.get('category') for item in catalogue)
+            print(f"   Categories: {sorted(categories)}")
+        
+        # Test add new infraction to catalogue
+        new_infraction = {
+            "code": f"TEST-{datetime.now().strftime('%H%M%S')}",
+            "category": "A",
+            "description": "Test infraction for automation",
+            "amount": 100,
+            "safety_flag": False,
+            "repeat_escalation": True,
+            "active": True
+        }
+        success2, created = self.run_test(
+            "Infractions - Add to Catalogue",
+            "POST",
+            "infractions/catalogue",
+            200,
+            data=new_infraction
+        )
+        
+        infraction_id = None
+        if success2:
+            infraction_id = created.get('id')
+            print(f"   Created infraction ID: {infraction_id}")
+        
+        # Test log an infraction
+        if catalogue:
+            infraction_code = catalogue[0].get('code', 'A01')
+            log_params = {
+                "bus_id": "TS-001",  # Using seeded bus
+                "driver_id": "",
+                "infraction_code": infraction_code,
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "remarks": "Test infraction log"
+            }
+            success3, logged = self.run_test(
+                "Infractions - Log Infraction",
+                "POST",
+                "infractions/log",
+                200,
+                params=log_params
+            )
+            if success3:
+                print(f"   Logged infraction ID: {logged.get('id')}")
+        else:
+            success3 = True  # Skip if no catalogue items
+        
+        # Test get logged infractions
+        success4, logged_list = self.run_test(
+            "Infractions - Get Logged",
+            "GET",
+            "infractions/logged",
+            200
+        )
+        if success4:
+            print(f"   Logged infractions: {len(logged_list)}")
+        
+        # Test get logged infractions with date filter
+        today = datetime.now().strftime("%Y-%m-%d")
+        week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+        success5, _ = self.run_test(
+            "Infractions - Get Logged (Date Filter)",
+            "GET",
+            "infractions/logged",
+            200,
+            params={"date_from": week_ago, "date_to": today}
+        )
+        
+        # Clean up - delete test infraction
+        if infraction_id:
+            success_del, _ = self.run_test(
+                "Infractions - Delete Test Item",
+                "DELETE",
+                f"infractions/catalogue/{infraction_id}",
+                200
+            )
+        
+        return success and success2 and success3 and success4 and success5
+
+    def test_billing_workflow(self):
+        """Test new Billing Workflow (§12) API endpoints"""
+        print("\n📋 Testing Billing Workflow APIs...")
+        
+        # First generate an invoice to test workflow
+        today = datetime.now().strftime("%Y-%m-%d")
+        week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+        invoice_data = {
+            "period_start": week_ago,
+            "period_end": today,
+            "depot": ""
+        }
+        success, created = self.run_test(
+            "Billing Workflow - Generate Invoice",
+            "POST",
+            "billing/generate",
+            200,
+            data=invoice_data
+        )
+        
+        if not success:
+            return False
+        
+        invoice_id = created.get('invoice_id')
+        if not invoice_id:
+            print("   No invoice ID returned")
+            return False
+        
+        print(f"   Generated invoice: {invoice_id}")
+        print(f"   Initial state: {created.get('workflow_state', 'unknown')}")
+        
+        # Test get workflow status
+        success2, workflow = self.run_test(
+            "Billing Workflow - Get Status",
+            "GET",
+            f"billing/{invoice_id}/workflow",
+            200
+        )
+        if success2:
+            current_state = workflow.get('current_state')
+            available_actions = workflow.get('available_actions', [])
+            print(f"   Current state: {current_state}")
+            print(f"   Available actions: {available_actions}")
+        
+        # Test advance workflow (submit action)
+        if success2 and 'submit' in workflow.get('available_actions', []):
+            workflow_data = {
+                "invoice_id": invoice_id,
+                "action": "submit",
+                "remarks": "Test workflow advancement"
+            }
+            success3, advanced = self.run_test(
+                "Billing Workflow - Advance (Submit)",
+                "POST",
+                "billing/workflow",
+                200,
+                data=workflow_data
+            )
+            if success3:
+                print(f"   Advanced to: {advanced.get('new_state')}")
+        else:
+            success3 = True  # Skip if submit not available
+        
+        # Test get updated workflow status
+        success4, updated_workflow = self.run_test(
+            "Billing Workflow - Get Updated Status",
+            "GET",
+            f"billing/{invoice_id}/workflow",
+            200
+        )
+        if success4:
+            print(f"   Updated state: {updated_workflow.get('current_state')}")
+            print(f"   Updated actions: {updated_workflow.get('available_actions', [])}")
+        
+        return success and success2 and success3 and success4
+
+    def test_business_rules(self):
+        """Test new Business Rules (§9) API endpoints"""
+        print("\n📏 Testing Business Rules APIs...")
+        
+        # Test get all business rules
+        success, rules = self.run_test(
+            "Business Rules - Get All",
+            "GET",
+            "business-rules",
+            200
+        )
+        if success:
+            print(f"   Total rules: {len(rules)}")
+            categories = set(rule.get('category') for rule in rules)
+            print(f"   Categories: {sorted(categories)}")
+            for category in sorted(categories):
+                cat_rules = [r for r in rules if r.get('category') == category]
+                print(f"     {category}: {len(cat_rules)} rules")
+        
+        # Test get rules by category
+        success2, kpi_rules = self.run_test(
+            "Business Rules - Get KPI Category",
+            "GET",
+            "business-rules",
+            200,
+            params={"category": "kpi"}
+        )
+        if success2:
+            print(f"   KPI rules: {len(kpi_rules)}")
+        
+        # Test add new rule
+        new_rule = {
+            "rule_key": f"test_rule_{datetime.now().strftime('%H%M%S')}",
+            "rule_value": "test_value_123",
+            "category": "general",
+            "description": "Test rule for automation"
+        }
+        success3, created_rule = self.run_test(
+            "Business Rules - Add Rule",
+            "POST",
+            "business-rules",
+            200,
+            data=new_rule
+        )
+        
+        # Test update existing rule (upsert)
+        if success3:
+            update_rule = {**new_rule, "rule_value": "updated_test_value_456"}
+            success4, _ = self.run_test(
+                "Business Rules - Update Rule",
+                "POST",
+                "business-rules",
+                200,
+                data=update_rule
+            )
+        else:
+            success4 = True
+        
+        # Test delete rule
+        if success3:
+            rule_key = new_rule['rule_key']
+            success5, _ = self.run_test(
+                "Business Rules - Delete Rule",
+                "DELETE",
+                f"business-rules/{rule_key}",
+                200
+            )
+        else:
+            success5 = True
+        
+        return success and success2 and success3 and success4 and success5
+
 def main():
     print("🚌 Starting Bus Management System API Tests")
     print("=" * 60)
@@ -741,6 +1047,11 @@ def main():
     # Run all feature tests
     test_modules = [
         ("Dashboard", tester.test_dashboard),
+        ("GCC KPI Engine", tester.test_gcc_kpi_engine),
+        ("Fee/PK Engine", tester.test_fee_pk_engine),
+        ("Infractions Management", tester.test_infractions_management),
+        ("Billing Workflow", tester.test_billing_workflow),
+        ("Business Rules", tester.test_business_rules),
         ("Revenue Details", tester.test_revenue_details),
         ("KM Details", tester.test_km_details),
         ("Duty Assignments", tester.test_duty_assignments),
