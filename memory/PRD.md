@@ -94,6 +94,19 @@ Build a fully functional Bus Management System dashboard with complete backend. 
 - Backend: 100% (72 endpoints)
 - Frontend: 98%
 
+## Iteration 4 - EBMS Tender (prompt_01.md) Implementation (April 5, 2026)
+- [x] CORS fix (deployment blocker resolved - reads CORS_ORIGINS)
+- [x] GCC KPI Engine (§18): Reliability (BF), Availability (shift), Punctuality (start/arrival), Frequency, Safety (MAF) with damages capped at 10%, incentives at 5%
+- [x] Fee/PK Engine (§20): actual>=assured and actual<assured band formulas
+- [x] Schedule-S Infractions (§19): Categories A-G catalogue (13 items seeded), Rs.100-Rs.2L, safety flags, repeat escalation, log infractions against buses
+- [x] Concessionaire Billing Workflow (§12): 10-step state machine (draft→submitted→...→paid) with role-based audit trail
+- [x] Configurable Business Rules (§9): 27 rules seeded across KPI, operations, infraction, billing, data categories
+- [x] Architecture docs: /app/docs/ARCHITECTURE.md with data flow, RBAC, engines
+
+## Test Results (Iteration 4)
+- Backend: 100% (89 endpoints)
+- Frontend: 98%
+
 ## Prioritized Backlog
 ### P0 (Critical)
 - None remaining
