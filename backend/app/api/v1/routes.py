@@ -748,8 +748,20 @@ async def list_stop_master(
     total = await db.stop_master.count_documents(q)
     cur = db.stop_master.find(q, {"_id": 0}).sort("stop_id", 1).skip((p - 1) * lim).limit(lim)
     items = await cur.to_list(lim)
+    # Batch route-count in single aggregation (avoids N+1)
+    stop_ids = [it["stop_id"] for it in items]
+    if stop_ids:
+        route_counts_agg = await db.routes.aggregate([
+            {"$match": {"stop_sequence.stop_id": {"$in": stop_ids}}},
+            {"$unwind": "$stop_sequence"},
+            {"$match": {"stop_sequence.stop_id": {"$in": stop_ids}}},
+            {"$group": {"_id": "$stop_sequence.stop_id", "count": {"$sum": 1}}}
+        ]).to_list(500)
+        route_count_map = {doc["_id"]: doc["count"] for doc in route_counts_agg}
+    else:
+        route_count_map = {}
     for it in items:
-        it["route_count"] = await db.routes.count_documents({"stop_sequence.stop_id": it["stop_id"]})
+        it["route_count"] = route_count_map.get(it["stop_id"], 0)
     return paged_payload(items, total=total, page=page, limit=limit)
 
 
