@@ -3765,6 +3765,13 @@ async def update_incident(
     log = existing.get("activity_log") or []
     if req.status is not None and req.status != existing.get("status"):
         updates["status"] = req.status
+        if req.status == IncidentStatus.RESOLVED.value:
+            updates["resolved_at"] = _incident_now_iso()
+        elif req.status in (IncidentStatus.OPEN.value, IncidentStatus.ASSIGNED.value, IncidentStatus.IN_PROGRESS.value, IncidentStatus.INVESTIGATING.value):
+            updates["resolved_at"] = ""
+        elif req.status == IncidentStatus.CLOSED.value and not existing.get("resolved_at"):
+            # Preserve a sensible timestamp for older records directly closed after migration.
+            updates["resolved_at"] = _incident_now_iso()
         log = _append_incident_activity(
             log,
             action="status_change",

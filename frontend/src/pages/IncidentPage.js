@@ -376,7 +376,7 @@ export default function IncidentPage() {
 
       <Card className="border-gray-200 shadow-sm overflow-hidden">
         <CardContent className="p-0 overflow-x-auto">
-          <Table>
+          <Table className="min-w-max">
             <TableHeader>
               <TableRow className="table-header">
                 <TableHead>ID</TableHead>
@@ -388,12 +388,13 @@ export default function IncidentPage() {
                 <TableHead>Severity</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Reported</TableHead>
+                <TableHead>Resolved</TableHead>
                 <TableHead className="text-right w-[108px]">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               <TableLoadRows
-                colSpan={10}
+                colSpan={11}
                 loading={loading}
                 error={fetchError}
                 onRetry={load}
@@ -413,8 +414,8 @@ export default function IncidentPage() {
                     </TableCell>
                     <TableCell className="text-sm capitalize">{inc.channel || "—"}</TableCell>
                     <TableCell className="text-sm">{inc.depot || "—"}</TableCell>
-                    <TableCell className="text-sm max-w-[120px] truncate">{inc.assigned_team || "—"}</TableCell>
-                    <TableCell className="font-mono text-sm">{inc.bus_id || "—"}</TableCell>
+                    <TableCell className="text-sm max-w-[120px] truncate whitespace-nowrap">{inc.assigned_team || "—"}</TableCell>
+                    <TableCell className="font-mono text-sm whitespace-nowrap">{inc.bus_id || "—"}</TableCell>
                     <TableCell>
                       <Badge className={severityColor(inc.severity)}>{inc.severity}</Badge>
                     </TableCell>
@@ -423,6 +424,11 @@ export default function IncidentPage() {
                     </TableCell>
                     <TableCell className="text-sm text-gray-500 whitespace-nowrap">
                       {formatDateIN(inc.created_at?.slice(0, 10))}
+                    </TableCell>
+                    <TableCell className="text-sm text-gray-500 whitespace-nowrap">
+                      {(inc.status === "resolved" || inc.status === "closed")
+                        ? formatDateIN((inc.resolved_at || inc.updated_at || "").slice(0, 10))
+                        : "—"}
                     </TableCell>
                     <TableCell className="text-right p-2">
                       <div className="inline-flex items-center justify-end gap-0.5">

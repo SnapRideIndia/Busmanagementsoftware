@@ -208,7 +208,7 @@ export default function ReportsViewPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <Table>
+              <Table className="min-w-max">
                 <TableHeader>
                   <TableRow className="table-header">
                     {previewCols.map((c) => (
