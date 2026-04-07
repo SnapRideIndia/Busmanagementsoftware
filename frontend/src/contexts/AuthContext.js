@@ -23,7 +23,8 @@ export function AuthProvider({ children }) {
   }, [checkAuth]);
 
   const login = async (email, password) => {
-    const { data } = await API.post("/auth/login", { email, password });
+    await API.post("/auth/login", { email, password });
+    const { data } = await API.get("/auth/me");
     setUser(data);
     return data;
   };

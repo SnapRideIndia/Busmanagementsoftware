@@ -202,11 +202,11 @@ export default function RevenueDetailPage() {
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <Card className="kpi-card">
-          <CardContent className="p-5">
+          <CardContent className="p-4">
             <div className="flex items-start justify-between">
               <div>
                 <p className="text-xs font-medium uppercase tracking-wider text-gray-500 mb-1">Total Revenue</p>
-                <p className="text-2xl font-semibold text-[#C8102E]" style={{ fontFamily: "Inter" }}>
+                <p className="text-lg font-bold text-[#C8102E]" style={{ fontFamily: "Inter" }}>
                   Rs.{inNum(data?.total_revenue ?? 0)}
                 </p>
               </div>
@@ -215,11 +215,11 @@ export default function RevenueDetailPage() {
           </CardContent>
         </Card>
         <Card className="kpi-card">
-          <CardContent className="p-5">
+          <CardContent className="p-4">
             <div className="flex items-start justify-between">
               <div>
                 <p className="text-xs font-medium uppercase tracking-wider text-gray-500 mb-1">Avg {period === "daily" ? "Daily" : period === "monthly" ? "Monthly" : "Quarterly"}</p>
-                <p className="text-2xl font-semibold text-[#2563EB]" style={{ fontFamily: "Inter" }}>
+                <p className="text-lg font-bold text-[#2563EB]" style={{ fontFamily: "Inter" }}>
                   Rs.{inNum(Math.round(avgDaily))}
                 </p>
               </div>
@@ -228,11 +228,11 @@ export default function RevenueDetailPage() {
           </CardContent>
         </Card>
         <Card className="kpi-card">
-          <CardContent className="p-5">
+          <CardContent className="p-4">
             <div className="flex items-start justify-between">
               <div>
                 <p className="text-xs font-medium uppercase tracking-wider text-gray-500 mb-1">Total Records</p>
-                <p className="text-2xl font-semibold text-gray-900" style={{ fontFamily: "Inter" }}>
+                <p className="text-lg font-bold text-gray-900" style={{ fontFamily: "Inter" }}>
                   {inNum(data?.data?.length ?? 0)}
                 </p>
               </div>
@@ -241,11 +241,11 @@ export default function RevenueDetailPage() {
           </CardContent>
         </Card>
         <Card className="kpi-card">
-          <CardContent className="p-5">
+          <CardContent className="p-4">
             <div className="flex items-start justify-between">
               <div>
                 <p className="text-xs font-medium uppercase tracking-wider text-gray-500 mb-1">Top Bus</p>
-                <p className="text-2xl font-semibold text-[#16A34A]" style={{ fontFamily: "Inter" }}>
+                <p className="text-lg font-bold text-[#16A34A]" style={{ fontFamily: "Inter" }}>
                   {topBuses[0]?.bus_id || "-"}
                 </p>
                 <p className="text-xs text-gray-400 mt-0.5">Rs.{inNum(topBuses[0]?.revenue ?? 0)}</p>
@@ -259,7 +259,7 @@ export default function RevenueDetailPage() {
       {/* Chart */}
       <Card className="border-gray-200 shadow-sm mb-6">
         <CardHeader className="pb-2">
-          <CardTitle className="text-base font-medium">Revenue Trend ({period})</CardTitle>
+          <CardTitle className="font-medium">Revenue Trend ({period})</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="h-72">
@@ -289,7 +289,7 @@ export default function RevenueDetailPage() {
       {/* Bus-wise Revenue Table */}
       <Card className="border-gray-200 shadow-sm mb-6">
         <CardHeader className="pb-2">
-          <CardTitle className="text-base font-medium">Bus-wise Revenue Summary</CardTitle>
+          <CardTitle className="font-medium">Bus-wise Revenue Summary</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
@@ -320,7 +320,7 @@ export default function RevenueDetailPage() {
       {/* Detailed Data Table */}
       <Card className="border-gray-200 shadow-sm">
         <CardHeader className="pb-2">
-          <CardTitle className="text-base font-medium">Detailed {period === "daily" ? "Day-wise" : period === "monthly" ? "Month-wise" : "Quarter-wise"} Data</CardTitle>
+          <CardTitle className="font-medium">Detailed {period === "daily" ? "Day-wise" : period === "monthly" ? "Month-wise" : "Quarter-wise"} Data</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           <div className="max-h-[400px] overflow-y-auto">

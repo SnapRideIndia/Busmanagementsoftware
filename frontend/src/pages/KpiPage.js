@@ -117,11 +117,11 @@ export default function KpiPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         {metrics.map((m) => (
           <Card key={m.label} className="kpi-card border-gray-200" data-testid={`kpi-metric-${m.label.toLowerCase().replace(/[\s%]/g, "-")}`}>
-            <CardContent className="p-5">
+            <CardContent className="p-4">
               <div className="flex items-start justify-between">
                 <div>
                   <p className="text-xs font-medium uppercase tracking-wider text-gray-500 mb-1">{m.label}</p>
-                  <p className="text-2xl font-semibold" style={{ fontFamily: 'Inter', color: m.color }}>
+                  <p className="text-lg font-bold" style={{ fontFamily: 'Inter', color: m.color }}>
                     {loading ? "..." : m.value}
                   </p>
                 </div>
@@ -134,9 +134,9 @@ export default function KpiPage() {
 
       {kpi && (
         <Card className="mt-6 border-gray-200 shadow-sm">
-          <CardHeader><CardTitle className="text-base">Summary</CardTitle></CardHeader>
+          <CardHeader><CardTitle>Summary</CardTitle></CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
               <div className="space-y-2">
                 <h4 className="font-medium text-gray-900">Operations</h4>
                 <p className="text-gray-600">Total KM Operated: <span className="font-mono font-medium text-gray-900">{inNum(kpi.total_km_operated)} km</span></p>

@@ -1,27 +1,12 @@
 # Test Credentials
 
-## Admin
-- Email: admin@tgsrtc.com
-- Password: admin123
-- Role: admin
+| Role | Email | Password |
+|------|-------|----------|
+| admin | admin@tgsrtc.com | admin123 |
+| admin | admin2@tgsrtc.com | Admin2123! |
+| management | management@tgsrtc.com | Mgmt123! |
+| depot | depot@tgsrtc.com | depot123 |
+| vendor | vendor@tgsrtc.com | vendor123 |
 
-## Depot Manager
-- Email: depot@tgsrtc.com
-- Password: depot123
-- Role: depot_manager
-
-## Finance Officer
-- Email: finance@tgsrtc.com
-- Password: finance123
-- Role: finance_officer
-
-## Vendor
-- Email: vendor@tgsrtc.com
-- Password: vendor123
-- Role: vendor
-
-## Auth Endpoints
-- POST /api/auth/login
-- POST /api/auth/register
-- GET /api/auth/me
-- POST /api/auth/logout
+## Auth
+- POST /api/auth/login — GET /api/auth/me — POST /api/auth/logout

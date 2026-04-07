@@ -239,9 +239,9 @@ export default function RoutesPage() {
         </Button>
       </div>
 
-      <p className="text-sm text-gray-500 mb-4 max-w-3xl">
-        Route <span className="font-mono">name</span> must match Ticket / revenue data so reports and passenger views stay aligned.
-        Renaming a route updates existing revenue rows to the new name.{" "}
+      <p className="page-lead max-w-3xl text-gray-500">
+        Route <span className="font-mono">name</span> is used by ticket and revenue analytics, reports, and passenger views.
+        Renaming a route updates dependent ticketing rows to the new name.{" "}
         <span className="text-gray-700">
           <strong>Stops</strong> come from the shared{" "}
           <Link to="/bus-stops" className="text-[#C8102E] font-medium hover:underline">
@@ -315,12 +315,11 @@ export default function RoutesPage() {
               <TableRow className="table-header">
                 <TableHead className="w-10" />
                 <TableHead>Route ID</TableHead>
-                <TableHead>Name (TIM / revenue)</TableHead>
+                <TableHead>Name</TableHead>
                 <TableHead>Origin</TableHead>
                 <TableHead>Destination</TableHead>
                 <TableHead className="text-right">Km</TableHead>
                 <TableHead>Depot</TableHead>
-                <TableHead className="text-right">TIM rows</TableHead>
                 <TableHead className="text-center">Stops</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -328,7 +327,7 @@ export default function RoutesPage() {
             </TableHeader>
             <TableBody>
               <TableLoadRows
-                colSpan={11}
+                colSpan={10}
                 loading={loading}
                 error={fetchError}
                 onRetry={load}
@@ -360,7 +359,6 @@ export default function RoutesPage() {
                       {r.distance_km != null ? Number(r.distance_km).toLocaleString("en-IN") : "—"}
                     </TableCell>
                     <TableCell className="text-sm">{r.depot || "—"}</TableCell>
-                    <TableCell className="text-right font-mono text-sm">{r.revenue_row_count ?? 0}</TableCell>
                     <TableCell className="text-center font-mono text-sm">{r.stop_count ?? (Array.isArray(r.stops) ? r.stops.length : 0)}</TableCell>
                     <TableCell>
                       <Badge
@@ -391,7 +389,7 @@ export default function RoutesPage() {
                   </TableRow>
                     {expandedRouteId === r.route_id ? (
                       <TableRow key={`${r.route_id}-stops`} className="bg-amber-50/50">
-                        <TableCell colSpan={11} className="p-4">
+                        <TableCell colSpan={10} className="p-4">
                           <div className="flex items-center gap-2 text-sm font-semibold text-gray-800 mb-2">
                             <MapPin size={16} className="text-[#C8102E]" />
                             Stops — {r.name} ({r.origin} → {r.destination})

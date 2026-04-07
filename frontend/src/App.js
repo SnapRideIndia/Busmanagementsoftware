@@ -12,12 +12,14 @@ import DepotsPage from "./pages/DepotsPage";
 import RoutesPage from "./pages/RoutesPage";
 import StopsPage from "./pages/StopsPage";
 import DriverPage from "./pages/DriverPage";
-import LiveOpsPage from "./pages/LiveOpsPage";
+import ConductorsPage from "./pages/ConductorsPage";
+import LiveTrackingPage from "./pages/LiveTrackingPage";
 import EnergyPage from "./pages/EnergyPage";
 import KpiPage from "./pages/KpiPage";
 import DeductionPage from "./pages/DeductionPage";
 import BillingPage from "./pages/BillingPage";
 import ReportsPage from "./pages/ReportsPage";
+import ReportsViewPage from "./pages/ReportsViewPage";
 import IncidentPage from "./pages/IncidentPage";
 import SettingsPage from "./pages/SettingsPage";
 import RevenueDetailPage from "./pages/RevenueDetailPage";
@@ -27,6 +29,8 @@ import PassengerDetailPage from "./pages/PassengerDetailPage";
 import InfractionsPage from "./pages/InfractionsPage";
 import BusinessRulesPage from "./pages/BusinessRulesPage";
 import GccKpiPage from "./pages/GccKpiPage";
+import AdminConsolePage from "./pages/AdminConsolePage";
+import AlertsCenterPage from "./pages/AlertsCenterPage";
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -65,17 +69,23 @@ function App() {
           <Route path="/routes" element={<Navigate to="/bus-routes" replace />} />
           <Route path="/buses" element={<ProtectedRoute><BusPage /></ProtectedRoute>} />
           <Route path="/drivers" element={<ProtectedRoute><DriverPage /></ProtectedRoute>} />
-          <Route path="/live-operations" element={<ProtectedRoute><LiveOpsPage /></ProtectedRoute>} />
+          <Route path="/conductors" element={<ProtectedRoute><ConductorsPage /></ProtectedRoute>} />
+          <Route path="/live-tracking" element={<ProtectedRoute><LiveTrackingPage /></ProtectedRoute>} />
+          <Route path="/live-operations" element={<Navigate to="/live-tracking" replace />} />
           <Route path="/energy" element={<ProtectedRoute><EnergyPage /></ProtectedRoute>} />
           <Route path="/kpi" element={<ProtectedRoute><KpiPage /></ProtectedRoute>} />
           <Route path="/deductions" element={<ProtectedRoute><DeductionPage /></ProtectedRoute>} />
           <Route path="/billing" element={<ProtectedRoute><BillingPage /></ProtectedRoute>} />
           <Route path="/reports" element={<ProtectedRoute><ReportsPage /></ProtectedRoute>} />
+          <Route path="/reports/view" element={<ProtectedRoute><ReportsViewPage /></ProtectedRoute>} />
           <Route path="/incidents" element={<ProtectedRoute><IncidentPage /></ProtectedRoute>} />
+          <Route path="/alerts-center" element={<ProtectedRoute><AlertsCenterPage /></ProtectedRoute>} />
+          <Route path="/admin" element={<ProtectedRoute><AdminConsolePage /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
           <Route path="/revenue-details" element={<ProtectedRoute><RevenueDetailPage /></ProtectedRoute>} />
           <Route path="/km-details" element={<ProtectedRoute><KmDetailPage /></ProtectedRoute>} />
           <Route path="/duties" element={<ProtectedRoute><DutyPage /></ProtectedRoute>} />
+          <Route path="/trip-km-approvals" element={<Navigate to="/km-details?tab=approval" replace />} />
           <Route path="/passenger-details" element={<ProtectedRoute><PassengerDetailPage /></ProtectedRoute>} />
           <Route path="/infractions" element={<ProtectedRoute><InfractionsPage /></ProtectedRoute>} />
           <Route path="/business-rules" element={<ProtectedRoute><BusinessRulesPage /></ProtectedRoute>} />

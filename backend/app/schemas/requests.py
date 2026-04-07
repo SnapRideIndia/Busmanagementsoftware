@@ -153,6 +153,7 @@ class IncidentCreateReq(BaseModel):
     incident_type: str = Field(..., min_length=1, max_length=64)
     description: str = Field(..., min_length=1, max_length=8000)
     occurred_at: str = Field(..., min_length=1, max_length=48)
+    vehicles_affected: list[str] = Field(default_factory=list)
     vehicles_affected_count: int = Field(default=1, ge=1, le=999)
     damage_summary: str = Field(default="", max_length=4000)
     engineer_action: str = Field(default="", max_length=4000)
@@ -168,6 +169,30 @@ class IncidentCreateReq(BaseModel):
     severity: str = Field(default=IncidentSeverity.MEDIUM.value)
     channel: str = Field(default=IncidentChannel.WEB.value)
     telephonic_reference: str = Field(default="", max_length=64)
+
+    @field_validator("vehicles_affected", mode="before")
+    @classmethod
+    def vehicles_affected_norm(cls, v: object) -> list[str]:
+        if v is None or v == "":
+            return []
+        if isinstance(v, str):
+            # allow comma-separated input from integrations
+            items = [x.strip() for x in v.split(",")]
+        elif isinstance(v, list):
+            items = [str(x).strip() for x in v]
+        else:
+            raise ValueError("vehicles_affected must be a list of bus ids")
+        out: list[str] = []
+        seen: set[str] = set()
+        for it in items:
+            if not it:
+                continue
+            if it not in seen:
+                out.append(it)
+                seen.add(it)
+        if len(out) > 50:
+            raise ValueError("vehicles_affected max 50")
+        return out
 
     @field_validator("occurred_at")
     @classmethod
@@ -197,9 +222,17 @@ class IncidentUpdateReq(BaseModel):
     assigned_to: Optional[str] = Field(default=None, max_length=128)
     description: Optional[str] = Field(default=None, min_length=1, max_length=8000)
     occurred_at: Optional[str] = None
+    vehicles_affected: Optional[list[str]] = None
     vehicles_affected_count: Optional[int] = Field(default=None, ge=1, le=999)
     damage_summary: Optional[str] = Field(default=None, max_length=4000)
     engineer_action: Optional[str] = Field(default=None, max_length=4000)
+
+    @field_validator("vehicles_affected", mode="before")
+    @classmethod
+    def vehicles_affected_update_norm(cls, v: object) -> object:
+        if v is None:
+            return None
+        return IncidentCreateReq.vehicles_affected_norm(v)  # reuse rules
 
     @field_validator("occurred_at")
     @classmethod
@@ -224,9 +257,17 @@ class IncidentNoteReq(BaseModel):
 
     note: str = Field(..., min_length=1, max_length=4000)
     occurred_at: Optional[str] = None
+    vehicles_affected: Optional[list[str]] = None
     vehicles_affected_count: Optional[int] = Field(default=None, ge=1, le=999)
     damage_summary: Optional[str] = Field(default=None, max_length=4000)
     engineer_action: Optional[str] = Field(default=None, max_length=4000)
+
+    @field_validator("vehicles_affected", mode="before")
+    @classmethod
+    def note_vehicles_norm(cls, v: object) -> object:
+        if v is None:
+            return None
+        return IncidentCreateReq.vehicles_affected_norm(v)
 
     @field_validator("occurred_at", mode="before")
     @classmethod
@@ -264,6 +305,8 @@ class BillingGenerateReq(BaseModel):
     period_start: str
     period_end: str
     depot: str = ""
+    bus_id: str = ""
+    trip_id: str = ""
 
 
 class TripDetail(BaseModel):

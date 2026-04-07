@@ -1,7 +1,7 @@
 /* TGSRTC Bus Management System Styles */
 
 .sidebar-item {
-  @apply flex items-center gap-3 px-4 py-2.5 text-sm rounded-lg transition-colors duration-150;
+  @apply flex items-center gap-2.5 px-2.5 py-1.5 text-xs sm:text-sm rounded-md transition-colors duration-150;
 }
 .sidebar-item:hover {
   background: rgba(255,255,255,0.08);
@@ -13,32 +13,40 @@
 }
 
 .kpi-card {
-  @apply bg-white border border-gray-200 shadow-sm rounded-lg p-5 transition-all duration-150;
+  @apply bg-white border border-gray-200 shadow-sm rounded-lg p-3 sm:p-3.5 transition-all duration-150;
 }
 .kpi-card:hover {
   @apply shadow-md;
 }
 
 .table-header {
-  @apply text-xs font-medium uppercase tracking-wider text-gray-500 bg-gray-50;
+  @apply text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-gray-500 bg-gray-50;
 }
 
 .page-header {
-  @apply flex items-center justify-between mb-6;
+  @apply flex items-center justify-between mb-3 gap-2 sm:gap-3;
 }
 .page-title {
-  @apply text-2xl md:text-3xl font-semibold tracking-tight text-[#1A1A1A];
+  @apply text-lg md:text-xl font-bold tracking-tight text-[#1A1A1A];
   font-family: 'Inter', sans-serif;
+}
+/* Subtitle under page titles */
+.page-desc {
+  @apply text-xs md:text-sm text-gray-500 mt-0.5;
+}
+/* Intro blurb under title (many operations / finance pages) */
+.page-lead {
+  @apply text-xs md:text-sm text-gray-600 mb-3 max-w-4xl leading-relaxed;
 }
 
 .btn-primary {
-  @apply bg-[#C8102E] text-white hover:bg-[#A50E25] transition-colors duration-150 px-4 py-2 rounded-lg text-sm font-medium;
+  @apply bg-[#C8102E] text-white hover:bg-[#A50E25] transition-colors duration-150 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium;
 }
 .btn-secondary {
-  @apply bg-[#E5E7EB] text-[#1A1A1A] hover:bg-[#D1D5DB] transition-colors duration-150 px-4 py-2 rounded-lg text-sm font-medium;
+  @apply bg-[#E5E7EB] text-[#1A1A1A] hover:bg-[#D1D5DB] transition-colors duration-150 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium;
 }
 .btn-success {
-  @apply bg-[#16A34A] text-white hover:bg-[#15803D] transition-colors duration-150 px-4 py-2 rounded-lg text-sm font-medium;
+  @apply bg-[#16A34A] text-white hover:bg-[#15803D] transition-colors duration-150 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium;
 }
 
 /* Leaflet: keep map layers from competing with app UI (Radix portals use z-[1050]+).

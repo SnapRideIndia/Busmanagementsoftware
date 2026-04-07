@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import API, { buildQuery, formatApiError } from "../lib/api";
 import TablePaginationBar from "../components/TablePaginationBar";
@@ -12,10 +12,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Badge } from "../components/ui/badge";
 import { MapPin, ArrowLeft, TrendingUp, Bus, Gauge } from "lucide-react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import TripKmApprovalPanel from "../components/TripKmApprovalPanel";
 
 export default function KmDetailPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [data, setData] = useState(null);
   const [depot, setDepot] = useState(searchParams.get("depot") || "");
   const [busId, setBusId] = useState(searchParams.get("bus") || "");
@@ -25,6 +27,15 @@ export default function KmDetailPage() {
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [fetchError, setFetchError] = useState(null);
+
+  const kmTab = useMemo(() => (searchParams.get("tab") === "approval" ? "approval" : "analytics"), [searchParams]);
+
+  const setKmTab = (v) => {
+    const p = new URLSearchParams(searchParams);
+    if (v === "approval") p.set("tab", "approval");
+    else p.delete("tab");
+    setSearchParams(p, { replace: true });
+  };
 
   const inNum = (n) => (n == null ? "—" : Number(n).toLocaleString("en-IN"));
 
@@ -88,11 +99,22 @@ export default function KmDetailPage() {
           <Button variant="ghost" size="icon" onClick={() => navigate("/dashboard")} data-testid="km-back-btn">
             <ArrowLeft size={18} />
           </Button>
-          <h1 className="page-title">KM Details</h1>
+          <h1 className="page-title">Kilometre Tracking</h1>
           <Badge className="bg-green-100 text-green-700 hover:bg-green-100 text-xs">Source: GPS API</Badge>
         </div>
       </div>
 
+      <Tabs value={kmTab} onValueChange={setKmTab} className="w-full">
+        <TabsList className="mb-4 h-auto flex-wrap justify-start gap-1 bg-gray-100/80 p-1">
+          <TabsTrigger value="analytics" className="text-xs sm:text-sm" data-testid="km-tab-analytics">
+            Analytics
+          </TabsTrigger>
+          <TabsTrigger value="approval" className="text-xs sm:text-sm" data-testid="km-tab-approval">
+            Trip kilometre verification
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="analytics" className="mt-0 space-y-0 focus-visible:ring-0">
       {/* Filters */}
       <Card className="border-gray-200 shadow-sm mb-6">
         <CardContent className="p-4">
@@ -154,31 +176,31 @@ export default function KmDetailPage() {
 
       {/* Summary */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <Card className="kpi-card"><CardContent className="p-5">
+        <Card className="kpi-card"><CardContent className="p-4">
           <div className="flex items-start justify-between">
             <div><p className="text-xs font-medium uppercase tracking-wider text-gray-500 mb-1">Total KM</p>
-            <p className="text-2xl font-semibold text-[#16A34A]" style={{ fontFamily: 'Inter' }}>{inNum(data?.total_km ?? 0)} km</p></div>
+            <p className="text-lg font-bold text-[#16A34A]" style={{ fontFamily: 'Inter' }}>{inNum(data?.total_km ?? 0)} km</p></div>
             <MapPin size={18} className="text-[#16A34A]" />
           </div>
         </CardContent></Card>
-        <Card className="kpi-card"><CardContent className="p-5">
+        <Card className="kpi-card"><CardContent className="p-4">
           <div className="flex items-start justify-between">
             <div><p className="text-xs font-medium uppercase tracking-wider text-gray-500 mb-1">Scheduled KM</p>
-            <p className="text-2xl font-semibold text-gray-600" style={{ fontFamily: 'Inter' }}>{inNum(totalScheduled)} km</p></div>
+            <p className="text-lg font-bold text-gray-600" style={{ fontFamily: 'Inter' }}>{inNum(totalScheduled)} km</p></div>
             <Gauge size={18} className="text-gray-400" />
           </div>
         </CardContent></Card>
-        <Card className="kpi-card"><CardContent className="p-5">
+        <Card className="kpi-card"><CardContent className="p-4">
           <div className="flex items-start justify-between">
             <div><p className="text-xs font-medium uppercase tracking-wider text-gray-500 mb-1">Availability %</p>
-            <p className={`text-2xl font-semibold ${Number(availPct) >= 90 ? "text-[#16A34A]" : "text-[#F59E0B]"}`} style={{ fontFamily: 'Inter' }}>{availPct}%</p></div>
+            <p className={`text-lg font-bold ${Number(availPct) >= 90 ? "text-[#16A34A]" : "text-[#F59E0B]"}`} style={{ fontFamily: 'Inter' }}>{availPct}%</p></div>
             <TrendingUp size={18} className="text-[#16A34A]" />
           </div>
         </CardContent></Card>
-        <Card className="kpi-card"><CardContent className="p-5">
+        <Card className="kpi-card"><CardContent className="p-4">
           <div className="flex items-start justify-between">
             <div><p className="text-xs font-medium uppercase tracking-wider text-gray-500 mb-1">Top Bus</p>
-            <p className="text-2xl font-semibold text-[#2563EB]" style={{ fontFamily: 'Inter' }}>{topBuses[0]?.bus_id || "-"}</p>
+            <p className="text-lg font-bold text-[#2563EB]" style={{ fontFamily: 'Inter' }}>{topBuses[0]?.bus_id || "-"}</p>
             <p className="text-xs text-gray-400 mt-0.5">{inNum(topBuses[0]?.actual_km ?? 0)} km</p></div>
             <Bus size={18} className="text-[#2563EB]" />
           </div>
@@ -187,7 +209,7 @@ export default function KmDetailPage() {
 
       {/* Chart */}
       <Card className="border-gray-200 shadow-sm mb-6">
-        <CardHeader className="pb-2"><CardTitle className="text-base font-medium">KM Trend ({period})</CardTitle></CardHeader>
+        <CardHeader className="pb-2"><CardTitle className="font-medium">KM Trend ({period})</CardTitle></CardHeader>
         <CardContent>
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
@@ -217,7 +239,7 @@ export default function KmDetailPage() {
 
       {/* Bus-wise KM Table */}
       <Card className="border-gray-200 shadow-sm mb-6">
-        <CardHeader className="pb-2"><CardTitle className="text-base font-medium">Bus-wise KM Summary</CardTitle></CardHeader>
+        <CardHeader className="pb-2"><CardTitle className="font-medium">Bus-wise KM Summary</CardTitle></CardHeader>
         <CardContent className="p-0">
           <Table>
             <TableHeader><TableRow className="table-header">
@@ -249,7 +271,7 @@ export default function KmDetailPage() {
 
       {/* Detail Table */}
       <Card className="border-gray-200 shadow-sm">
-        <CardHeader className="pb-2"><CardTitle className="text-base font-medium">Detailed {period === "daily" ? "Day-wise" : period === "monthly" ? "Month-wise" : "Quarter-wise"} Data</CardTitle></CardHeader>
+        <CardHeader className="pb-2"><CardTitle className="font-medium">Detailed {period === "daily" ? "Day-wise" : period === "monthly" ? "Month-wise" : "Quarter-wise"} Data</CardTitle></CardHeader>
         <CardContent className="p-0">
           <div className="max-h-[400px] overflow-y-auto">
             <Table>
@@ -285,6 +307,12 @@ export default function KmDetailPage() {
           />
         </CardContent>
       </Card>
+        </TabsContent>
+
+        <TabsContent value="approval" className="mt-0 focus-visible:ring-0">
+          <TripKmApprovalPanel />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

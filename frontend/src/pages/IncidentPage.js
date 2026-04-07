@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Link } from "react-router-dom";
 import API, { formatApiError, buildQuery, unwrapListResponse, fetchAllPaginated } from "../lib/api";
 import TablePaginationBar from "../components/TablePaginationBar";
 import TableLoadRows from "../components/TableLoadRows";
@@ -53,9 +52,19 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+function localDatetimeInputValue(d = new Date()) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 const emptyForm = () => ({
   incident_type: "",
   description: "",
+  occurred_at: localDatetimeInputValue(),
+  vehicles_affected: [],
+  vehicles_affected_count: 1,
+  damage_summary: "",
+  engineer_action: "",
   bus_id: "",
   driver_id: "",
   depot: "",
@@ -184,8 +193,21 @@ export default function IncidentPage() {
       toast.error("Type and description are required");
       return;
     }
+    if (!form.occurred_at || !String(form.occurred_at).trim()) {
+      toast.error("Occurred time is required");
+      return;
+    }
     try {
-      await API.post("/incidents", form);
+      const vehicles = Array.isArray(form.vehicles_affected) ? form.vehicles_affected.filter(Boolean) : [];
+      const vehiclesCount = vehicles.length || (form.bus_id ? 1 : Number(form.vehicles_affected_count) || 1);
+      await API.post("/incidents", {
+        ...form,
+        occurred_at: String(form.occurred_at).trim(),
+        vehicles_affected: vehicles,
+        vehicles_affected_count: vehiclesCount,
+        damage_summary: form.damage_summary || "",
+        engineer_action: form.engineer_action || "",
+      });
       toast.success("Incident reported");
       setOpen(false);
       setForm(emptyForm());
@@ -285,17 +307,7 @@ export default function IncidentPage() {
         </Button>
       </div>
 
-      <p className="text-sm text-gray-600 mb-4 max-w-4xl">
-        Log and assign operational cases (breakdowns, accidents, complaints). Incident <strong>types</strong> are fixed — use the dropdown only. For penalties with bus, route, and amount, use{" "}
-        <Link to="/infractions" className="text-[#C8102E] font-medium hover:underline">
-          Infractions
-        </Link>
-        {" "}or{" "}
-        <Link to="/gcc-kpi" className="text-[#C8102E] font-medium hover:underline">
-          GCC KPI
-        </Link>
-        .
-      </p>
+      <p className="text-sm text-gray-600 mb-4 max-w-4xl">Log, assign, and track incident cases.</p>
 
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <div className="space-y-1">
@@ -595,6 +607,76 @@ export default function IncidentPage() {
                 placeholder="What happened, location context, immediate actions…"
               />
             </div>
+            <div className="rounded-md border border-gray-200 bg-white p-3 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>Occurred</Label>
+                  <Input
+                    type="datetime-local"
+                    value={form.occurred_at}
+                    onChange={(e) => setForm({ ...form, occurred_at: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Vehicles affected</Label>
+                  <div className="text-sm text-gray-700">
+                    {(Array.isArray(form.vehicles_affected) ? form.vehicles_affected.length : 0) || (form.bus_id ? 1 : 1)}
+                  </div>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Add affected bus</Label>
+                <Select
+                  value="none"
+                  onValueChange={(v) => {
+                    if (!v || v === "none") return;
+                    const cur = Array.isArray(form.vehicles_affected) ? form.vehicles_affected : [];
+                    if (cur.includes(v)) return;
+                    setForm({ ...form, vehicles_affected: [...cur, v] });
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select bus" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-[18rem]">
+                    <SelectItem value="none">—</SelectItem>
+                    {buses.map((b) => (
+                      <SelectItem key={b.bus_id} value={b.bus_id}>
+                        {b.bus_id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {(form.vehicles_affected || []).length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {form.vehicles_affected.map((id) => (
+                      <button
+                        key={id}
+                        type="button"
+                        className="px-2 py-1 rounded-md border text-xs font-mono text-gray-700 hover:bg-gray-50"
+                        title="Remove"
+                        onClick={() =>
+                          setForm({
+                            ...form,
+                            vehicles_affected: form.vehicles_affected.filter((x) => x !== id),
+                          })
+                        }
+                      >
+                        {id} ×
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+              <div className="space-y-2">
+                <Label>Damage</Label>
+                <Textarea value={form.damage_summary} onChange={(e) => setForm({ ...form, damage_summary: e.target.value })} rows={2} />
+              </div>
+              <div className="space-y-2">
+                <Label>Engineer action</Label>
+                <Textarea value={form.engineer_action} onChange={(e) => setForm({ ...form, engineer_action: e.target.value })} rows={2} />
+              </div>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>Depot</Label>
@@ -633,15 +715,7 @@ export default function IncidentPage() {
                   placeholder="Stable route id"
                 />
               </div>
-              <div className="space-y-2">
-                <Label>Related infraction log ID</Label>
-                <Input
-                  className="font-mono text-xs"
-                  value={form.related_infraction_id}
-                  onChange={(e) => setForm({ ...form, related_infraction_id: e.target.value })}
-                  placeholder="Logged infraction id (IL-…)"
-                />
-              </div>
+              <div className="space-y-2" />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
@@ -786,3 +860,5 @@ export default function IncidentPage() {
     </div>
   );
 }
+
+

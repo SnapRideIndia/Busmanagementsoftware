@@ -103,7 +103,7 @@ export default function BusPage() {
   return (
     <div data-testid="bus-page">
       <div className="page-header">
-        <h1 className="page-title">Bus Master</h1>
+        <h1 className="page-title">Bus Fleet</h1>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => setAssignOpen(true)} data-testid="assign-tender-btn">
             <Link size={14} className="mr-1.5" /> Assign Tender
@@ -113,6 +113,7 @@ export default function BusPage() {
           </Button>
         </div>
       </div>
+      <p className="page-desc mb-3 max-w-3xl">Fleet register by depot, tender, and vehicle type.</p>
 
       <div className="flex flex-wrap gap-3 mb-4 items-end">
         <div className="space-y-1">

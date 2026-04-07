@@ -1,7 +1,7 @@
 import requests
 import sys
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 class BusManagementTester:
     def __init__(self, base_url="https://bus-management-pro.preview.emergentagent.com"):
@@ -231,6 +231,10 @@ class BusManagementTester:
         success, live_data = self.run_test("Live Operations - Bus Positions", "GET", "live-operations", 200)
         if not success:
             return False
+
+        success, _ = self.run_test("Live Tracking - Telemetry positions", "GET", "telemetry/live-positions", 200)
+        if not success:
+            return False
             
         # Get alerts
         success, alerts = self.run_test("Live Operations - Alerts", "GET", "live-operations/alerts", 200)
@@ -387,9 +391,26 @@ class BusManagementTester:
 
     def test_reports(self):
         """Test reports functionality"""
+        success, catalog = self.run_test("Reports - Catalog", "GET", "reports/catalog", 200)
+        if not success:
+            return False
+        if not isinstance(catalog, list) or len(catalog) < 4:
+            print("❌ Failed - Reports catalog should be a non-empty list")
+            self.failed_tests.append("Reports catalog: invalid response shape")
+            return False
+
         # Test different report types
-        report_types = ["operations", "energy", "incidents", "billing"]
-        
+        report_types = [
+            "operations",
+            "energy",
+            "incidents",
+            "billing",
+            "ticket_revenue",
+            "km_gps",
+            "energy_efficiency",
+            "infractions_logged",
+        ]
+
         for report_type in report_types:
             success, _ = self.run_test(f"Reports - {report_type.title()}", "GET", "reports", 200, 
                                     params={"report_type": report_type})
@@ -432,13 +453,19 @@ class BusManagementTester:
         if not success:
             return False
             
-        # Create new incident
+        # Create new incident (canonical type + PM occurred_at required)
+        occurred = datetime.now(timezone.utc).isoformat()
         new_incident = {
-            "incident_type": "Test Incident",
+            "incident_type": "BREAKDOWN",
             "description": "Test incident for automation",
-            "bus_id": "TS-001",  # Using seeded bus
+            "occurred_at": occurred,
+            "vehicles_affected": ["TS-001"],
+            "vehicles_affected_count": 1,
+            "damage_summary": "Test damage summary",
+            "engineer_action": "",
+            "bus_id": "TS-001",
             "driver_id": "",
-            "severity": "medium"
+            "severity": "medium",
         }
         success, created = self.run_test("Incidents - Create", "POST", "incidents", 200, data=new_incident)
         if not success:
@@ -446,13 +473,12 @@ class BusManagementTester:
             
         incident_id = created.get('id')
         if incident_id:
-            # Update incident status
             success, _ = self.run_test(
-                f"Incidents - Update Status", 
-                "PUT", 
-                f"incidents/{incident_id}", 
+                "Incidents - Update Status",
+                "PUT",
+                f"incidents/{incident_id}",
                 200,
-                params={"status": "investigating"}
+                data={"status": "investigating"},
             )
         
         return success
@@ -800,39 +826,32 @@ class BusManagementTester:
             "Infractions - Get Catalogue",
             "GET",
             "infractions/catalogue",
-            200
+            200,
+            params={"page": 1, "limit": 100},
         )
         if success:
-            print(f"   Catalogue items: {len(catalogue)}")
-            categories = set(item.get('category') for item in catalogue)
+            items = catalogue.get("items", []) if isinstance(catalogue, dict) else catalogue
+            print(f"   Catalogue items: {len(items)}")
+            categories = set(item.get('category') for item in items)
             print(f"   Categories: {sorted(categories)}")
-        
-        # Test add new infraction to catalogue
-        new_infraction = {
-            "code": f"TEST-{datetime.now().strftime('%H%M%S')}",
-            "category": "A",
-            "description": "Test infraction for automation",
-            "amount": 100,
-            "safety_flag": False,
-            "repeat_escalation": True,
-            "active": True
-        }
-        success2, created = self.run_test(
-            "Infractions - Add to Catalogue",
-            "POST",
-            "infractions/catalogue",
-            200,
-            data=new_infraction
+            success_master = categories.issubset({"A", "B", "C", "D", "E", "F", "G"}) and len(items) >= 40
+        else:
+            success_master = False
+            items = []
+
+        success_master_api, master_payload = self.run_test(
+            "Infractions - Master",
+            "GET",
+            "infractions/master",
+            200
         )
-        
-        infraction_id = None
-        if success2:
-            infraction_id = created.get('id')
-            print(f"   Created infraction ID: {infraction_id}")
+        if success_master_api:
+            print(f"   Tender report heads: {len(master_payload.get('report_heads', []))}")
+            success_master_api = len(master_payload.get("report_heads", [])) == 21
         
         # Test log an infraction
-        if catalogue:
-            infraction_code = catalogue[0].get('code', 'A01')
+        if items:
+            infraction_code = items[0].get('code', 'A01')
             log_params = {
                 "bus_id": "TS-001",  # Using seeded bus
                 "driver_id": "",
@@ -845,12 +864,16 @@ class BusManagementTester:
                 "POST",
                 "infractions/log",
                 200,
-                params=log_params
+                data=log_params,
             )
             if success3:
                 print(f"   Logged infraction ID: {logged.get('id')}")
+                log_id = logged.get("id")
+            else:
+                log_id = None
         else:
             success3 = True  # Skip if no catalogue items
+            log_id = None
         
         # Test get logged infractions
         success4, logged_list = self.run_test(
@@ -860,7 +883,8 @@ class BusManagementTester:
             200
         )
         if success4:
-            print(f"   Logged infractions: {len(logged_list)}")
+            rows = logged_list.get("items", []) if isinstance(logged_list, dict) else logged_list
+            print(f"   Logged infractions: {len(rows)}")
         
         # Test get logged infractions with date filter
         today = datetime.now().strftime("%Y-%m-%d")
@@ -873,16 +897,18 @@ class BusManagementTester:
             params={"date_from": week_ago, "date_to": today}
         )
         
-        # Clean up - delete test infraction
-        if infraction_id:
-            success_del, _ = self.run_test(
-                "Infractions - Delete Test Item",
-                "DELETE",
-                f"infractions/catalogue/{infraction_id}",
-                200
+        if log_id:
+            success6, _ = self.run_test(
+                "Infractions - Close Logged",
+                "POST",
+                f"infractions/{log_id}/close",
+                200,
+                data={"status": "closed", "close_remarks": "test close"}
             )
-        
-        return success and success2 and success3 and success4 and success5
+        else:
+            success6 = True
+
+        return success and success_master and success_master_api and success3 and success4 and success5 and success6
 
     def test_billing_workflow(self):
         """Test new Billing Workflow (§12) API endpoints"""

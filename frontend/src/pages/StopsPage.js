@@ -142,7 +142,7 @@ export default function StopsPage() {
         </Button>
       </div>
 
-      <p className="text-sm text-gray-500 mb-4 max-w-3xl">
+      <p className="page-lead max-w-3xl text-gray-500">
         <MapPin className="inline w-4 h-4 mr-1 text-[#C8102E] align-text-bottom" />
         Shared <strong>stop master</strong> — the same stop (e.g. Tarnaka) can appear on multiple routes. Assign ordered stops on the{" "}
         <Link to="/bus-routes" className="text-[#C8102E] font-medium hover:underline">

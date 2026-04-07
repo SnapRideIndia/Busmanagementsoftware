@@ -147,32 +147,32 @@ export default function PassengerDetailPage() {
 
       {/* Summary */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <Card className="kpi-card"><CardContent className="p-5">
+        <Card className="kpi-card"><CardContent className="p-4">
           <div className="flex items-start justify-between">
             <div><p className="text-xs font-medium uppercase tracking-wider text-gray-500 mb-1">Total Passengers</p>
-            <p className="text-2xl font-semibold text-[#8B5CF6]" style={{ fontFamily: 'Inter' }}>{inNum(data?.total_passengers ?? 0)}</p></div>
+            <p className="text-lg font-bold text-[#8B5CF6]" style={{ fontFamily: 'Inter' }}>{inNum(data?.total_passengers ?? 0)}</p></div>
             <Users size={18} className="text-[#8B5CF6]" />
           </div>
         </CardContent></Card>
-        <Card className="kpi-card"><CardContent className="p-5">
+        <Card className="kpi-card"><CardContent className="p-4">
           <div className="flex items-start justify-between">
             <div><p className="text-xs font-medium uppercase tracking-wider text-gray-500 mb-1">Avg {period === "daily" ? "Daily" : period === "monthly" ? "Monthly" : "Quarterly"}</p>
-            <p className="text-2xl font-semibold text-[#2563EB]" style={{ fontFamily: 'Inter' }}>{inNum(Math.round(avgDaily))}</p></div>
+            <p className="text-lg font-bold text-[#2563EB]" style={{ fontFamily: 'Inter' }}>{inNum(Math.round(avgDaily))}</p></div>
             <TrendingUp size={18} className="text-[#2563EB]" />
           </div>
         </CardContent></Card>
-        <Card className="kpi-card"><CardContent className="p-5">
+        <Card className="kpi-card"><CardContent className="p-4">
           <div className="flex items-start justify-between">
             <div><p className="text-xs font-medium uppercase tracking-wider text-gray-500 mb-1">Top Bus</p>
-            <p className="text-2xl font-semibold text-[#16A34A]" style={{ fontFamily: 'Inter' }}>{topBuses[0]?.bus_id || "-"}</p>
+            <p className="text-lg font-bold text-[#16A34A]" style={{ fontFamily: 'Inter' }}>{topBuses[0]?.bus_id || "-"}</p>
             <p className="text-xs text-gray-400 mt-0.5">{inNum(topBuses[0]?.passengers ?? 0)} pax</p></div>
             <Bus size={18} className="text-[#16A34A]" />
           </div>
         </CardContent></Card>
-        <Card className="kpi-card"><CardContent className="p-5">
+        <Card className="kpi-card"><CardContent className="p-4">
           <div className="flex items-start justify-between">
             <div><p className="text-xs font-medium uppercase tracking-wider text-gray-500 mb-1">Top Route</p>
-            <p className="text-lg font-semibold text-[#F59E0B]" style={{ fontFamily: 'Inter' }}>{routeData[0]?.route?.split("-")[0] || "-"}</p>
+            <p className="text-base font-bold text-[#F59E0B]" style={{ fontFamily: 'Inter' }}>{routeData[0]?.route?.split("-")[0] || "-"}</p>
             <p className="text-xs text-gray-400 mt-0.5">{inNum(routeData[0]?.passengers ?? 0)} pax</p></div>
             <MapPin size={18} className="text-[#F59E0B]" />
           </div>
@@ -181,7 +181,7 @@ export default function PassengerDetailPage() {
 
       {/* Chart */}
       <Card className="border-gray-200 shadow-sm mb-6">
-        <CardHeader className="pb-2"><CardTitle className="text-base font-medium">Passenger Trend ({period})</CardTitle></CardHeader>
+        <CardHeader className="pb-2"><CardTitle className="font-medium">Passenger Trend ({period})</CardTitle></CardHeader>
         <CardContent>
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
@@ -208,9 +208,9 @@ export default function PassengerDetailPage() {
       </Card>
 
       {/* Route-wise Table */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
         <Card className="border-gray-200 shadow-sm">
-          <CardHeader className="pb-2"><CardTitle className="text-base font-medium">Route-wise Passengers</CardTitle></CardHeader>
+          <CardHeader className="pb-2"><CardTitle className="font-medium">Route-wise Passengers</CardTitle></CardHeader>
           <CardContent className="p-0">
             <Table>
               <TableHeader><TableRow className="table-header"><TableHead>Route</TableHead><TableHead className="text-right">Passengers</TableHead><TableHead className="text-right">Revenue (Rs)</TableHead></TableRow></TableHeader>
@@ -228,7 +228,7 @@ export default function PassengerDetailPage() {
         </Card>
 
         <Card className="border-gray-200 shadow-sm">
-          <CardHeader className="pb-2"><CardTitle className="text-base font-medium">Bus-wise Passengers</CardTitle></CardHeader>
+          <CardHeader className="pb-2"><CardTitle className="font-medium">Bus-wise Passengers</CardTitle></CardHeader>
           <CardContent className="p-0">
             <Table>
               <TableHeader><TableRow className="table-header"><TableHead>Bus</TableHead><TableHead>Depot</TableHead><TableHead className="text-right">Passengers</TableHead></TableRow></TableHeader>
@@ -248,7 +248,7 @@ export default function PassengerDetailPage() {
 
       {/* Detail Table */}
       <Card className="border-gray-200 shadow-sm">
-        <CardHeader className="pb-2"><CardTitle className="text-base font-medium">Detailed {period === "daily" ? "Day-wise" : period === "monthly" ? "Month-wise" : "Quarter-wise"} Data</CardTitle></CardHeader>
+        <CardHeader className="pb-2"><CardTitle className="font-medium">Detailed {period === "daily" ? "Day-wise" : period === "monthly" ? "Month-wise" : "Quarter-wise"} Data</CardTitle></CardHeader>
         <CardContent className="p-0">
           <div className="max-h-[400px] overflow-y-auto">
             <Table>

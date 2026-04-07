@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
-import API, { buildQuery, unwrapListResponse, formatApiError, fetchAllPaginated } from "../lib/api";
+import API, { buildQuery, formatApiError, fetchAllPaginated, getBackendOrigin } from "../lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import TablePaginationBar from "../components/TablePaginationBar";
 import AsyncPanel from "../components/AsyncPanel";
 import RingLoader from "../components/RingLoader";
-import { BarChart3, TrendingUp, Shield, Clock, Gauge, AlertTriangle, ArrowDown, ArrowUp } from "lucide-react";
+import { BarChart3, TrendingUp, Shield, Clock, Gauge, AlertTriangle, ArrowDown, ArrowUp, Download } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from "recharts";
 
 const FEE_PK_LIMIT = 20;
@@ -102,6 +102,23 @@ export default function GccKpiPage() {
     loadFeePk(1);
   }, [loadKpi, loadFeePk]);
 
+  const downloadKpiReport = useCallback(
+    (fmt) => {
+      const q = new URLSearchParams(
+        buildQuery({
+          period_start: periodStart,
+          period_end: periodEnd,
+          depot,
+          bus_id: busId,
+          fmt,
+        }),
+      );
+      const origin = getBackendOrigin();
+      window.open(`${origin || ""}/api/kpi/gcc-engine/download?${q}`, "_blank");
+    },
+    [periodStart, periodEnd, depot, busId],
+  );
+
   useEffect(() => {
     loadKpi();
     loadFeePk(1);
@@ -151,12 +168,20 @@ export default function GccKpiPage() {
     <div data-testid="gcc-kpi-page">
       <div className="page-header">
         <h1 className="page-title">GCC KPI</h1>
-        <Button onClick={refreshAll} className="bg-[#C8102E] hover:bg-[#A50E25]" data-testid="compute-kpi-btn">
-          <BarChart3 size={14} className="mr-1.5" /> Compute
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button onClick={() => downloadKpiReport("excel")} variant="outline" data-testid="gcc-kpi-download-excel-btn">
+            <Download size={14} className="mr-1.5 text-green-600" /> KPI Excel
+          </Button>
+          <Button onClick={() => downloadKpiReport("pdf")} variant="outline" data-testid="gcc-kpi-download-pdf-btn">
+            <Download size={14} className="mr-1.5 text-red-500" /> KPI PDF
+          </Button>
+          <Button onClick={refreshAll} className="bg-[#C8102E] hover:bg-[#A50E25]" data-testid="compute-kpi-btn">
+            <BarChart3 size={14} className="mr-1.5" /> Compute
+          </Button>
+        </div>
       </div>
 
-      <p className="text-sm text-gray-600 mb-4 max-w-4xl">
+      <p className="page-lead">
         Month-close style damages and incentives. Results are <strong>point-in-time</strong> after Compute (trips and incidents in range). Related data:{" "}
         <Link to="/incidents" className="text-[#C8102E] font-medium hover:underline">
           Incidents
@@ -232,21 +257,21 @@ export default function GccKpiPage() {
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <Card className="kpi-card">
-                  <CardContent className="p-5">
+                  <CardContent className="p-4">
                     <p className="text-xs text-gray-500 uppercase mb-1">Monthly Fee Base</p>
-                    <p className="text-xl font-semibold" style={{ fontFamily: "Inter" }}>
+                    <p className="text-lg font-bold" style={{ fontFamily: "Inter" }}>
                       Rs.{inNum(kpi.monthly_fee_base)}
                     </p>
                     <p className="text-xs text-gray-400">{inNum(kpi.bus_km)} bus-km</p>
                   </CardContent>
                 </Card>
                 <Card className="kpi-card border-red-200">
-                  <CardContent className="p-5">
+                  <CardContent className="p-4">
                     <p className="text-xs text-gray-500 uppercase mb-1 flex items-center gap-1">
                       <ArrowDown size={10} className="text-red-500" />
                       Total Damages (Capped)
                     </p>
-                    <p className="text-xl font-semibold text-[#DC2626]" style={{ fontFamily: "Inter" }}>
+                    <p className="text-lg font-bold text-[#DC2626]" style={{ fontFamily: "Inter" }}>
                       Rs.{inNum(kpi.total_damages_capped)}
                     </p>
                     <p className="text-xs text-gray-400">
@@ -255,12 +280,12 @@ export default function GccKpiPage() {
                   </CardContent>
                 </Card>
                 <Card className="kpi-card border-green-200">
-                  <CardContent className="p-5">
+                  <CardContent className="p-4">
                     <p className="text-xs text-gray-500 uppercase mb-1 flex items-center gap-1">
                       <ArrowUp size={10} className="text-green-500" />
                       Total Incentives (Capped)
                     </p>
-                    <p className="text-xl font-semibold text-[#16A34A]" style={{ fontFamily: "Inter" }}>
+                    <p className="text-lg font-bold text-[#16A34A]" style={{ fontFamily: "Inter" }}>
                       Rs.{inNum(kpi.total_incentive_capped)}
                     </p>
                     <p className="text-xs text-gray-400">
@@ -269,10 +294,10 @@ export default function GccKpiPage() {
                   </CardContent>
                 </Card>
                 <Card className="kpi-card">
-                  <CardContent className="p-5">
+                  <CardContent className="p-4">
                     <p className="text-xs text-gray-500 uppercase mb-1">Net Impact</p>
                     <p
-                      className={`text-xl font-semibold ${kpi.total_incentive_capped - kpi.total_damages_capped >= 0 ? "text-[#16A34A]" : "text-[#DC2626]"}`}
+                      className={`text-lg font-bold ${kpi.total_incentive_capped - kpi.total_damages_capped >= 0 ? "text-[#16A34A]" : "text-[#DC2626]"}`}
                       style={{ fontFamily: "Inter" }}
                     >
                       Rs.{inNum(Math.abs(kpi.total_incentive_capped - kpi.total_damages_capped))}
@@ -349,7 +374,7 @@ export default function GccKpiPage() {
                           {k.label}
                         </Badge>
                       </div>
-                      <p className="text-lg font-semibold" style={{ fontFamily: "Inter" }}>
+                      <p className="text-lg font-bold" style={{ fontFamily: "Inter" }}>
                         {loading ? "…" : k.value}
                       </p>
                       <p className="text-xs text-gray-400">Target: {k.target}</p>
@@ -370,7 +395,7 @@ export default function GccKpiPage() {
 
               <Card className="border-gray-200 shadow-sm">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Damages vs Incentives by Category</CardTitle>
+                  <CardTitle>Damages vs Incentives by Category</CardTitle>
                 </CardHeader>
                 <CardContent>
                   {loading ? (
@@ -418,23 +443,23 @@ export default function GccKpiPage() {
               ) : null}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <Card className="kpi-card">
-                  <CardContent className="p-5">
+                  <CardContent className="p-4">
                     <p className="text-xs text-gray-500 uppercase mb-1">Total Fee (PK)</p>
-                    <p className="text-2xl font-semibold text-[#C8102E]" style={{ fontFamily: "Inter" }}>
+                    <p className="text-lg font-bold text-[#C8102E]" style={{ fontFamily: "Inter" }}>
                       Rs.{inNum(feePk.total_fee)}
                     </p>
                   </CardContent>
                 </Card>
                 <Card className="kpi-card">
-                  <CardContent className="p-5">
+                  <CardContent className="p-4">
                     <p className="text-xs text-gray-500 uppercase mb-1">Buses</p>
-                    <p className="text-2xl font-semibold" style={{ fontFamily: "Inter" }}>
+                    <p className="text-lg font-bold" style={{ fontFamily: "Inter" }}>
                       {inNum(feePk.bus_count)}
                     </p>
                   </CardContent>
                 </Card>
                 <Card className="kpi-card">
-                  <CardContent className="p-5">
+                  <CardContent className="p-4">
                     <p className="text-xs text-gray-500 uppercase mb-1">Fee/PK formula</p>
                     <p className="text-xs text-gray-600 leading-relaxed">
                       actual≥assured: PK×assured + PK×0.5×(act-ass)
@@ -447,7 +472,7 @@ export default function GccKpiPage() {
 
               <Card className="border-gray-200 shadow-sm">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Bus-wise Fee/PK Calculation</CardTitle>
+                  <CardTitle>Bus-wise Fee/PK Calculation</CardTitle>
                 </CardHeader>
                 <CardContent className="p-0">
                   {feePkLoading ? (

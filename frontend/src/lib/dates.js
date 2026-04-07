@@ -19,6 +19,21 @@ export function formatDateIN(value) {
   return s;
 }
 
+/** Date + time in en-IN (24h). ISO strings and timestamps OK. */
+export function formatDateTimeIN(value) {
+  if (value == null || value === "") return "—";
+  const t = Date.parse(String(value).trim());
+  if (Number.isNaN(t)) return "—";
+  return new Date(t).toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
 /** Short axis label for charts (DD/MM). */
 export function formatChartAxisDate(value) {
   if (value == null || value === "") return "";

@@ -53,5 +53,31 @@ class Settings:
         """Writable docs dir for dev credentials (works on Windows + Linux)."""
         return self.backend_root / "memory"
 
+    @property
+    def upload_dir(self) -> Path:
+        """Root directory for user uploads (incident attachments, etc.)."""
+        raw = os.environ.get("UPLOAD_DIR", "").strip()
+        if raw:
+            return Path(raw)
+        return self.backend_root / "uploads"
+
+    @property
+    def max_upload_bytes(self) -> int:
+        return int(os.environ.get("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
+
+    @property
+    def allowed_upload_content_types(self) -> frozenset[str]:
+        raw = os.environ.get("ALLOWED_UPLOAD_MIME", "").strip()
+        if raw:
+            return frozenset(x.strip() for x in raw.split(",") if x.strip())
+        return frozenset(
+            {
+                "image/jpeg",
+                "image/png",
+                "image/webp",
+                "application/pdf",
+            }
+        )
+
 
 settings = Settings()

@@ -63,11 +63,11 @@ export default function LoginPage() {
               <Bus size={24} />
             </div>
             <div>
-              <h1 className="text-2xl font-bold" style={{ fontFamily: 'Inter' }}>TGSRTC</h1>
+              <h1 className="text-xl font-bold" style={{ fontFamily: 'Inter' }}>TGSRTC</h1>
               <p className="text-sm text-white/70">Bus Management System</p>
             </div>
           </div>
-          <h2 className="text-3xl font-semibold mb-4" style={{ fontFamily: 'Inter' }}>
+          <h2 className="text-xl font-bold mb-2" style={{ fontFamily: 'Inter' }}>
             Powering Telangana's Electric Bus Fleet
           </h2>
           <p className="text-white/70 text-sm leading-relaxed">
@@ -86,8 +86,8 @@ export default function LoginPage() {
               </div>
               <span className="font-semibold text-lg text-[#C8102E]" style={{ fontFamily: 'Inter' }}>TGSRTC BMS</span>
             </div>
-            <CardTitle className="text-2xl font-semibold" style={{ fontFamily: 'Inter' }}>Sign in</CardTitle>
-            <p className="text-sm text-gray-500">Enter your credentials to access the dashboard</p>
+            <CardTitle className="text-lg font-bold" style={{ fontFamily: 'Inter' }}>Sign in</CardTitle>
+            <p className="text-xs text-gray-500">Enter your credentials to access the dashboard</p>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleLogin} className="space-y-4">

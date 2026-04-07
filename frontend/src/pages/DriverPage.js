@@ -149,7 +149,7 @@ export default function DriverPage() {
           <Table>
             <TableHeader><TableRow className="table-header">
               <TableHead>Name</TableHead><TableHead>License</TableHead><TableHead>Phone</TableHead>
-              <TableHead>Bus</TableHead><TableHead>Score</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Actions</TableHead>
+              <TableHead>Bus</TableHead><TableHead>Rating</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Actions</TableHead>
             </TableRow></TableHeader>
             <TableBody>
               <TableLoadRows
@@ -167,8 +167,13 @@ export default function DriverPage() {
                     <TableCell>{d.phone || "-"}</TableCell>
                     <TableCell className="font-mono">{d.bus_id || "-"}</TableCell>
                     <TableCell>
-                      <span className={`font-mono font-medium ${d.performance_score >= 90 ? "text-green-600" : d.performance_score >= 70 ? "text-yellow-600" : "text-red-600"}`}>
-                        {d.performance_score?.toFixed(1)}
+                      <span
+                        className={`font-mono font-medium ${
+                          (d.rating ?? 0) >= 4.5 ? "text-green-600" : (d.rating ?? 0) >= 3.5 ? "text-yellow-600" : "text-red-600"
+                        }`}
+                      >
+                        {(d.rating ?? 0).toFixed(1)}
+                        <span className="text-gray-400 font-normal text-xs ml-0.5">/ 5</span>
                       </span>
                     </TableCell>
                     <TableCell><Badge className={d.status === "active" ? "bg-green-100 text-green-700 hover:bg-green-100" : "bg-gray-100 text-gray-600 hover:bg-gray-100"}>{d.status}</Badge></TableCell>
@@ -216,10 +221,16 @@ export default function DriverPage() {
             <div className="space-y-3">
               <p className="font-medium text-lg">{perf.driver?.name}</p>
               <div className="grid grid-cols-2 gap-3">
-                <div className="kpi-card"><p className="text-xs text-gray-500 uppercase">Score</p><p className="text-2xl font-mono font-semibold">{perf.performance_score?.toFixed(1)}</p></div>
-                <div className="kpi-card"><p className="text-xs text-gray-500 uppercase">Total KM</p><p className="text-2xl font-mono font-semibold">{perf.total_km?.toLocaleString()}</p></div>
-                <div className="kpi-card"><p className="text-xs text-gray-500 uppercase">Total Trips</p><p className="text-2xl font-mono font-semibold">{perf.total_trips}</p></div>
-                <div className="kpi-card"><p className="text-xs text-gray-500 uppercase">Incidents</p><p className="text-2xl font-mono font-semibold">{perf.incidents}</p></div>
+                <div className="kpi-card">
+                  <p className="text-xs text-gray-500 uppercase">Rating (out of 5)</p>
+                  <p className="text-xl font-mono font-bold">
+                    {(perf.rating ?? 0).toFixed(1)}
+                    <span className="text-sm text-gray-500 font-normal"> / 5</span>
+                  </p>
+                </div>
+                <div className="kpi-card"><p className="text-xs text-gray-500 uppercase">Total KM</p><p className="text-xl font-mono font-bold">{perf.total_km?.toLocaleString()}</p></div>
+                <div className="kpi-card"><p className="text-xs text-gray-500 uppercase">Total Trips</p><p className="text-xl font-mono font-bold">{perf.total_trips}</p></div>
+                <div className="kpi-card"><p className="text-xs text-gray-500 uppercase">Incidents</p><p className="text-xl font-mono font-bold">{perf.incidents}</p></div>
               </div>
             </div>
           )}

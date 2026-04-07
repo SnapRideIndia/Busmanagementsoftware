@@ -123,7 +123,7 @@ export default function BusinessRulesPage() {
         return (
           <Card key={cat} className="border-gray-200 shadow-sm mb-4">
             <CardHeader className="pb-2">
-              <CardTitle className="text-base font-medium flex items-center gap-2">
+              <CardTitle className="font-medium flex items-center gap-2">
                 <Icon size={16} className={color} />
                 {cat.charAt(0).toUpperCase() + cat.slice(1)} Rules
               </CardTitle>

@@ -1,39 +1,297 @@
-import { useState, useEffect, useCallback } from "react";
-import API, { buildQuery, unwrapListResponse, formatApiError, fetchAllPaginated, getBackendOrigin } from "../lib/api";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
+import API, { buildQuery, formatApiError, fetchAllPaginated, getBackendOrigin } from "../lib/api";
 import TablePaginationBar from "../components/TablePaginationBar";
 import AsyncPanel from "../components/AsyncPanel";
 import RingLoader from "../components/RingLoader";
-import { formatDateIN } from "../lib/dates";
+import { formatDateIN, formatDateTimeIN } from "../lib/dates";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Badge } from "../components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
-import { FileBarChart, Download } from "lucide-react";
+import {
+  BarChart3,
+  Search,
+  Download,
+  Play,
+  FileText,
+  MapPin,
+  AlertTriangle,
+  DollarSign,
+  Shield,
+  Database,
+  Zap,
+  Eye,
+} from "lucide-react";
 import { toast } from "sonner";
 
+const CATEGORY_ICONS = {
+  Operational: Play,
+  Energy: Zap,
+  Incident: AlertTriangle,
+  Billing: DollarSign,
+  Revenue: DollarSign,
+  Infraction: Shield,
+  Statistical: BarChart3,
+  SLA: Shield,
+  Security: Database,
+  "Map Tracking": MapPin,
+};
+
+const CATEGORY_COLORS = {
+  Operational: "bg-green-50 text-green-700 border-green-200",
+  Energy: "bg-amber-50 text-amber-800 border-amber-200",
+  Incident: "bg-orange-50 text-orange-700 border-orange-200",
+  Billing: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  Revenue: "bg-violet-50 text-violet-700 border-violet-200",
+  Infraction: "bg-yellow-50 text-yellow-800 border-yellow-200",
+  Statistical: "bg-purple-50 text-purple-700 border-purple-200",
+  SLA: "bg-indigo-50 text-indigo-700 border-indigo-200",
+  Security: "bg-gray-50 text-gray-700 border-gray-200",
+  "Map Tracking": "bg-blue-50 text-blue-700 border-blue-200",
+};
+
+const OPERATIONS_COLUMN_LABELS = {
+  bus_id: "Bus ID",
+  driver_id: "Driver ID",
+  date: "Date",
+  scheduled_bus_out: "Scheduled bus out",
+  actual_bus_out: "Actual bus out",
+  scheduled_bus_in: "Scheduled bus in",
+  actual_bus_in: "Actual bus in",
+  scheduled_km: "Scheduled KM",
+  actual_km: "Actual KM",
+};
+
+const TRIP_KM_LABELS = {
+  trip_key: "Trip key",
+  km_variance: "KM variance",
+  km_variance_pct: "Variance %",
+  needs_exception_action: "Exception review",
+  exception_action_status: "Exception status",
+  traffic_km_approved: "First verification",
+  maintenance_km_finalized: "Final verification",
+  traffic_km_approved_by: "First by",
+  maintenance_km_finalized_by: "Final by",
+};
+
+const BILLING_WORKFLOW_STATES = [
+  "draft",
+  "submitted",
+  "processing",
+  "proposed",
+  "depot_approved",
+  "regional_approved",
+  "rm_sanctioned",
+  "voucher_raised",
+  "hq_approved",
+  "paid",
+];
+
+const SIMPLE_REPORT_NAMES = {
+  operations: "Operations",
+  km_gps: "KM Operated",
+  trip_km_verification: "Trip KM Verification",
+  energy: "Energy",
+  energy_efficiency: "Energy Efficiency",
+  ticket_revenue: "Revenue & Passengers",
+  incidents: "Incidents",
+  infractions_logged: "Service Infractions",
+  infractions_driver_wise: "Driver Infractions",
+  infractions_vehicle_wise: "Vehicle Infractions",
+  infractions_conductor_wise: "Conductor Infractions",
+  incident_penalty_report: "Incident Penalties",
+  billing: "Billing Summary",
+  billing_trip_wise_km: "Trip KM",
+  billing_day_wise_km: "Day-wise KM",
+  billing_bus_wise_km: "Bus-wise KM",
+  assured_km_reconciliation: "Assured KM Reconciliation",
+  service_wise_infractions: "Service Infractions (Billing)",
+};
+
+function columnsForPreview(reportType, revenuePeriod) {
+  const map = {
+    operations: [
+      "bus_id",
+      "driver_id",
+      "date",
+      "scheduled_bus_out",
+      "actual_bus_out",
+      "scheduled_bus_in",
+      "actual_bus_in",
+      "scheduled_km",
+      "actual_km",
+    ],
+    energy: ["bus_id", "date", "units_charged", "tariff_rate"],
+    incidents: [
+      "id",
+      "incident_type",
+      "channel",
+      "bus_id",
+      "depot",
+      "assigned_team",
+      "severity",
+      "status",
+      "occurred_at",
+      "vehicles_affected_count",
+      "damage_summary",
+      "engineer_action",
+      "attachments_summary",
+      "created_at",
+    ],
+    billing: [
+      "invoice_id",
+      "period_start",
+      "period_end",
+      "depot",
+      "bus_id",
+      "base_payment",
+      "energy_adjustment",
+      "km_incentive",
+      "total_deduction",
+      "final_payable",
+      "status",
+      "workflow_state",
+    ],
+    billing_trip_wise_km: ["date", "bus_id", "route_name", "trip_id", "duty_id", "scheduled_km", "actual_km", "variance_km"],
+    billing_day_wise_km: ["date", "scheduled_km", "actual_km", "variance_km", "achievement_pct"],
+    billing_bus_wise_km: ["bus_id", "trip_count", "scheduled_km", "actual_km", "variance_km", "achievement_pct"],
+    assured_km_reconciliation: ["bus_id", "trip_count", "scheduled_km", "actual_km", "variance_km", "achievement_pct"],
+    service_wise_infractions: ["service", "category", "count", "total_amount"],
+    ticket_revenue:
+      revenuePeriod === "daily"
+        ? ["date", "bus_id", "depot", "route", "passengers", "revenue_amount"]
+        : revenuePeriod === "monthly"
+          ? ["bus_id", "depot", "period", "route", "passengers", "revenue_amount", "days"]
+          : ["bus_id", "depot", "period", "passengers", "revenue_amount", "days"],
+    km_gps: ["bus_id", "date", "depot", "driver_id", "scheduled_km", "actual_km"],
+    energy_efficiency: [
+      "bus_id",
+      "bus_type",
+      "km_operated",
+      "kwh_per_km",
+      "allowed_kwh",
+      "actual_kwh",
+      "efficiency",
+      "allowed_cost",
+      "actual_cost",
+      "adjustment",
+    ],
+    infractions_logged: [
+      "id",
+      "date",
+      "bus_id",
+      "driver_id",
+      "depot",
+      "infraction_code",
+      "category",
+      "amount",
+      "route_name",
+      "related_incident_id",
+      "status",
+      "created_at",
+    ],
+    infractions_driver_wise: ["driver_id", "category", "count", "total_amount"],
+    infractions_vehicle_wise: ["bus_id", "category", "count", "total_amount"],
+    infractions_conductor_wise: ["conductor_id", "count", "total_amount"],
+    incident_penalty_report: [
+      "related_incident_id",
+      "id",
+      "date",
+      "bus_id",
+      "driver_id",
+      "infraction_code",
+      "category",
+      "amount",
+      "status",
+      "close_remarks",
+    ],
+    trip_km_verification: [
+      "trip_key",
+      "bus_id",
+      "depot",
+      "date",
+      "scheduled_km",
+      "actual_km",
+      "km_variance_pct",
+      "traffic_km_approved",
+      "maintenance_km_finalized",
+      "exception_action_status",
+    ],
+  };
+  return map[reportType] || [];
+}
+
+function headerLabel(reportType, col) {
+  if (reportType === "operations" && OPERATIONS_COLUMN_LABELS[col]) return OPERATIONS_COLUMN_LABELS[col];
+  if (reportType === "trip_km_verification" && TRIP_KM_LABELS[col]) return TRIP_KM_LABELS[col];
+  return col.replace(/_/g, " ");
+}
+
 export default function ReportsPage() {
-  const [reportType, setReportType] = useState("operations");
+  const navigate = useNavigate();
+  const [catalog, setCatalog] = useState([]);
+  const [catalogError, setCatalogError] = useState(null);
+  const [search, setSearch] = useState("");
+  const [activeCategory, setActiveCategory] = useState("all");
+  const [selectedId, setSelectedId] = useState(null);
+
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [depot, setDepot] = useState("");
   const [busId, setBusId] = useState("");
+  const [route, setRoute] = useState("");
+  const [revenuePeriod, setRevenuePeriod] = useState("daily");
+  const [queue, setQueue] = useState("all");
   const [incStatus, setIncStatus] = useState("");
   const [incType, setIncType] = useState("");
   const [incSeverity, setIncSeverity] = useState("");
+  const [workflowState, setWorkflowState] = useState("");
+  const [invoiceId, setInvoiceId] = useState("");
+  const [tripId, setTripId] = useState("");
+  const [dutyId, setDutyId] = useState("");
+  const [incOccurredFrom, setIncOccurredFrom] = useState("");
+  const [incOccurredTo, setIncOccurredTo] = useState("");
+  const [infCategory, setInfCategory] = useState("");
+  const [driverId, setDriverId] = useState("");
+  const [infractionCode, setInfractionCode] = useState("");
+  const [routeId, setRouteId] = useState("");
+  const [infractionRouteName, setInfractionRouteName] = useState("");
+  const [relatedIncidentId, setRelatedIncidentId] = useState("");
+
   const [allBuses, setAllBuses] = useState([]);
   const [meta, setMeta] = useState(null);
+  const [routesList, setRoutesList] = useState([]);
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [generateError, setGenerateError] = useState(null);
   const [pageError, setPageError] = useState(null);
 
-  const formatReportCell = useCallback((col, val) => {
-    if (val == null || val === "") return "-";
-    if (typeof val === "number") return val.toLocaleString("en-IN");
-    if (["date", "period_start", "period_end"].includes(col) && typeof val === "string") return formatDateIN(val);
-    return String(val);
+  const selected = useMemo(
+    () => catalog.find((r) => r.id === selectedId) || null,
+    [catalog, selectedId],
+  );
+  const simpleReportName = useCallback((entry) => {
+    if (!entry) return "";
+    return SIMPLE_REPORT_NAMES[entry.report_type] || entry.name;
+  }, []);
+  const reportType = selected?.report_type || "operations";
+  const filters = useMemo(() => selected?.filters || [], [selected]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await API.get("/reports/catalog");
+        setCatalog(Array.isArray(data) ? data : []);
+        setCatalogError(null);
+      } catch (e) {
+        setCatalog([]);
+        setCatalogError(formatApiError(e.response?.data?.detail) || e.message || "Failed to load report list");
+      }
+    })();
   }, []);
 
   useEffect(() => {
@@ -48,55 +306,176 @@ export default function ReportsPage() {
     })();
   }, []);
 
-  const depotsList = [...new Set(allBuses.map((b) => b.depot).filter(Boolean))].sort();
+  useEffect(() => {
+    if (!catalog.length) {
+      setSelectedId(null);
+      return;
+    }
+    setSelectedId((prev) => (prev && catalog.some((r) => r.id === prev) ? prev : catalog[0].id));
+  }, [catalog]);
+
+  useEffect(() => {
+    if (!filters.includes("route")) return;
+    (async () => {
+      try {
+        const { data } = await API.get("/revenue/details", { params: { limit: 1, page: 1 } });
+        setRoutesList(data.routes || []);
+      } catch {
+        setRoutesList([]);
+      }
+    })();
+  }, [filters, selectedId]);
+
+  const depotsList = useMemo(
+    () => [...new Set(allBuses.map((b) => b.depot).filter(Boolean))].sort(),
+    [allBuses],
+  );
   const busesForSelect = depot ? allBuses.filter((b) => b.depot === depot) : allBuses;
 
-  const reportParams = (pageOverride) => {
-    const pg = pageOverride ?? page;
-    const p = { report_type: reportType, date_from: dateFrom, date_to: dateTo, page: pg, limit: 20 };
-    if (["operations", "energy", "incidents"].includes(reportType)) {
-      p.depot = depot;
-      p.bus_id = busId;
-    }
-    if (reportType === "billing") p.depot = depot;
-    if (reportType === "incidents") {
-      p.status = incStatus;
-      p.incident_type = incType;
-      p.severity = incSeverity;
-    }
-    return buildQuery(p);
-  };
+  const categories = useMemo(() => ["all", ...new Set(catalog.map((r) => r.category))], [catalog]);
+  const filteredCatalog = useMemo(() => {
+    return catalog.filter((r) => {
+      if (activeCategory !== "all" && r.category !== activeCategory) return false;
+      if (search && !r.name.toLowerCase().includes(search.toLowerCase()) && !r.description?.toLowerCase().includes(search.toLowerCase()))
+        return false;
+      return true;
+    });
+  }, [catalog, activeCategory, search]);
 
-  const generate = async () => {
-    setPage(1);
-    setLoading(true);
-    setGenerateError(null);
-    setPageError(null);
-    try {
-      const { data } = await API.get("/reports", { params: reportParams(1) });
-      setReport(data);
-      toast.success(`${data.count} records found`);
-    } catch (err) {
-      const msg = formatApiError(err.response?.data?.detail) || err.message || "Failed to generate report";
-      setGenerateError(msg);
-      setReport(null);
-      toast.error(msg);
-    } finally {
-      setLoading(false);
+  useEffect(() => {
+    if (!filteredCatalog.length) {
+      setSelectedId(null);
+      return;
     }
+    setSelectedId((prev) => (prev && filteredCatalog.some((r) => r.id === prev) ? prev : filteredCatalog[0].id));
+  }, [filteredCatalog]);
+
+  const formatReportCell = useCallback((col, val) => {
+    if (val == null || val === "") return "-";
+    if (typeof val === "boolean") return val ? "Yes" : "No";
+    if (typeof val === "number") return val.toLocaleString("en-IN");
+    if (["date", "period_start", "period_end"].includes(col) && typeof val === "string") return formatDateIN(val);
+    if (["created_at", "occurred_at", "updated_at"].includes(col) && typeof val === "string") return formatDateTimeIN(val);
+    return String(val);
+  }, []);
+
+  const buildParamsForEntry = useCallback(
+    (entry, pageOverride) => {
+      const pg = pageOverride ?? page;
+      if (!entry) return buildQuery({});
+      const rt = entry.report_type;
+      const fl = entry.filters || [];
+      const p = {
+        report_type: rt,
+        date_from: dateFrom,
+        date_to: dateTo,
+        page: pg,
+        limit: 20,
+      };
+      if (fl.includes("depot")) p.depot = depot;
+      if (fl.includes("bus_id")) p.bus_id = busId;
+      if (fl.includes("route")) p.route = route;
+      if (fl.includes("period")) p.period = revenuePeriod;
+      if (fl.includes("queue")) p.queue = queue;
+      if (fl.includes("status")) p.status = incStatus;
+      if (fl.includes("workflow_state")) p.workflow_state = workflowState;
+      if (fl.includes("invoice_id")) p.invoice_id = invoiceId;
+      if (fl.includes("trip_id")) p.trip_id = tripId;
+      if (fl.includes("duty_id")) p.duty_id = dutyId;
+      if (fl.includes("incident_type")) p.incident_type = incType;
+      if (fl.includes("severity")) p.severity = incSeverity;
+      if (fl.includes("category")) p.category = infCategory;
+      if (fl.includes("driver_id")) p.driver_id = driverId;
+      if (fl.includes("infraction_code")) p.infraction_code = infractionCode;
+      if (fl.includes("route_id")) p.route_id = routeId;
+      if (fl.includes("infraction_route_name")) p.infraction_route_name = infractionRouteName;
+      if (fl.includes("related_incident_id")) p.related_incident_id = relatedIncidentId;
+      if (fl.includes("occurred_from")) p.occurred_from = incOccurredFrom;
+      if (fl.includes("occurred_to")) p.occurred_to = incOccurredTo;
+      return buildQuery(p);
+    },
+    [
+      page,
+      dateFrom,
+      dateTo,
+      depot,
+      busId,
+      route,
+      revenuePeriod,
+      queue,
+      incStatus,
+      incType,
+      incSeverity,
+      workflowState,
+      invoiceId,
+      tripId,
+      dutyId,
+      incOccurredFrom,
+      incOccurredTo,
+      infCategory,
+      driverId,
+      infractionCode,
+      routeId,
+      infractionRouteName,
+      relatedIncidentId,
+    ],
+  );
+
+  const generate = async (entryOverride) => {
+    const isReportEntry =
+      entryOverride &&
+      typeof entryOverride === "object" &&
+      !("preventDefault" in entryOverride) &&
+      "report_type" in entryOverride;
+    const entry = isReportEntry ? entryOverride : selected;
+    if (!entry || !entry.report_type) {
+      toast.error("Choose a report first");
+      return;
+    }
+    const params = buildParamsForEntry(entry, 1);
+    params.report_type = entry.report_type;
+    const displayName = simpleReportName(entry);
+    const q = new URLSearchParams({
+      ...params,
+      ...(displayName && displayName !== "undefined" ? { report_name: displayName } : {}),
+    });
+    navigate(`/reports/view?${q.toString()}`);
   };
 
   useEffect(() => {
     setPage(1);
     setReport(null);
-  }, [reportType, dateFrom, dateTo, depot, busId, incStatus, incType, incSeverity]);
+  }, [
+    selectedId,
+    reportType,
+    dateFrom,
+    dateTo,
+    depot,
+    busId,
+    route,
+    revenuePeriod,
+    queue,
+    incStatus,
+    incType,
+    incSeverity,
+    workflowState,
+    invoiceId,
+    tripId,
+    dutyId,
+    infCategory,
+    driverId,
+    infractionCode,
+    routeId,
+    infractionRouteName,
+    relatedIncidentId,
+  ]);
 
   const goReportPage = async (p) => {
-    if (!report) return;
+    if (!report || !selected) return;
     setLoading(true);
     setPageError(null);
     try {
-      const { data } = await API.get("/reports", { params: reportParams(p) });
+      const { data } = await API.get("/reports", { params: buildParamsForEntry(selected, p) });
       setReport(data);
       setPage(p);
     } catch (err) {
@@ -108,155 +487,403 @@ export default function ReportsPage() {
     }
   };
 
-  const download = (fmt) => {
-    const q = new URLSearchParams({ ...reportParams(1), fmt });
+  const download = (fmt, entryOverride) => {
+    const entry = entryOverride ?? selected;
+    if (!entry) {
+      toast.error("Choose a report first");
+      return;
+    }
+    const q = new URLSearchParams({ ...buildParamsForEntry(entry, 1), fmt });
     const o = getBackendOrigin();
     window.open(`${o || ""}/api/reports/download?${q}`, "_blank");
   };
 
-  const cols = {
-    operations: ["bus_id", "driver_id", "date", "scheduled_km", "actual_km"],
-    energy: ["bus_id", "date", "units_charged", "tariff_rate"],
-    incidents: ["id", "incident_type", "bus_id", "severity", "status"],
-    billing: ["invoice_id", "period_start", "period_end", "base_payment", "final_payable"],
-  };
+  const previewCols = columnsForPreview(reportType, revenuePeriod);
 
   return (
-    <div data-testid="reports-page">
-      <div className="page-header">
-        <h1 className="page-title">Reports</h1>
+    <div data-testid="reports-page" className="space-y-4">
+      <div className="page-header flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+        <div>
+          <h1 className="page-title text-2xl font-bold text-[#1A1A1A] tracking-tight">Reports &amp; MIS center</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            {catalog.length ? `${catalog.length} reports available` : catalogError ? "Report list unavailable" : "Loading…"}
+          </p>
+        </div>
       </div>
 
-      <Card className="border-gray-200 shadow-sm mb-6">
-        <CardContent className="p-6">
-          <div className="flex flex-wrap gap-3 items-end">
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium uppercase text-gray-500">Report Type</label>
-              <Select value={reportType} onValueChange={setReportType}>
-                <SelectTrigger className="w-48" data-testid="report-type-select"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="operations">Operations</SelectItem>
-                  <SelectItem value="energy">Energy</SelectItem>
-                  <SelectItem value="incidents">Incidents</SelectItem>
-                  <SelectItem value="billing">Billing</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium uppercase text-gray-500">From</label>
-              <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-40" data-testid="report-date-from" />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium uppercase text-gray-500">To</label>
-              <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-40" data-testid="report-date-to" />
-            </div>
-            {(reportType === "operations" || reportType === "energy") && (
-              <>
+      {catalogError ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-900">{catalogError}</div>
+      ) : null}
+
+      <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
+        <div className="flex items-center gap-2 bg-white rounded-lg px-3 py-2 border border-gray-200 flex-1 max-w-md">
+          <Search className="w-4 h-4 text-gray-400 shrink-0" />
+          <input
+            type="text"
+            placeholder="Search reports…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="bg-transparent text-sm outline-none flex-1 min-w-0"
+            data-testid="report-search"
+          />
+        </div>
+      </div>
+
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {categories.map((cat) => (
+          <button
+            key={cat}
+            type="button"
+            onClick={() => setActiveCategory(cat)}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md border whitespace-nowrap transition-colors ${
+              activeCategory === cat
+                ? "bg-[#C8102E] text-white border-[#C8102E]"
+                : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
+            }`}
+            data-testid={`cat-${cat}`}
+          >
+            {cat === "all" ? "All reports" : cat}
+          </button>
+        ))}
+      </div>
+
+      {catalog.length > 0 && selected ? (
+        <Card className="border-gray-200 shadow-sm">
+          <CardHeader className="pb-2 border-b border-gray-100 bg-gray-50/50">
+            <CardTitle className="text-sm font-semibold text-[#1A1A1A]">Filters</CardTitle>
+          </CardHeader>
+          <CardContent className="p-4">
+            <div className="flex flex-wrap gap-3 items-end">
+              <div className="space-y-1.5 w-full sm:w-auto basis-full sm:basis-auto">
+                <label className="text-xs font-medium uppercase text-gray-500">Report</label>
+                <Select value={selectedId || ""} onValueChange={setSelectedId}>
+                  <SelectTrigger className="w-full sm:w-[min(100%,280px)]" data-testid="report-type-select">
+                    <SelectValue placeholder="Select report" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {catalog.map((r) => (
+                      <SelectItem key={r.id} value={r.id}>
+                        {simpleReportName(r)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {filters.includes("date_from") ? (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium uppercase text-gray-500">From</label>
+                  <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-40" data-testid="report-date-from" />
+                </div>
+              ) : null}
+              {filters.includes("date_to") ? (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium uppercase text-gray-500">To</label>
+                  <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-40" data-testid="report-date-to" />
+                </div>
+              ) : null}
+              {filters.includes("occurred_from") ? (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium uppercase text-gray-500">Occurred from</label>
+                  <Input type="date" value={incOccurredFrom} onChange={(e) => setIncOccurredFrom(e.target.value)} className="w-40" />
+                </div>
+              ) : null}
+              {filters.includes("occurred_to") ? (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium uppercase text-gray-500">Occurred to</label>
+                  <Input type="date" value={incOccurredTo} onChange={(e) => setIncOccurredTo(e.target.value)} className="w-40" />
+                </div>
+              ) : null}
+              {filters.includes("depot") ? (
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium uppercase text-gray-500">Depot</label>
-                  <Select value={depot || "all"} onValueChange={(v) => { setDepot(v === "all" ? "" : v); setBusId(""); }}>
-                    <SelectTrigger className="w-44"><SelectValue placeholder="All Depots" /></SelectTrigger>
+                  <Select
+                    value={depot || "all"}
+                    onValueChange={(v) => {
+                      setDepot(v === "all" ? "" : v);
+                      setBusId("");
+                    }}
+                  >
+                    <SelectTrigger className="w-44">
+                      <SelectValue placeholder="All depots" />
+                    </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Depots</SelectItem>
-                      {depotsList.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                      <SelectItem value="all">All depots</SelectItem>
+                      {depotsList.map((d) => (
+                        <SelectItem key={d} value={d}>
+                          {d}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
+              ) : null}
+              {filters.includes("bus_id") ? (
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium uppercase text-gray-500">Bus</label>
                   <Select value={busId || "all"} onValueChange={(v) => setBusId(v === "all" ? "" : v)}>
-                    <SelectTrigger className="w-36"><SelectValue placeholder="All Buses" /></SelectTrigger>
+                    <SelectTrigger className="w-36">
+                      <SelectValue placeholder="All buses" />
+                    </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Buses</SelectItem>
-                      {busesForSelect.map((b) => <SelectItem key={b.bus_id} value={b.bus_id}>{b.bus_id}</SelectItem>)}
+                      <SelectItem value="all">All buses</SelectItem>
+                      {busesForSelect.map((b) => (
+                        <SelectItem key={b.bus_id} value={b.bus_id}>
+                          {b.bus_id}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
-              </>
-            )}
-            {reportType === "incidents" && (
-              <>
+              ) : null}
+              {filters.includes("route") ? (
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium uppercase text-gray-500">Depot</label>
-                  <Select value={depot || "all"} onValueChange={(v) => { setDepot(v === "all" ? "" : v); setBusId(""); }}>
-                    <SelectTrigger className="w-44"><SelectValue placeholder="All Depots" /></SelectTrigger>
+                  <label className="text-xs font-medium uppercase text-gray-500">Route</label>
+                  <Select value={route || "all"} onValueChange={(v) => setRoute(v === "all" ? "" : v)}>
+                    <SelectTrigger className="w-48">
+                      <SelectValue placeholder="All routes" />
+                    </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Depots</SelectItem>
-                      {depotsList.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                      <SelectItem value="all">All routes</SelectItem>
+                      {routesList.map((rt) => (
+                        <SelectItem key={rt} value={rt}>
+                          {rt}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
+              ) : null}
+              {filters.includes("period") ? (
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium uppercase text-gray-500">Bus</label>
-                  <Select value={busId || "all"} onValueChange={(v) => setBusId(v === "all" ? "" : v)}>
-                    <SelectTrigger className="w-36"><SelectValue placeholder="All Buses" /></SelectTrigger>
+                  <label className="text-xs font-medium uppercase text-gray-500">Period</label>
+                  <Select value={revenuePeriod} onValueChange={setRevenuePeriod}>
+                    <SelectTrigger className="w-40">
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Buses</SelectItem>
-                      {busesForSelect.map((b) => <SelectItem key={b.bus_id} value={b.bus_id}>{b.bus_id}</SelectItem>)}
+                      <SelectItem value="daily">Daily</SelectItem>
+                      <SelectItem value="monthly">Monthly</SelectItem>
+                      <SelectItem value="quarterly">Quarterly</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+              ) : null}
+              {filters.includes("queue") ? (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium uppercase text-gray-500">Queue</label>
+                  <Select value={queue} onValueChange={setQueue}>
+                    <SelectTrigger className="w-48">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All</SelectItem>
+                      <SelectItem value="traffic_pending">First verification pending</SelectItem>
+                      <SelectItem value="maintenance_pending">Final verification pending</SelectItem>
+                      <SelectItem value="complete">Complete</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
+              {filters.includes("status") ? (
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium uppercase text-gray-500">Status</label>
                   <Select value={incStatus || "all"} onValueChange={(v) => setIncStatus(v === "all" ? "" : v)}>
-                    <SelectTrigger className="w-36"><SelectValue placeholder="All" /></SelectTrigger>
+                    <SelectTrigger className="w-36">
+                      <SelectValue placeholder="All" />
+                    </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All</SelectItem>
-                      {(meta?.statuses || []).map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                      {(reportType === "billing" ? BILLING_WORKFLOW_STATES : (meta?.statuses || [])).map((s) => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
+              ) : null}
+              {filters.includes("workflow_state") ? (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium uppercase text-gray-500">Workflow state</label>
+                  <Select value={workflowState || "all"} onValueChange={(v) => setWorkflowState(v === "all" ? "" : v)}>
+                    <SelectTrigger className="w-44"><SelectValue placeholder="All" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All</SelectItem>
+                      {BILLING_WORKFLOW_STATES.map((s) => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
+              {filters.includes("invoice_id") ? (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium uppercase text-gray-500">Invoice ID</label>
+                  <Input value={invoiceId} onChange={(e) => setInvoiceId(e.target.value)} placeholder="INV-..." className="w-40 font-mono text-xs" />
+                </div>
+              ) : null}
+              {filters.includes("trip_id") ? (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium uppercase text-gray-500">Trip ID</label>
+                  <Input value={tripId} onChange={(e) => setTripId(e.target.value)} className="w-40 text-xs" />
+                </div>
+              ) : null}
+              {filters.includes("duty_id") ? (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium uppercase text-gray-500">Duty ID</label>
+                  <Input value={dutyId} onChange={(e) => setDutyId(e.target.value)} className="w-40 text-xs" />
+                </div>
+              ) : null}
+              {filters.includes("severity") ? (
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium uppercase text-gray-500">Severity</label>
                   <Select value={incSeverity || "all"} onValueChange={(v) => setIncSeverity(v === "all" ? "" : v)}>
-                    <SelectTrigger className="w-32"><SelectValue placeholder="All" /></SelectTrigger>
+                    <SelectTrigger className="w-32">
+                      <SelectValue placeholder="All" />
+                    </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All</SelectItem>
-                      {(meta?.severities || []).map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                      {(meta?.severities || []).map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {s}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
+              ) : null}
+              {filters.includes("incident_type") ? (
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium uppercase text-gray-500">Type code</label>
                   <Input value={incType} onChange={(e) => setIncType(e.target.value)} placeholder="e.g. OVERSPEED" className="w-36 font-mono text-xs" />
                 </div>
-              </>
-            )}
-            {reportType === "billing" && (
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium uppercase text-gray-500">Depot</label>
-                <Select value={depot || "all"} onValueChange={(v) => setDepot(v === "all" ? "" : v)}>
-                  <SelectTrigger className="w-44"><SelectValue placeholder="All Depots" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Depots</SelectItem>
-                    {depotsList.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-            <Button onClick={generate} disabled={loading} className="bg-[#C8102E] hover:bg-[#A50E25]" data-testid="generate-report-btn">
-              <FileBarChart size={14} className="mr-1.5" /> {loading ? "Loading..." : "Generate"}
-            </Button>
-            <Button onClick={() => download("excel")} variant="outline" data-testid="download-excel-btn">
-              <Download size={14} className="mr-1.5 text-green-600" /> Excel
-            </Button>
-            <Button onClick={() => download("pdf")} variant="outline" data-testid="download-pdf-btn">
-              <Download size={14} className="mr-1.5 text-red-500" /> PDF
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+              ) : null}
+              {filters.includes("category") ? (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium uppercase text-gray-500">Category</label>
+                  <Input value={infCategory} onChange={(e) => setInfCategory(e.target.value)} placeholder="e.g. SAFETY" className="w-32 font-mono text-xs" />
+                </div>
+              ) : null}
+              {filters.includes("driver_id") ? (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium uppercase text-gray-500">Driver ID</label>
+                  <Input value={driverId} onChange={(e) => setDriverId(e.target.value)} placeholder="License no." className="w-36 text-xs" />
+                </div>
+              ) : null}
+              {filters.includes("infraction_code") ? (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium uppercase text-gray-500">Infraction code</label>
+                  <Input value={infractionCode} onChange={(e) => setInfractionCode(e.target.value)} className="w-36 font-mono text-xs" />
+                </div>
+              ) : null}
+              {filters.includes("route_id") ? (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium uppercase text-gray-500">Route ID</label>
+                  <Input value={routeId} onChange={(e) => setRouteId(e.target.value)} className="w-36 text-xs" />
+                </div>
+              ) : null}
+              {filters.includes("infraction_route_name") ? (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium uppercase text-gray-500">Route name contains</label>
+                  <Input value={infractionRouteName} onChange={(e) => setInfractionRouteName(e.target.value)} className="w-44 text-xs" />
+                </div>
+              ) : null}
+              {filters.includes("related_incident_id") ? (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium uppercase text-gray-500">Related incident</label>
+                  <Input value={relatedIncidentId} onChange={(e) => setRelatedIncidentId(e.target.value)} className="w-40 font-mono text-xs" />
+                </div>
+              ) : null}
 
-      {generateError && !loading && !report ? (
-        <AsyncPanel error={generateError} onRetry={generate} />
+              <Button onClick={generate} disabled={loading} className="bg-[#C8102E] hover:bg-[#A50E25]" data-testid="generate-report-btn">
+                <Play size={14} className="mr-1.5" /> {loading ? "Loading…" : "Run preview"}
+              </Button>
+              <Button onClick={() => download("excel")} variant="outline" data-testid="download-excel-btn">
+                <Download size={14} className="mr-1.5 text-green-600" /> Excel
+              </Button>
+              <Button onClick={() => download("pdf")} variant="outline" data-testid="download-pdf-btn">
+                <Download size={14} className="mr-1.5 text-red-500" /> PDF
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       ) : null}
 
-      {report && (
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+        {filteredCatalog.map((r) => {
+          const IconComp = CATEGORY_ICONS[r.category] || FileText;
+          const catCls = CATEGORY_COLORS[r.category] || "bg-gray-50 text-gray-600 border-gray-200";
+          const isSel = selectedId === r.id;
+          return (
+            <Card
+              key={r.id}
+              className={`border rounded-lg transition-shadow cursor-pointer ${isSel ? "ring-2 ring-[#C8102E] border-[#C8102E]" : "border-gray-200 hover:shadow-sm"}`}
+              data-testid={`report-card-${r.id}`}
+              onClick={() => setSelectedId(r.id)}
+            >
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between mb-2">
+                  <div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center">
+                    <IconComp className="w-4 h-4 text-[#C8102E]" strokeWidth={1.5} />
+                  </div>
+                  <Badge variant="outline" className={`text-[9px] border ${catCls}`}>
+                    {r.category}
+                  </Badge>
+                </div>
+                <h3 className="text-sm font-semibold text-[#1A1A1A] mb-1">{simpleReportName(r)}</h3>
+                <p className="text-xs text-gray-500 mb-3 line-clamp-3">{r.description}</p>
+                <div className="flex flex-wrap gap-2" onClick={(e) => e.stopPropagation()}>
+                  <Button
+                    size="sm"
+                    className="h-7 text-xs bg-[#C8102E] hover:bg-[#A50E25] text-white"
+                    onClick={() => {
+                      setSelectedId(r.id);
+                      void generate(r);
+                    }}
+                    disabled={loading && selectedId === r.id}
+                    data-testid={`view-${r.id}`}
+                  >
+                    <Eye className="w-3 h-3 mr-1" /> View
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs"
+                    onClick={() => {
+                      setSelectedId(r.id);
+                      download("excel", r);
+                    }}
+                    data-testid={`excel-${r.id}`}
+                  >
+                    <Download className="w-3 h-3 mr-1 text-green-600" /> Excel
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs"
+                    onClick={() => {
+                      setSelectedId(r.id);
+                      download("pdf", r);
+                    }}
+                    data-testid={`pdf-${r.id}`}
+                  >
+                    <Download className="w-3 h-3 mr-1 text-red-500" /> PDF
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+
+      {generateError && !loading && !report ? <AsyncPanel error={generateError} onRetry={generate} /> : null}
+
+      {report && selected ? (
         <Card className="border-gray-200 shadow-sm">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center justify-between">
-              <span>{report.type?.charAt(0).toUpperCase() + report.type?.slice(1)} Report</span>
-              <span className="text-sm font-normal text-gray-500">{report.count} records (page {report.page} of {report.pages})</span>
+            <CardTitle className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <span>{selected.name} — preview</span>
+              <span className="text-sm font-normal text-gray-500">
+                {report.count} records (page {report.page} of {report.pages})
+              </span>
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
@@ -274,23 +901,37 @@ export default function ReportsPage() {
                 <p className="text-xs text-gray-500">Loading…</p>
               </div>
             ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader><TableRow className="table-header">
-                  {(cols[reportType] || []).map((c) => <TableHead key={c} className="capitalize">{c.replace(/_/g, " ")}</TableHead>)}
-                </TableRow></TableHeader>
-                <TableBody>
-                  {report.data?.map((row, i) => (
-                    <TableRow key={i} className="hover:bg-gray-50">
-                      {(cols[reportType] || []).map((c) => (
-                        <TableCell key={c} className="font-mono text-sm">{formatReportCell(c, row[c])}</TableCell>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="table-header">
+                      {previewCols.map((c) => (
+                        <TableHead key={c} className="whitespace-nowrap">
+                          {headerLabel(reportType, c)}
+                        </TableHead>
                       ))}
                     </TableRow>
-                  ))}
-                  {report.data?.length === 0 && <TableRow><TableCell colSpan={5} className="text-center text-gray-400 py-8">No data</TableCell></TableRow>}
-                </TableBody>
-              </Table>
-            </div>
+                  </TableHeader>
+                  <TableBody>
+                    {report.data?.map((row, i) => (
+                      <TableRow key={i} className="hover:bg-gray-50">
+                        {previewCols.map((c) => (
+                          <TableCell key={c} className="font-mono text-sm">
+                            {formatReportCell(c, row[c])}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))}
+                    {report.data?.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={Math.max(1, previewCols.length)} className="text-center text-gray-400 py-8">
+                          No data
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
             )}
             <TablePaginationBar
               page={report.page ?? 1}
@@ -301,7 +942,7 @@ export default function ReportsPage() {
             />
           </CardContent>
         </Card>
-      )}
+      ) : null}
     </div>
   );
 }

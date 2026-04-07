@@ -77,7 +77,7 @@ export default function SettingsPage() {
       </div>
 
       <Card className="border-gray-200 shadow-sm">
-        <CardHeader><CardTitle className="text-base flex items-center gap-2"><Settings size={16} /> System Configuration</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="flex items-center gap-2"><Settings size={14} /> System Configuration</CardTitle></CardHeader>
         <CardContent>
           {fetchError ? <AsyncPanel error={fetchError} onRetry={load} minHeight="min-h-[120px]" /> : null}
           {!fetchError && loading && settings.length === 0 ? <AsyncPanel loading minHeight="min-h-[200px]" /> : null}
@@ -108,7 +108,7 @@ export default function SettingsPage() {
       </Card>
 
       <Card className="mt-6 border-gray-200 shadow-sm">
-        <CardHeader><CardTitle className="text-base">Add New Setting</CardTitle></CardHeader>
+        <CardHeader><CardTitle>Add New Setting</CardTitle></CardHeader>
         <CardContent>
           <NewSettingForm onSave={() => load()} />
         </CardContent>

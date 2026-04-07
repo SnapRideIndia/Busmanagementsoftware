@@ -192,22 +192,22 @@ export default function EnergyPage() {
           {report && !reportError ? (
         <>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Card className="kpi-card"><CardContent className="p-5">
+            <Card className="kpi-card"><CardContent className="p-4">
               <p className="text-xs text-gray-500 uppercase mb-1">Allowed Energy</p>
-              <p className="text-2xl font-mono font-semibold">{report.summary.total_allowed_kwh?.toLocaleString()} kWh</p>
+              <p className="text-xl font-mono font-bold">{report.summary.total_allowed_kwh?.toLocaleString()} kWh</p>
             </CardContent></Card>
-            <Card className="kpi-card"><CardContent className="p-5">
+            <Card className="kpi-card"><CardContent className="p-4">
               <p className="text-xs text-gray-500 uppercase mb-1">Actual Energy</p>
-              <p className="text-2xl font-mono font-semibold">{report.summary.total_actual_kwh?.toLocaleString()} kWh</p>
+              <p className="text-xl font-mono font-bold">{report.summary.total_actual_kwh?.toLocaleString()} kWh</p>
             </CardContent></Card>
-            <Card className="kpi-card"><CardContent className="p-5">
+            <Card className="kpi-card"><CardContent className="p-4">
               <p className="text-xs text-gray-500 uppercase mb-1">Efficiency</p>
-              <p className={`text-2xl font-mono font-semibold ${report.summary.total_efficiency <= 100 ? "text-green-600" : "text-red-600"}`}>{report.summary.total_efficiency}%</p>
+              <p className={`text-xl font-mono font-bold ${report.summary.total_efficiency <= 100 ? "text-green-600" : "text-red-600"}`}>{report.summary.total_efficiency}%</p>
             </CardContent></Card>
           </div>
 
           <Card className="border-gray-200 shadow-sm">
-            <CardHeader className="pb-2"><CardTitle className="text-base">Energy by Bus</CardTitle></CardHeader>
+            <CardHeader className="pb-2"><CardTitle>Energy by Bus</CardTitle></CardHeader>
             <CardContent>
               <div className="h-64">
                 <ResponsiveContainer>

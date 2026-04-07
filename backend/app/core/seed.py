@@ -10,11 +10,44 @@ from datetime import datetime, timedelta, timezone
 from app.core.config import settings as app_settings
 from app.core.database import db
 from app.core.security import hash_password, verify_password
+from app.domain.permissions import ALL_PERMISSION_IDS, default_permission_ids_for_role
+from app.domain.infractions_master import build_master_rows
+from app.domain.user_roles import ALLOWED_ROLE_IDS, LEGACY_ROLE_TO_CANONICAL
 
 logger = logging.getLogger(__name__)
 
 
 async def run_seed_data():
+    def _to_five_star(raw: float) -> float:
+        """Map legacy 0–100 scores to 0–5 (linear)."""
+        return round(min(5.0, max(0.0, float(raw) / 20.0)), 1)
+
+    async def _migrate_driver_rating():
+        async for doc in db.drivers.find({"performance_score": {"$exists": True}}):
+            r5 = _to_five_star(doc.get("performance_score", 100.0))
+            await db.drivers.update_one(
+                {"_id": doc["_id"]},
+                {"$set": {"rating": r5}, "$unset": {"performance_score": ""}},
+            )
+
+    async def _normalize_driver_ratings_five_star():
+        """Legacy rows stored as 0–100 after rename, or old API default 100.0."""
+        async for doc in db.drivers.find({"rating": {"$gt": 5.01}}):
+            await db.drivers.update_one(
+                {"_id": doc["_id"]},
+                {"$set": {"rating": _to_five_star(doc["rating"])}},
+            )
+
+    async def _normalize_conductor_ratings_five_star():
+        async for doc in db.conductors.find({"rating": {"$gt": 5.01}}):
+            await db.conductors.update_one(
+                {"_id": doc["_id"]},
+                {"$set": {"rating": _to_five_star(doc["rating"])}},
+            )
+
+    await _migrate_driver_rating()
+    await _normalize_driver_ratings_five_star()
+    await _normalize_conductor_ratings_five_star()
     # Admin user
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@tgsrtc.com")
     admin_password = os.environ.get("ADMIN_PASSWORD", "admin123")
@@ -26,11 +59,23 @@ async def run_seed_data():
         })
     elif not verify_password(admin_password, existing["password_hash"]):
         await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": hash_password(admin_password)}})
-    # Extra users
+
+    async def _migrate_legacy_user_roles() -> None:
+        for old_id, new_id in LEGACY_ROLE_TO_CANONICAL.items():
+            await db.users.update_many({"role": old_id}, {"$set": {"role": new_id}})
+
+    await _migrate_legacy_user_roles()
+    await db.users.update_many(
+        {"role": {"$nin": list(ALLOWED_ROLE_IDS)}},
+        {"$set": {"role": "vendor"}},
+    )
+
+    # Demo users — one per tender-aligned role (+ second admin for last-admin tests); local/dev only
     users_seed = [
-        {"email": "depot@tgsrtc.com", "name": "Depot Manager", "role": "depot_manager", "password": "depot123"},
-        {"email": "finance@tgsrtc.com", "name": "Finance Officer", "role": "finance_officer", "password": "finance123"},
-        {"email": "vendor@tgsrtc.com", "name": "Vendor User", "role": "vendor", "password": "vendor123"},
+        {"email": "admin2@tgsrtc.com", "name": "Administrator (2)", "role": "admin", "password": "Admin2123!"},
+        {"email": "management@tgsrtc.com", "name": "Management demo", "role": "management", "password": "Mgmt123!"},
+        {"email": "depot@tgsrtc.com", "name": "Depot operations demo", "role": "depot", "password": "depot123"},
+        {"email": "vendor@tgsrtc.com", "name": "Vendor / concessionaire demo", "role": "vendor", "password": "vendor123"},
     ]
     for u in users_seed:
         if not await db.users.find_one({"email": u["email"]}):
@@ -76,6 +121,35 @@ async def run_seed_data():
                 "kwh_per_km": kwh, "created_at": datetime.now(timezone.utc).isoformat()
             })
         await db.buses.insert_many(buses)
+    # Top up active fleet for live-tracking / telemetry demos (idempotent)
+    target_fleet = 40
+    for _ in range(80):
+        if await db.buses.count_documents({}) >= target_fleet:
+            break
+        existing_ids = [b["bus_id"] for b in await db.buses.find({}, {"bus_id": 1}).to_list(500)]
+        nums = []
+        for bid in existing_ids:
+            if isinstance(bid, str) and bid.startswith("TS-"):
+                try:
+                    nums.append(int(bid.split("-")[1]))
+                except ValueError:
+                    pass
+        ni = max(nums) + 1 if nums else 1
+        bt = random.choice(["12m_ac", "9m_ac", "12m_non_ac"])
+        kwh = {"12m_ac": 1.3, "9m_ac": 1.0, "12m_non_ac": 1.1}.get(bt, 1.0)
+        tid = random.choice(["TND-001", "TND-002", "TND-003"])
+        await db.buses.insert_one(
+            {
+                "bus_id": f"TS-{str(ni).zfill(3)}",
+                "bus_type": bt,
+                "capacity": random.choice([32, 40, 50]),
+                "tender_id": tid,
+                "depot": random.choice(depot_names),
+                "status": "active" if random.random() > 0.12 else random.choice(["maintenance", "inactive"]),
+                "kwh_per_km": kwh,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
     # Drivers
     driver_names = ["Ravi Kumar", "Suresh Reddy", "Venkat Rao", "Anjali Devi", "Prasad M", "Lakshmi K", "Srinivas P", "Kavitha B"]
     if await db.drivers.count_documents({}) == 0:
@@ -86,12 +160,410 @@ async def run_seed_data():
                 "name": name, "license_number": f"TS-DL-{2020+i}-{str(random.randint(1000,9999))}",
                 "phone": f"98{random.randint(10000000, 99999999)}",
                 "bus_id": f"TS-{str(i+1).zfill(3)}" if i < 8 else "",
-                "status": "active", "performance_score": round(random.uniform(75, 100), 1),
+                "status": "active", "rating": round(random.uniform(3.6, 5.0), 1),
                 "penalties": [], "created_at": datetime.now(timezone.utc).isoformat()
             })
         await db.drivers.insert_many(drivers)
+    await db.role_permissions.delete_many({"role_id": {"$nin": list(ALLOWED_ROLE_IDS)}})
+    for rid in ALLOWED_ROLE_IDS:
+        if not await db.role_permissions.find_one({"role_id": rid}):
+            await db.role_permissions.insert_one(
+                {"role_id": rid, "permission_ids": default_permission_ids_for_role(rid)}
+            )
+
+    async def _resync_stale_role_permissions():
+        """Reset matrix rows that reference removed permission ids (catalog upgrades)."""
+        await db.role_permissions.delete_many({"role_id": {"$nin": list(ALLOWED_ROLE_IDS)}})
+        async for doc in db.role_permissions.find({}):
+            rid = doc.get("role_id")
+            ids = list(doc.get("permission_ids") or [])
+            if not ids or any(x not in ALL_PERMISSION_IDS for x in ids):
+                await db.role_permissions.update_one(
+                    {"role_id": rid},
+                    {"$set": {"permission_ids": default_permission_ids_for_role(rid)}},
+                )
+
+    await _resync_stale_role_permissions()
+    if await db.conductors.count_documents({}) == 0:
+        c_names = [
+            "Kiran Rao", "Neha Sharma", "Arun Prasad", "Divya Iyer", "Imran Khan",
+            "Sunita Devi", "Vikram Singh", "Meera Joshi", "Rahul Nair", "Fatima Begum",
+            "Harish Goud", "Priya Kulkarni", "Naveen Babu", "Deepa Reddy",
+        ]
+        cond = []
+        for i, name in enumerate(c_names):
+            cond.append(
+                {
+                    "conductor_id": f"CND-{str(i + 1).zfill(4)}",
+                    "name": name,
+                    "badge_no": f"BDG-{2100 + i}",
+                    "phone": f"97{random.randint(10000000, 99999999)}",
+                    "depot": random.choice(depot_names),
+                    "status": "active" if random.random() > 0.08 else "inactive",
+                    "rating": round(random.uniform(3.7, 5.0), 1),
+                    "total_trips": random.randint(120, 2200),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+        await db.conductors.insert_many(cond)
+
+    # Unified 30-day synchronized operational dataset (replace mode).
+    await db.duty_assignments.delete_many({})
+    await db.trip_data.delete_many({})
+    await db.energy_data.delete_many({})
+    await db.revenue_data.delete_many({})
+    await db.incidents.delete_many({})
+    await db.infractions_logged.delete_many({})
+    await db.billing.delete_many({})
+
+    active_buses = await db.buses.find({"status": "active"}, {"_id": 0}).to_list(500)
+    all_routes = await db.routes.find({"active": True}, {"_id": 0, "route_id": 1, "name": 1, "origin": 1, "destination": 1, "depot": 1, "distance_km": 1}).to_list(200)
+    if not all_routes:
+        all_routes = [
+            {"route_id": "RT-101", "name": "Route-101 Miyapur-Secunderabad", "origin": "Miyapur", "destination": "Secunderabad", "depot": "Miyapur Depot", "distance_km": 28.5}
+        ]
+    drivers_list = await db.drivers.find({"status": "active"}, {"_id": 0}).to_list(500)
+    driver_by_bus = {d.get("bus_id", ""): d for d in drivers_list if d.get("bus_id")}
+    fallback_drivers = list(drivers_list)
+
+    base_now = datetime.now(timezone.utc)
+    trips_docs = []
+    duties_docs = []
+    energy_docs = []
+    revenue_docs = []
+    incidents_docs = []
+    infractions_docs = []
+
+    route_ptr = 0
+    for day_offset in range(30):
+        day_dt = base_now - timedelta(days=day_offset)
+        day = day_dt.strftime("%Y-%m-%d")
+        for bi, bus in enumerate(active_buses):
+            bus_id = bus["bus_id"]
+            drv = driver_by_bus.get(bus_id) or (fallback_drivers[bi % len(fallback_drivers)] if fallback_drivers else {})
+            route = all_routes[route_ptr % len(all_routes)]
+            route_ptr += 1
+
+            duty_id = f"DTY-{day.replace('-', '')}-{bus_id}"
+            start_h = 6 + (bi % 4) * 2
+            duty_trips = []
+            total_actual_km = 0.0
+            total_sched_km = 0.0
+
+            for trip_no in (1, 2):
+                trip_start = start_h + (trip_no - 1) * 3
+                trip_id = f"TRP-{day.replace('-', '')}-{bus_id}-{trip_no}"
+                scheduled_km = float(max(8, round(float(route.get("distance_km", 20) or 20) * random.uniform(0.85, 1.1), 2)))
+                actual_km = float(max(0.0, round(scheduled_km * random.uniform(0.88, 1.06), 2)))
+                total_sched_km += scheduled_km
+                total_actual_km += actual_km
+                passengers = int(max(5, bus.get("capacity", 40) * random.uniform(1.6, 4.5)))
+                revenue_amount = float(round(passengers * random.uniform(9.0, 18.0), 2))
+                traffic_ok = day_offset >= 2
+                maint_ok = day_offset >= 4
+                trip_doc = {
+                    "trip_id": trip_id,
+                    "bus_id": bus_id,
+                    "driver_id": drv.get("license_number", ""),
+                    "date": day,
+                    "scheduled_km": scheduled_km,
+                    "actual_km": actual_km,
+                    "plan_start_time": f"{trip_start:02d}:00",
+                    "plan_end_time": f"{trip_start + 1:02d}:45",
+                    "actual_start_time": f"{trip_start:02d}:{random.choice(['00', '05', '10'])}",
+                    "planned_trip_duration_min": 105,
+                    "actual_end_time": f"{trip_start + 2:02d}:{random.choice(['00', '10', '20'])}",
+                    "start_time": f"{trip_start:02d}:00",
+                    "end_time": f"{trip_start + 2:02d}:00",
+                    "traffic_km_approved": traffic_ok,
+                    "traffic_km_approved_at": day_dt.isoformat() if traffic_ok else "",
+                    "traffic_km_approved_by": "Seed / First verification" if traffic_ok else "",
+                    "maintenance_km_finalized": maint_ok,
+                    "maintenance_km_finalized_at": day_dt.isoformat() if maint_ok else "",
+                    "maintenance_km_finalized_by": "Seed / Final verification" if maint_ok else "",
+                    "route_id": route.get("route_id", ""),
+                    "route_name": route.get("name", ""),
+                    "duty_id": duty_id,
+                }
+                trips_docs.append(trip_doc)
+                duty_trips.append(
+                    {
+                        "trip_number": trip_no,
+                        "trip_id": trip_id,
+                        "start_time": f"{trip_start:02d}:00",
+                        "end_time": f"{trip_start + 2:02d}:00",
+                        "direction": "outward" if trip_no == 1 else "return",
+                    }
+                )
+                revenue_docs.append(
+                    {
+                        "bus_id": bus_id,
+                        "date": day,
+                        "depot": bus.get("depot", ""),
+                        "route": route.get("name", ""),
+                        "revenue_amount": revenue_amount,
+                        "passengers": passengers,
+                        "trip_id": trip_id,
+                        "duty_id": duty_id,
+                        "source": "ticket_issuing_machine",
+                    }
+                )
+
+            kwh_per_km = float(bus.get("kwh_per_km", 1.0) or 1.0)
+            energy_docs.append(
+                {
+                    "bus_id": bus_id,
+                    "date": day,
+                    "units_charged": round(total_actual_km * kwh_per_km * random.uniform(0.95, 1.08), 2),
+                    "tariff_rate": 8.5,
+                }
+            )
+            duties_docs.append(
+                {
+                    "id": duty_id,
+                    "driver_license": drv.get("license_number", ""),
+                    "driver_name": drv.get("name", ""),
+                    "driver_phone": drv.get("phone", ""),
+                    "bus_id": bus_id,
+                    "depot": bus.get("depot", ""),
+                    "route_name": route.get("name", ""),
+                    "start_point": route.get("origin", ""),
+                    "end_point": route.get("destination", ""),
+                    "date": day,
+                    "trips": duty_trips,
+                    "status": "assigned",
+                    "sms_sent": day_offset <= 1,
+                    "sms_message": f"TGSRTC Duty Alert: duty on {day} for {bus_id}",
+                    "created_at": day_dt.isoformat(),
+                    "created_by": "System",
+                }
+            )
+
+            if (bi + day_offset) % 17 == 0:
+                inc_id = f"INC-SEED-{day.replace('-', '')}-{bus_id}"
+                first_trip_id = duty_trips[0]["trip_id"] if duty_trips else ""
+                incidents_docs.append(
+                    {
+                        "id": inc_id,
+                        "incident_type": random.choice(["BREAKDOWN", "ROUTE_DEVIATION", "PASSENGER_COMPLAINT", "ITS_GPS_FAILURE"]),
+                        "description": "Seed synced incident",
+                        "occurred_at": f"{day}T10:00:00+00:00",
+                        "vehicles_affected": [bus_id],
+                        "vehicles_affected_count": 1,
+                        "damage_summary": "",
+                        "engineer_action": "",
+                        "bus_id": bus_id,
+                        "driver_id": drv.get("id", ""),
+                        "depot": bus.get("depot", ""),
+                        "route_name": route.get("name", ""),
+                        "route_id": route.get("route_id", ""),
+                        "trip_id": first_trip_id,
+                        "duty_id": duty_id,
+                        "related_infraction_id": "",
+                        "location_text": route.get("origin", ""),
+                        "severity": random.choice(["low", "medium", "high"]),
+                        "channel": random.choice(["web", "telephonic"]),
+                        "telephonic_reference": "",
+                        "status": random.choice(["open", "assigned", "in_progress"]),
+                        "assigned_team": "Depot Maintenance",
+                        "assigned_to": "",
+                        "reported_by": "System",
+                        "attachments": [],
+                        "created_at": day_dt.isoformat(),
+                        "updated_at": day_dt.isoformat(),
+                        "activity_log": [{"at": day_dt.isoformat(), "action": "created", "by": "System", "detail": "Seed incident"}],
+                    }
+                )
+
+    master_rows = build_master_rows()
+    by_code = {m["code"]: m for m in master_rows}
+    codes = sorted(by_code.keys())
+    for i, inc in enumerate(incidents_docs[: max(20, len(incidents_docs))]):
+        code = codes[i % len(codes)] if codes else ""
+        cat = by_code.get(code, {})
+        infractions_docs.append(
+            {
+                "id": f"IL-{inc['id']}",
+                "bus_id": inc.get("bus_id", ""),
+                "driver_id": inc.get("driver_id", ""),
+                "infraction_code": code,
+                "category": cat.get("category", "A"),
+                "description": cat.get("description", "Seed infraction"),
+                "amount": float(cat.get("amount", 500)),
+                "amount_snapshot": float(cat.get("amount", 500)),
+                "safety_flag": bool(cat.get("safety_flag", False)),
+                "date": inc.get("occurred_at", "")[:10],
+                "remarks": "Auto-linked from seed incident",
+                "logged_by": "System",
+                "created_at": inc.get("created_at", ""),
+                "depot": inc.get("depot", ""),
+                "route_id": inc.get("route_id", ""),
+                "route_name": inc.get("route_name", ""),
+                "trip_id": inc.get("trip_id", ""),
+                "duty_id": inc.get("duty_id", ""),
+                "location_text": inc.get("location_text", ""),
+                "cause_code": "SEED",
+                "related_incident_id": inc.get("id", ""),
+                "status": random.choice(["open", "under_review", "closed"]),
+                "opened_at": inc.get("created_at", ""),
+                "opened_by": "System",
+                "resolve_by": inc.get("occurred_at", "")[:10],
+                "close_remarks": "",
+                "closed_at": "",
+                "closed_by": "",
+            }
+        )
+
+    if duties_docs:
+        await db.duty_assignments.insert_many(duties_docs)
+    if trips_docs:
+        await db.trip_data.insert_many(trips_docs)
+    if energy_docs:
+        await db.energy_data.insert_many(energy_docs)
+    if revenue_docs:
+        await db.revenue_data.insert_many(revenue_docs)
+    if incidents_docs:
+        await db.incidents.insert_many(incidents_docs)
+    if infractions_docs:
+        await db.infractions_logged.insert_many(infractions_docs)
+
+    # Seed synchronized billing invoices for latest period by depot + consolidated.
+    today = base_now.date()
+    p_start = (today - timedelta(days=29)).isoformat()
+    p_end = today.isoformat()
+    depot_values = sorted({b.get("depot", "") for b in active_buses if b.get("depot")}) + ["All"]
+    billing_seed_docs = []
+    for dep in depot_values:
+        dep_buses = [b["bus_id"] for b in active_buses if dep == "All" or b.get("depot") == dep]
+        dep_trips = [t for t in trips_docs if t.get("bus_id") in dep_buses]
+        if not dep_trips:
+            continue
+        tkm = sum(float(t.get("actual_km", 0) or 0) for t in dep_trips)
+        skm = sum(float(t.get("scheduled_km", 0) or 0) for t in dep_trips)
+        avg_pk = 85.0
+        base_payment = tkm * avg_pk
+        dep_energy = [e for e in energy_docs if e.get("bus_id") in dep_buses]
+        actual_kwh = sum(float(e.get("units_charged", 0) or 0) for e in dep_energy)
+        kwh_by_bus = {b["bus_id"]: float(b.get("kwh_per_km", 1.0) or 1.0) for b in active_buses}
+        allowed_kwh = sum(
+            float(t.get("actual_km", 0) or 0) * kwh_by_bus.get(str(t.get("bus_id", "") or ""), 1.0)
+            for t in dep_trips
+        )
+        tariff = 8.5
+        energy_adj = min(actual_kwh, allowed_kwh) * tariff
+        missed_km = max(0.0, skm - tkm)
+        avail_ded = missed_km * avg_pk
+        perf_ded = base_payment * 0.02
+        sys_ded = base_payment * 0.01
+        infra_ded = sum(float(i.get("amount", 0) or 0) for i in infractions_docs if i.get("bus_id") in dep_buses)
+        total_ded = avail_ded + perf_ded + sys_ded + infra_ded
+        excess = max(0.0, tkm - skm)
+        km_inc = excess * avg_pk * 0.5
+        rev_sum = [r for r in revenue_docs if r.get("bus_id") in dep_buses]
+        rev_key = {(r.get("date", ""), r.get("bus_id", ""), r.get("trip_id", "")): r for r in rev_sum}
+        trip_rows = []
+        for t in dep_trips[:3000]:
+            rr = rev_key.get((t.get("date", ""), t.get("bus_id", ""), t.get("trip_id", "")), {})
+            trip_rows.append(
+                {
+                    "date": t.get("date", ""),
+                    "bus_id": t.get("bus_id", ""),
+                    "route_name": t.get("route_name", ""),
+                    "trip_id": t.get("trip_id", ""),
+                    "duty_id": t.get("duty_id", ""),
+                    "scheduled_km": round(float(t.get("scheduled_km", 0) or 0), 2),
+                    "actual_km": round(float(t.get("actual_km", 0) or 0), 2),
+                    "variance_km": round(float(t.get("actual_km", 0) or 0) - float(t.get("scheduled_km", 0) or 0), 2),
+                    "passengers": int(rr.get("passengers", 0) or 0),
+                    "revenue_amount": round(float(rr.get("revenue_amount", 0) or 0), 2),
+                }
+            )
+        bw_map = {}
+        for t in dep_trips:
+            bid = t.get("bus_id", "")
+            cur = bw_map.setdefault(bid, {"bus_id": bid, "depot": dep if dep != "All" else "", "trip_count": 0, "scheduled_km": 0.0, "actual_km": 0.0, "passengers": 0, "revenue_amount": 0.0, "energy_kwh": 0.0})
+            cur["trip_count"] += 1
+            cur["scheduled_km"] += float(t.get("scheduled_km", 0) or 0)
+            cur["actual_km"] += float(t.get("actual_km", 0) or 0)
+        for r in rev_sum:
+            bid = r.get("bus_id", "")
+            if bid in bw_map:
+                bw_map[bid]["passengers"] += int(r.get("passengers", 0) or 0)
+                bw_map[bid]["revenue_amount"] += float(r.get("revenue_amount", 0) or 0)
+        for e in dep_energy:
+            bid = e.get("bus_id", "")
+            if bid in bw_map:
+                bw_map[bid]["energy_kwh"] += float(e.get("units_charged", 0) or 0)
+        billing_seed_docs.append(
+            {
+                "invoice_id": f"INV-SEED-{dep.replace(' ', '')[:8].upper()}",
+                "period_start": p_start,
+                "period_end": p_end,
+                "depot": dep,
+                "selected_bus_id": "",
+                "selected_trip_id": "",
+                "bus_ids": sorted(dep_buses),
+                "bus_count": len(dep_buses),
+                "total_km": round(tkm, 2),
+                "scheduled_km": round(skm, 2),
+                "avg_pk_rate": round(avg_pk, 2),
+                "base_payment": round(base_payment, 2),
+                "allowed_energy_kwh": round(allowed_kwh, 2),
+                "actual_energy_kwh": round(actual_kwh, 2),
+                "tariff_rate": tariff,
+                "allowed_energy_cost": round(allowed_kwh * tariff, 2),
+                "actual_energy_cost": round(actual_kwh * tariff, 2),
+                "energy_adjustment": round(energy_adj, 2),
+                "subsidy": 0.0,
+                "excess_km": round(excess, 2),
+                "km_incentive_factor": 0.5,
+                "km_incentive": round(km_inc, 2),
+                "missed_km": round(missed_km, 2),
+                "availability_deduction": round(avail_ded, 2),
+                "performance_deduction": round(perf_ded, 2),
+                "system_deduction": round(sys_ded, 2),
+                "infractions_deduction": round(infra_ded, 2),
+                "infractions_breakdown": {"total_applied": round(infra_ded, 2), "rows": []},
+                "total_deduction": round(total_ded, 2),
+                "final_payable": round(base_payment + energy_adj + km_inc - total_ded, 2),
+                "bus_wise_summary": [
+                    {
+                        **v,
+                        "scheduled_km": round(v["scheduled_km"], 2),
+                        "actual_km": round(v["actual_km"], 2),
+                        "revenue_amount": round(v["revenue_amount"], 2),
+                        "energy_kwh": round(v["energy_kwh"], 2),
+                    }
+                    for v in sorted(bw_map.values(), key=lambda x: x["bus_id"])
+                ],
+                "trip_wise_details": trip_rows,
+                "invoice_components": {
+                    "base_payment": round(base_payment, 2),
+                    "energy_adjustment": round(energy_adj, 2),
+                    "subsidy_included": False,
+                    "subsidy": 0.0,
+                    "km_incentive": round(km_inc, 2),
+                    "total_deduction": round(total_ded, 2),
+                },
+                "artifact_refs": {
+                    "payment_processing_note": "",
+                    "proposal_note": "",
+                    "show_cause_notice": "",
+                    "gst_proof_ref": "",
+                    "tax_withholding_ref": "",
+                },
+                "approval_dates": {"submitted_at": "", "approved_at": "", "paid_at": ""},
+                "status": random.choice(["draft", "submitted", "proposed", "paid"]),
+                "workflow_state": random.choice(["draft", "submitted", "proposed", "paid"]),
+                "workflow_log": [],
+                "created_at": base_now.isoformat(),
+            }
+        )
+    if billing_seed_docs:
+        await db.billing.insert_many(billing_seed_docs)
+    use_synced_operational_seed = True
     # Trip data (last 30 days)
-    if await db.trip_data.count_documents({}) == 0:
+    if (not use_synced_operational_seed) and await db.trip_data.count_documents({}) == 0:
         trips = []
         buses_list = await db.buses.find({}, {"_id": 0}).to_list(100)
         drivers_list = await db.drivers.find({}, {"_id": 0}).to_list(100)
@@ -114,17 +586,41 @@ async def run_seed_data():
                 def _fmt_mins(m: int) -> str:
                     return f"{m // 60:02d}:{m % 60:02d}"
 
+                # Tender §5 / matrix #10: traffic 1st-level KM sign-off; maintenance final (demo: older days complete).
+                traffic_ok = day_offset >= 2
+                maint_ok = traffic_ok and day_offset >= 5 and random.random() < 0.92
+                now_iso = datetime.now(timezone.utc).isoformat()
                 trips.append({
+                    "trip_id": f"TRP-{bus['bus_id']}-{date}",
                     "bus_id": bus["bus_id"], "driver_id": driver.get("license_number", "") if driver else "",
                     "date": date, "scheduled_km": scheduled, "actual_km": max(actual, 150),
                     "plan_start_time": _fmt_mins(plan_start_min),
+                    "plan_end_time": _fmt_mins(plan_start_min + trip_duration_min),
                     "actual_start_time": _fmt_mins(actual_start_min),
                     "planned_trip_duration_min": trip_duration_min,
                     "actual_end_time": _fmt_mins(actual_end_min),
+                    # Friendly aliases used by KM verification table.
+                    "start_time": _fmt_mins(actual_start_min),
+                    "end_time": _fmt_mins(actual_end_min),
+                    "traffic_km_approved": traffic_ok,
+                    "traffic_km_approved_at": now_iso if traffic_ok else "",
+                    "traffic_km_approved_by": "Seed / First verification" if traffic_ok else "",
+                    "maintenance_km_finalized": maint_ok,
+                    "maintenance_km_finalized_at": now_iso if maint_ok else "",
+                    "maintenance_km_finalized_by": "Seed / Final verification" if maint_ok else "",
                 })
         await db.trip_data.insert_many(trips)
+    # Legacy trip rows: ensure KM approval flags exist (idempotent).
+    await db.trip_data.update_many(
+        {"traffic_km_approved": {"$exists": False}},
+        {"$set": {"traffic_km_approved": False}},
+    )
+    await db.trip_data.update_many(
+        {"maintenance_km_finalized": {"$exists": False}},
+        {"$set": {"maintenance_km_finalized": False}},
+    )
     # Energy data
-    if await db.energy_data.count_documents({}) == 0:
+    if (not use_synced_operational_seed) and await db.energy_data.count_documents({}) == 0:
         energy_records = []
         buses_list = await db.buses.find({"status": "active"}, {"_id": 0}).to_list(100)
         for day_offset in range(30):
@@ -267,7 +763,7 @@ async def run_seed_data():
         )
     tim_route_names = [r["name"] for r in route_seed_docs]
     # Revenue data (Ticket Issuing Machine)
-    if await db.revenue_data.count_documents({}) == 0:
+    if (not use_synced_operational_seed) and await db.revenue_data.count_documents({}) == 0:
         revenue_records = []
         buses_list = await db.buses.find({"status": "active"}, {"_id": 0}).to_list(100)
         for day_offset in range(90):
@@ -286,7 +782,7 @@ async def run_seed_data():
                 })
         await db.revenue_data.insert_many(revenue_records)
     # Sample billing invoices (PK / energy / workflow demos)
-    if await db.billing.count_documents({}) == 0:
+    if (not use_synced_operational_seed) and await db.billing.count_documents({}) == 0:
         today = datetime.now(timezone.utc).date()
         p0_end = today.isoformat()
         p0_start = (today - timedelta(days=30)).isoformat()
@@ -389,7 +885,7 @@ async def run_seed_data():
         ]
         await db.deduction_rules.insert_many(rules)
     # Incidents (canonical IRMS types — prompt §14, §5.7)
-    if await db.incidents.count_documents({}) == 0:
+    if (not use_synced_operational_seed) and await db.incidents.count_documents({}) == 0:
         now_base = datetime.now(timezone.utc)
         seed_specs = [
             ("ACCIDENT", "low", "open", "web", "Minor scrape — no injuries"),
@@ -407,10 +903,19 @@ async def run_seed_data():
                     "id": f"INC-SEED-{str(i + 1).zfill(3)}",
                     "incident_type": itype,
                     "description": desc,
+                    "occurred_at": ts,
+                    "vehicles_affected": [],
+                    "vehicles_affected_count": 1,
+                    "damage_summary": "Seed — minimal damage narrative for PM fields.",
+                    "engineer_action": "Seed — inspection scheduled." if st != "open" else "",
                     "bus_id": f"TS-{str(random.randint(1, 8)).zfill(3)}",
                     "driver_id": f"DRV-{str(random.randint(1, 8)).zfill(3)}",
                     "depot": depot,
                     "route_name": "Sample Route",
+                    "route_id": "",
+                    "trip_id": "",
+                    "duty_id": "",
+                    "related_infraction_id": "",
                     "location_text": "Hyderabad",
                     "severity": sev,
                     "channel": ch,
@@ -419,6 +924,7 @@ async def run_seed_data():
                     "assigned_team": "Depot Maintenance" if st in ("assigned", "in_progress") else "",
                     "assigned_to": "",
                     "reported_by": "System",
+                    "attachments": [],
                     "created_at": ts,
                     "updated_at": ts,
                     "activity_log": [
@@ -444,7 +950,7 @@ async def run_seed_data():
         ]
         await db["settings"].insert_many(app_settings_seed)
     # Duty assignments (sample for today and next 3 days)
-    if await db.duty_assignments.count_documents({}) == 0:
+    if (not use_synced_operational_seed) and await db.duty_assignments.count_documents({}) == 0:
         drivers_list = await db.drivers.find({"status": "active"}, {"_id": 0}).to_list(100)
         buses_list = await db.buses.find({"status": "active"}, {"_id": 0}).to_list(100)
         route_defs = [
@@ -486,28 +992,19 @@ async def run_seed_data():
                     "created_by": "System"
                 })
         await db.duty_assignments.insert_many(duties)
-    # Schedule-S Infraction Catalogue (§19)
-    if await db.infraction_catalogue.count_documents({}) == 0:
-        infractions = [
-            {"id": "INF-A01", "code": "A01", "category": "A", "description": "Minor uniform violation", "amount": 100, "safety_flag": False, "repeat_escalation": True, "active": True},
-            {"id": "INF-A02", "code": "A02", "description": "Late log submission", "category": "A", "amount": 100, "safety_flag": False, "repeat_escalation": True, "active": True},
-            {"id": "INF-B01", "code": "B01", "description": "Rude behaviour to passenger", "category": "B", "amount": 500, "safety_flag": False, "repeat_escalation": True, "active": True},
-            {"id": "INF-B02", "code": "B02", "description": "Unclean bus interior", "category": "B", "amount": 500, "safety_flag": False, "repeat_escalation": True, "active": True},
-            {"id": "INF-C01", "code": "C01", "description": "GPS device tampered", "category": "C", "amount": 1000, "safety_flag": False, "repeat_escalation": True, "active": True},
-            {"id": "INF-C02", "code": "C02", "description": "Skipping scheduled stop", "category": "C", "amount": 1000, "safety_flag": False, "repeat_escalation": True, "active": True},
-            {"id": "INF-D01", "code": "D01", "description": "Unauthorised route deviation", "category": "D", "amount": 1500, "safety_flag": False, "repeat_escalation": True, "active": True},
-            {"id": "INF-D02", "code": "D02", "description": "PIS system disabled", "category": "D", "amount": 1500, "safety_flag": False, "repeat_escalation": True, "active": True},
-            {"id": "INF-E01", "code": "E01", "description": "Overspeeding (>60 km/h city)", "category": "E", "amount": 3000, "safety_flag": True, "repeat_escalation": True, "active": True},
-            {"id": "INF-E02", "code": "E02", "description": "CCTV cameras non-functional", "category": "E", "amount": 3000, "safety_flag": True, "repeat_escalation": True, "active": True},
-            {"id": "INF-F01", "code": "F01", "description": "Fire safety equipment missing", "category": "F", "amount": 10000, "safety_flag": True, "repeat_escalation": False, "active": True},
-            {"id": "INF-F02", "code": "F02", "description": "Critical brake failure", "category": "F", "amount": 10000, "safety_flag": True, "repeat_escalation": False, "active": True},
-            {"id": "INF-G01", "code": "G01", "description": "Major accident due to negligence", "category": "G", "amount": 200000, "safety_flag": True, "repeat_escalation": False, "active": True},
-        ]
-        for inf in infractions:
-            inf["created_at"] = datetime.now(timezone.utc).isoformat()
-        await db.infraction_catalogue.insert_many(infractions)
+    # Schedule-S Infraction Catalogue (§19) — tender-frozen master
+    master = build_master_rows()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for inf in master:
+        payload = dict(inf)
+        payload["created_at"] = payload.get("created_at", now_iso)
+        await db.infraction_catalogue.update_one(
+            {"code": payload["code"]},
+            {"$set": payload},
+            upsert=True,
+        )
     # Logged infractions (Schedule-S history tab)
-    if await db.infractions_logged.count_documents({}) == 0:
+    if (not use_synced_operational_seed) and await db.infractions_logged.count_documents({}) == 0:
         log_specs = [
             ("TS-001", "DRV-001", "A01", "Uniform reminder"),
             ("TS-002", "DRV-002", "B01", "Passenger feedback"),
@@ -547,6 +1044,13 @@ async def run_seed_data():
                 "location_text": "Hyderabad" if i % 2 == 0 else "",
                 "cause_code": "SEED",
                 "related_incident_id": "INC-SEED-001" if i == 0 else "",
+                "status": "open" if i % 3 else "closed",
+                "opened_at": (now_il - timedelta(days=i * 3)).isoformat(),
+                "opened_by": "System",
+                "resolve_by": (now_il - timedelta(days=i * 3 - 2)).strftime("%Y-%m-%d"),
+                "close_remarks": "Closed in seed flow" if i % 3 == 0 else "",
+                "closed_at": (now_il - timedelta(days=i * 3 - 1)).isoformat() if i % 3 == 0 else "",
+                "closed_by": "System" if i % 3 == 0 else "",
             })
         if logged_docs:
             await db.infractions_logged.insert_many(logged_docs)
@@ -613,10 +1117,12 @@ async def run_seed_data():
     cred_path = app_settings.memory_dir / "test_credentials.md"
     with open(cred_path, "w", encoding="utf-8") as f:
         f.write("# Test Credentials\n\n")
-        f.write("## Admin\n- Email: admin@tgsrtc.com\n- Password: admin123\n- Role: admin\n\n")
-        f.write("## Depot Manager\n- Email: depot@tgsrtc.com\n- Password: depot123\n- Role: depot_manager\n\n")
-        f.write("## Finance Officer\n- Email: finance@tgsrtc.com\n- Password: finance123\n- Role: finance_officer\n\n")
-        f.write("## Vendor\n- Email: vendor@tgsrtc.com\n- Password: vendor123\n- Role: vendor\n\n")
-        f.write("## Auth Endpoints\n- POST /api/auth/login\n- POST /api/auth/register\n- GET /api/auth/me\n- POST /api/auth/logout\n")
+        f.write("| Role | Email | Password |\n|------|-------|----------|\n")
+        f.write("| admin | admin@tgsrtc.com | admin123 |\n")
+        f.write("| admin | admin2@tgsrtc.com | Admin2123! |\n")
+        f.write("| management | management@tgsrtc.com | Mgmt123! |\n")
+        f.write("| depot | depot@tgsrtc.com | depot123 |\n")
+        f.write("| vendor | vendor@tgsrtc.com | vendor123 |\n\n")
+        f.write("## Auth\n- POST /api/auth/login — GET /api/auth/me — POST /api/auth/logout\n")
     logger.info("Seed data complete")
 

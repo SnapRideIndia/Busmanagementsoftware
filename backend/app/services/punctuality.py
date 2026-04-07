@@ -26,6 +26,12 @@ from __future__ import annotations
 from typing import Any
 
 
+def minutes_to_hhmm(total_min: int) -> str:
+    """Format minutes-from-midnight as HH:MM (same service day, wraps past midnight)."""
+    m = int(total_min) % (24 * 60)
+    return f"{m // 60:02d}:{m % 60:02d}"
+
+
 def parse_hhmm_to_minutes(value: str | None) -> int | None:
     """Parse 'HH:MM' or 'H:MM' to minutes from midnight; same service day only."""
     if value is None or not isinstance(value, str):

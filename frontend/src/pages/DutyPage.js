@@ -214,6 +214,7 @@ export default function DutyPage() {
                       {d.trips?.map((t) => (
                         <p key={t.trip_number} className="text-xs">
                           <span className="font-medium">Trip {t.trip_number}</span> ({t.direction}): {t.start_time} - {t.end_time}
+                          {t.trip_id ? <span className="ml-1 font-mono text-gray-500">[{t.trip_id}]</span> : null}
                         </p>
                       ))}
                     </div>
@@ -233,7 +234,7 @@ export default function DutyPage() {
           </Card>
         ))}
         {!fetchError && !loading && duties.length === 0 ? (
-          <Card className="border-gray-200"><CardContent className="p-8 text-center text-gray-400">No duties assigned for this date</CardContent></Card>
+          <Card className="border-gray-200"><CardContent className="p-6 text-center text-sm text-gray-400">No duties assigned for this date</CardContent></Card>
         ) : null}
         <TablePaginationBar page={page} pages={listMeta.pages} total={listMeta.total} limit={listMeta.limit} onPageChange={setPage} />
       </div>
@@ -241,12 +242,12 @@ export default function DutyPage() {
       {/* Summary Table */}
       {duties.length > 0 && (
         <Card className="mt-6 border-gray-200 shadow-sm">
-          <CardHeader className="pb-2"><CardTitle className="text-base font-medium">Duty Summary — {formatDateIN(filterDate)}</CardTitle></CardHeader>
+          <CardHeader className="pb-2"><CardTitle className="font-medium">Duty Summary — {formatDateIN(filterDate)}</CardTitle></CardHeader>
           <CardContent className="p-0">
             <Table>
               <TableHeader><TableRow className="table-header">
                 <TableHead>Driver</TableHead><TableHead>Bus</TableHead><TableHead>Route</TableHead>
-                <TableHead>Trip 1</TableHead><TableHead>Trip 2</TableHead><TableHead>SMS</TableHead>
+                <TableHead>Trip 1</TableHead><TableHead>Trip 1 ID</TableHead><TableHead>Trip 2</TableHead><TableHead>Trip 2 ID</TableHead><TableHead>SMS</TableHead>
               </TableRow></TableHeader>
               <TableBody>
                 {duties.map((d) => (
@@ -255,7 +256,9 @@ export default function DutyPage() {
                     <TableCell className="font-mono">{d.bus_id}</TableCell>
                     <TableCell className="text-sm">{d.start_point} &rarr; {d.end_point}</TableCell>
                     <TableCell className="text-sm font-mono">{d.trips?.[0]?.start_time} - {d.trips?.[0]?.end_time}</TableCell>
+                    <TableCell className="text-xs font-mono text-gray-600">{d.trips?.[0]?.trip_id || "—"}</TableCell>
                     <TableCell className="text-sm font-mono">{d.trips?.[1]?.start_time} - {d.trips?.[1]?.end_time}</TableCell>
+                    <TableCell className="text-xs font-mono text-gray-600">{d.trips?.[1]?.trip_id || "—"}</TableCell>
                     <TableCell>{d.sms_sent ? <Badge className="bg-green-100 text-green-700 hover:bg-green-100">Sent</Badge> : <Badge variant="secondary">Pending</Badge>}</TableCell>
                   </TableRow>
                 ))}
@@ -273,14 +276,17 @@ export default function DutyPage() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>Driver</Label>
-                <Select value={form.driver_license} onValueChange={(v) => setForm({ ...form, driver_license: v })}>
+                <Select
+                  value={form.driver_license || undefined}
+                  onValueChange={(v) => setForm({ ...form, driver_license: v })}
+                >
                   <SelectTrigger data-testid="duty-driver-select"><SelectValue placeholder="Select driver" /></SelectTrigger>
                   <SelectContent>{drivers.map((d) => <SelectItem key={d.license_number} value={d.license_number}>{d.name} ({d.license_number})</SelectItem>)}</SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
                 <Label>Bus</Label>
-                <Select value={form.bus_id} onValueChange={(v) => setForm({ ...form, bus_id: v })}>
+                <Select value={form.bus_id || undefined} onValueChange={(v) => setForm({ ...form, bus_id: v })}>
                   <SelectTrigger data-testid="duty-bus-select"><SelectValue placeholder="Select bus" /></SelectTrigger>
                   <SelectContent>{buses.map((b) => <SelectItem key={b.bus_id} value={b.bus_id}>{b.bus_id} ({b.depot})</SelectItem>)}</SelectContent>
                 </Select>
