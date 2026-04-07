@@ -6,7 +6,9 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.domain.incident_evidence import normalize_occurred_at_iso
 from app.domain.incident_types import IncidentChannel, IncidentSeverity, IncidentStatus
+from app.domain.user_roles import ALLOWED_ROLE_IDS, PLATFORM_ADMIN_ROLES
 
 
 class LoginReq(BaseModel):
@@ -19,6 +21,34 @@ class RegisterReq(BaseModel):
     password: str
     name: str
     role: str = "vendor"
+
+    @field_validator("role")
+    @classmethod
+    def register_role_allowed(cls, v: str) -> str:
+        r = (v or "vendor").strip()
+        if r not in ALLOWED_ROLE_IDS:
+            raise ValueError("Invalid role")
+        if r in PLATFORM_ADMIN_ROLES:
+            raise ValueError("Administrator roles cannot be self-registered")
+        return r
+
+
+class UserRoleUpdateReq(BaseModel):
+    role: str
+
+
+class RolePermissionsUpdateReq(BaseModel):
+    permission_ids: list[str]
+
+
+class ConductorReq(BaseModel):
+    name: str = Field(..., min_length=1, max_length=160)
+    badge_no: str = Field(..., min_length=1, max_length=64)
+    phone: str = ""
+    depot: str = ""
+    status: str = "active"
+    rating: float = Field(default=4.5, ge=0, le=5)
+    total_trips: int = 0
 
 
 class ForgotPasswordReq(BaseModel):
@@ -122,6 +152,10 @@ class EnergyReq(BaseModel):
 class IncidentCreateReq(BaseModel):
     incident_type: str = Field(..., min_length=1, max_length=64)
     description: str = Field(..., min_length=1, max_length=8000)
+    occurred_at: str = Field(..., min_length=1, max_length=48)
+    vehicles_affected_count: int = Field(default=1, ge=1, le=999)
+    damage_summary: str = Field(default="", max_length=4000)
+    engineer_action: str = Field(default="", max_length=4000)
     bus_id: str = Field(default="", max_length=64)
     driver_id: str = Field(default="", max_length=64)
     depot: str = Field(default="", max_length=128)
@@ -134,6 +168,11 @@ class IncidentCreateReq(BaseModel):
     severity: str = Field(default=IncidentSeverity.MEDIUM.value)
     channel: str = Field(default=IncidentChannel.WEB.value)
     telephonic_reference: str = Field(default="", max_length=64)
+
+    @field_validator("occurred_at")
+    @classmethod
+    def occurred_at_ok(cls, v: str) -> str:
+        return normalize_occurred_at_iso(v)
 
     @field_validator("severity")
     @classmethod
@@ -157,6 +196,17 @@ class IncidentUpdateReq(BaseModel):
     assigned_team: Optional[str] = Field(default=None, max_length=128)
     assigned_to: Optional[str] = Field(default=None, max_length=128)
     description: Optional[str] = Field(default=None, min_length=1, max_length=8000)
+    occurred_at: Optional[str] = None
+    vehicles_affected_count: Optional[int] = Field(default=None, ge=1, le=999)
+    damage_summary: Optional[str] = Field(default=None, max_length=4000)
+    engineer_action: Optional[str] = Field(default=None, max_length=4000)
+
+    @field_validator("occurred_at")
+    @classmethod
+    def occurred_at_update_ok(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        return normalize_occurred_at_iso(v)
 
     @field_validator("status")
     @classmethod
@@ -170,7 +220,29 @@ class IncidentUpdateReq(BaseModel):
 
 
 class IncidentNoteReq(BaseModel):
+    """Add a note; optional PM fields apply only when sent (model_dump exclude_unset) — overwrites DB."""
+
     note: str = Field(..., min_length=1, max_length=4000)
+    occurred_at: Optional[str] = None
+    vehicles_affected_count: Optional[int] = Field(default=None, ge=1, le=999)
+    damage_summary: Optional[str] = Field(default=None, max_length=4000)
+    engineer_action: Optional[str] = Field(default=None, max_length=4000)
+
+    @field_validator("occurred_at", mode="before")
+    @classmethod
+    def note_occurred_empty_to_none(cls, v: object) -> object:
+        if v is None:
+            return None
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
+
+    @field_validator("occurred_at")
+    @classmethod
+    def note_occurred_normalize(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        return normalize_occurred_at_iso(v)
 
 
 class DeductionRuleReq(BaseModel):
@@ -213,6 +285,21 @@ class DutyReq(BaseModel):
     trips: list = []
 
 
+class TripKmKeysReq(BaseModel):
+    """Keys are ``bus_id|YYYY-MM-DD`` (daily trip row) or optional ``trip_id`` if stored on the document."""
+
+    trip_keys: list[str] = Field(..., min_length=1, max_length=500)
+
+
+class TripKmExceptionReq(BaseModel):
+    """Record administrator action for schedule/kilometre mismatch before first verification."""
+
+    trip_key: str = Field(..., min_length=1, max_length=128)
+    action: str = Field(..., min_length=1, max_length=64)
+    note: str = Field(..., min_length=3, max_length=2000)
+    linked_incident_id: str = Field(default="", max_length=64)
+
+
 class InfractionReq(BaseModel):
     code: str
     category: str
@@ -240,6 +327,11 @@ class InfractionLogReq(BaseModel):
     cause_code: str = Field(default="", max_length=64)
     deductible: bool | None = None
     related_incident_id: str = Field(default="", max_length=64)
+
+
+class InfractionCloseReq(BaseModel):
+    status: str = Field(default="closed", max_length=32)
+    close_remarks: str = Field(default="", max_length=4000)
 
 
 class BillingWorkflowReq(BaseModel):
