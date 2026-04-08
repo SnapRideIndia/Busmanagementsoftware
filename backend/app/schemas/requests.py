@@ -150,6 +150,13 @@ class EnergyReq(BaseModel):
     tariff_rate: float = 10.0
 
 
+class InfractionEntryReq(BaseModel):
+    """One infraction code to embed in an incident."""
+
+    code: str = Field(..., min_length=1, max_length=16)
+    deductible: bool = True
+
+
 class IncidentCreateReq(BaseModel):
     incident_type: str = Field(..., min_length=1, max_length=64)
     description: str = Field(..., min_length=1, max_length=8000)
@@ -170,6 +177,7 @@ class IncidentCreateReq(BaseModel):
     severity: str = Field(default=IncidentSeverity.MEDIUM.value)
     channel: str = Field(default=IncidentChannel.WEB.value)
     telephonic_reference: str = Field(default="", max_length=64)
+    infractions: list[InfractionEntryReq] = Field(default_factory=list)
 
     @field_validator("vehicles_affected", mode="before")
     @classmethod
@@ -227,6 +235,7 @@ class IncidentUpdateReq(BaseModel):
     vehicles_affected_count: Optional[int] = Field(default=None, ge=1, le=999)
     damage_summary: Optional[str] = Field(default=None, max_length=4000)
     engineer_action: Optional[str] = Field(default=None, max_length=4000)
+    infractions: Optional[list[InfractionEntryReq]] = None
 
     @field_validator("vehicles_affected", mode="before")
     @classmethod

@@ -134,8 +134,8 @@ export default function BusinessRulesPage() {
                 {catRules.map(r => (
                   <div key={r.rule_key} className="flex items-center gap-3 p-3 bg-[#FAFAFA] rounded-lg" data-testid={`rule-${r.rule_key}`}>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-[#1A1A1A] truncate">{r.description || r.rule_key}</p>
-                      <p className="text-xs text-gray-400 font-mono">{r.rule_key}</p>
+                      <p className="text-[12px] font-medium text-[#1A1A1A] leading-relaxed">{r.description || r.rule_key}</p>
+                      <p className="text-[12px] text-gray-400 font-mono">{r.rule_key}</p>
                     </div>
                     <Input
                       value={editValues[r.rule_key] || ""}

@@ -4,8 +4,9 @@ export default function TablePaginationBar({
   page = 1,
   pages = 1,
   total = 0,
-  limit = 20,
+  limit = 30,
   onPageChange,
+  onLimitChange,
   className = "",
 }) {
   if (total === 0) return null;
@@ -18,11 +19,28 @@ export default function TablePaginationBar({
       className={`flex flex-wrap items-center justify-between gap-3 py-3 px-2 border-t border-gray-100 bg-gray-50/80 ${className}`}
       data-testid="table-pagination"
     >
-      <p className="text-sm text-gray-600">
-        Showing <span className="font-medium text-gray-900">{from}</span>–
-        <span className="font-medium text-gray-900">{to}</span> of{" "}
-        <span className="font-medium text-gray-900">{total}</span>
-      </p>
+      <div className="flex items-center gap-6">
+        <p className="text-sm text-gray-600">
+          Showing <span className="font-medium text-gray-900">{from}</span>–
+          <span className="font-medium text-gray-900">{to}</span> of{" "}
+          <span className="font-medium text-gray-900">{total}</span>
+        </p>
+        
+        {onLimitChange && (
+          <div className="flex items-center gap-2 border-l pl-6 border-gray-200">
+             <span className="text-[10px] uppercase font-black tracking-widest text-gray-400">Rows</span>
+             <select 
+               value={limit} 
+               onChange={(e) => onLimitChange(Number(e.target.value))}
+               className="bg-transparent border-none text-sm font-bold text-gray-700 focus:ring-0 cursor-pointer hover:text-[#C8102E] transition-colors"
+             >
+               <option value={30}>30</option>
+               <option value={50}>50</option>
+               <option value={100}>100</option>
+             </select>
+          </div>
+        )}
+      </div>
       <div className="flex items-center gap-2">
         <Button type="button" variant="outline" size="sm" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
           Previous

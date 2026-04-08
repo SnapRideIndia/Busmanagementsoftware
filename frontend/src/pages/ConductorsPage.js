@@ -169,7 +169,7 @@ export default function ConductorsPage() {
 
       <Card className="border-gray-200 shadow-sm">
         <CardContent className="p-0">
-          <Table>
+          <Table className="text-[12px]">
             <TableHeader>
               <TableRow className="table-header">
                 <TableHead>ID</TableHead>
@@ -194,9 +194,9 @@ export default function ConductorsPage() {
               >
                 {rows.map((c) => (
                   <TableRow key={c.conductor_id} className="hover:bg-gray-50" data-testid={`conductor-row-${c.conductor_id}`}>
-                    <TableCell className="font-mono text-xs">{c.conductor_id}</TableCell>
+                    <TableCell className="font-mono text-[12px]">{c.conductor_id}</TableCell>
                     <TableCell className="font-medium">{c.name}</TableCell>
-                    <TableCell className="font-mono text-sm">{c.badge_no}</TableCell>
+                    <TableCell className="font-mono text-[12px]">{c.badge_no}</TableCell>
                     <TableCell>{c.phone || "—"}</TableCell>
                     <TableCell>{c.depot || "—"}</TableCell>
                     <TableCell className="font-mono">

@@ -30,7 +30,7 @@ export default function DriverPage() {
   const [filterDepot, setFilterDepot] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [page, setPage] = useState(1);
-  const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 20 });
+  const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 30 });
   const [depotNames, setDepotNames] = useState([]);
   const [allDriversForAssign, setAllDriversForAssign] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -63,7 +63,7 @@ export default function DriverPage() {
     setFetchError(null);
     try {
       const [d, busItems] = await Promise.all([
-        API.get(Endpoints.masters.drivers.list(), { params: buildQuery({ depot: filterDepot, status: filterStatus, page, limit: 20 }) }),
+        API.get(Endpoints.masters.drivers.list(), { params: buildQuery({ depot: filterDepot, status: filterStatus, page, limit: meta.limit }) }),
         fetchAllPaginated(Endpoints.masters.buses.list(), {}),
       ]);
       const du = unwrapListResponse(d.data);
@@ -76,7 +76,7 @@ export default function DriverPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterDepot, filterStatus, page]);
+  }, [filterDepot, filterStatus, page, meta.limit]);
   useEffect(() => {
     load();
   }, [load]);
@@ -147,7 +147,7 @@ export default function DriverPage() {
 
       <Card className="border-gray-200 shadow-sm">
         <CardContent className="p-0">
-          <Table>
+          <Table className="text-[12px]">
             <TableHeader><TableRow className="table-header">
               <TableHead>Name</TableHead><TableHead>License</TableHead><TableHead>Phone</TableHead>
               <TableHead>Bus</TableHead><TableHead>Rating</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Actions</TableHead>
@@ -164,7 +164,7 @@ export default function DriverPage() {
                 {drivers.map((d) => (
                   <TableRow key={d.license_number} className="hover:bg-gray-50" data-testid={`driver-row-${d.license_number}`}>
                     <TableCell className="font-medium">{d.name}</TableCell>
-                    <TableCell className="font-mono text-sm">{d.license_number}</TableCell>
+                    <TableCell className="font-mono text-[12px]">{d.license_number}</TableCell>
                     <TableCell>{d.phone || "-"}</TableCell>
                     <TableCell className="font-mono">{d.bus_id || "-"}</TableCell>
                     <TableCell>
@@ -190,7 +190,14 @@ export default function DriverPage() {
               </TableLoadRows>
             </TableBody>
           </Table>
-          <TablePaginationBar page={page} pages={meta.pages} total={meta.total} limit={meta.limit} onPageChange={setPage} />
+          <TablePaginationBar 
+            page={page} 
+            pages={meta.pages} 
+            total={meta.total} 
+            limit={meta.limit} 
+            onPageChange={setPage} 
+            onLimitChange={(l) => setMeta(prev => ({ ...prev, limit: l }))}
+          />
         </CardContent>
       </Card>
 

@@ -127,7 +127,7 @@ export default function DepotsPage() {
 
       <Card className="border-gray-200 shadow-sm">
         <CardContent className="p-0">
-          <Table>
+          <Table className="text-[12px]">
             <TableHeader>
               <TableRow className="table-header">
                 <TableHead>Name</TableHead>
@@ -149,12 +149,12 @@ export default function DepotsPage() {
               >
                 {depots.map((d) => (
                   <TableRow key={d.name} className="hover:bg-gray-50" data-testid={`depot-row-${d.name}`}>
-                    <TableCell className="font-medium text-sm">{d.name}</TableCell>
-                    <TableCell className="text-sm text-gray-600">{d.code || "—"}</TableCell>
-                    <TableCell className="text-sm text-gray-600 max-w-[240px] truncate" title={d.address}>
+                    <TableCell className="font-medium text-[12px]">{d.name}</TableCell>
+                    <TableCell className="text-[12px] text-gray-600">{d.code || "—"}</TableCell>
+                    <TableCell className="text-[12px] text-gray-600 py-4 leading-relaxed whitespace-normal" title={d.address}>
                       {d.address || "—"}
                     </TableCell>
-                    <TableCell className="text-right font-mono text-sm">{d.bus_count ?? 0}</TableCell>
+                    <TableCell className="text-right font-mono text-[12px]">{d.bus_count ?? 0}</TableCell>
                     <TableCell>
                       <Badge
                         variant={d.active !== false ? "default" : "secondary"}

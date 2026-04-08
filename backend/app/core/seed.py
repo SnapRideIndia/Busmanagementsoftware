@@ -17,6 +17,15 @@ from app.domain.user_roles import ALLOWED_ROLE_IDS, LEGACY_ROLE_TO_CANONICAL
 logger = logging.getLogger(__name__)
 
 
+def _add_days_ymd(ymd: str, days: int) -> str:
+    """Add integer days to a YYYY-MM-DD string; returns YYYY-MM-DD."""
+    try:
+        dt = datetime.strptime(ymd, "%Y-%m-%d")
+        return (dt + timedelta(days=max(0, int(days)))).strftime("%Y-%m-%d")
+    except (ValueError, TypeError):
+        return ymd
+
+
 async def run_seed_data():
     def _to_five_star(raw: float) -> float:
         """Map legacy 0–100 scores to 0–5 (linear)."""
@@ -212,7 +221,7 @@ async def run_seed_data():
     await db.energy_data.delete_many({})
     await db.revenue_data.delete_many({})
     await db.incidents.delete_many({})
-    await db.infractions_logged.delete_many({})
+    # db.infractions_logged is deprecated; removing it from seed reset logic.
     await db.billing.delete_many({})
 
     active_buses = await db.buses.find({"status": "active"}, {"_id": 0}).to_list(500)
@@ -377,41 +386,34 @@ async def run_seed_data():
     master_rows = build_master_rows()
     by_code = {m["code"]: m for m in master_rows}
     codes = sorted(by_code.keys())
-    for i, inc in enumerate(incidents_docs[: max(20, len(incidents_docs))]):
-        code = codes[i % len(codes)] if codes else ""
-        cat = by_code.get(code, {})
-        infractions_docs.append(
-            {
-                "id": f"IL-{inc['id']}",
-                "bus_id": inc.get("bus_id", ""),
-                "driver_id": inc.get("driver_id", ""),
-                "infraction_code": code,
-                "category": cat.get("category", "A"),
-                "description": cat.get("description", "Seed infraction"),
-                "amount": float(cat.get("amount", 500)),
-                "amount_snapshot": float(cat.get("amount", 500)),
-                "safety_flag": bool(cat.get("safety_flag", False)),
-                "date": inc.get("occurred_at", "")[:10],
-                "remarks": "Auto-linked from seed incident",
-                "logged_by": "System",
-                "created_at": inc.get("created_at", ""),
-                "depot": inc.get("depot", ""),
-                "route_id": inc.get("route_id", ""),
-                "route_name": inc.get("route_name", ""),
-                "trip_id": inc.get("trip_id", ""),
-                "duty_id": inc.get("duty_id", ""),
-                "location_text": inc.get("location_text", ""),
-                "cause_code": "SEED",
-                "related_incident_id": inc.get("id", ""),
-                "status": random.choice(["open", "under_review", "closed"]),
-                "opened_at": inc.get("created_at", ""),
-                "opened_by": "System",
-                "resolve_by": inc.get("occurred_at", "")[:10],
-                "close_remarks": "",
-                "closed_at": "",
-                "closed_by": "",
-            }
-        )
+    for i, inc in enumerate(incidents_docs):
+        # Attach 1-2 infractions to some seed incidents
+        code = codes[i % len(codes)] if codes and i % 2 == 0 else ""
+        if code:
+            cat = by_code.get(code, {})
+            now_iso = datetime.now(timezone.utc).isoformat()
+            res_days = int(cat.get("resolve_days", 1))
+            res_by = _add_days_ymd(inc.get("occurred_at", "")[:10], res_days)
+            
+            inc["infractions"] = [
+                {
+                    "infraction_code": code,
+                    "category": cat.get("category", "A"),
+                    "description": cat.get("description", "Seed infraction"),
+                    "amount": float(cat.get("amount", 500)),
+                    "amount_snapshot": float(cat.get("amount", 500)),
+                    "safety_flag": bool(cat.get("safety_flag", False)),
+                    "resolve_days": res_days,
+                    "resolve_by": res_by,
+                    "deductible": True,
+                    "status": random.choice(["open", "closed"]),
+                    "created_at": inc.get("created_at") or now_iso,
+                    "closed_at": None,
+                    "close_remarks": ""
+                }
+            ]
+        else:
+            inc["infractions"] = []
 
     if duties_docs:
         await db.duty_assignments.insert_many(duties_docs)
@@ -423,8 +425,6 @@ async def run_seed_data():
         await db.revenue_data.insert_many(revenue_docs)
     if incidents_docs:
         await db.incidents.insert_many(incidents_docs)
-    if infractions_docs:
-        await db.infractions_logged.insert_many(infractions_docs)
 
     # Seed synchronized billing invoices for latest period by depot + consolidated.
     today = base_now.date()
@@ -998,56 +998,8 @@ async def run_seed_data():
             upsert=True,
         )
     # Logged infractions (Schedule-S history tab)
-    if (not use_synced_operational_seed) and await db.infractions_logged.count_documents({}) == 0:
-        log_specs = [
-            ("TS-001", "DRV-001", "A01", "Uniform reminder"),
-            ("TS-002", "DRV-002", "B01", "Passenger feedback"),
-            ("TS-003", "DRV-003", "C01", "GPS check"),
-            ("TS-004", "DRV-004", "D01", "Route adherence"),
-            ("TS-005", "DRV-005", "E01", "Speed camera match"),
-            ("TS-006", "DRV-006", "A02", "Late paperwork"),
-        ]
-        logged_docs = []
-        now_il = datetime.now(timezone.utc)
-        for i, (bus_id, drv, code, remarks) in enumerate(log_specs):
-            cat = await db.infraction_catalogue.find_one({"code": code}, {"_id": 0})
-            if not cat:
-                continue
-            day = (now_il - timedelta(days=i * 3)).strftime("%Y-%m-%d")
-            bus_doc = await db.buses.find_one({"bus_id": bus_id}, {"_id": 0, "depot": 1})
-            depot_val = (bus_doc or {}).get("depot") or "Miyapur Depot"
-            logged_docs.append({
-                "id": f"IL-SEED-{str(i + 1).zfill(3)}",
-                "bus_id": bus_id,
-                "driver_id": drv,
-                "infraction_code": code,
-                "category": cat["category"],
-                "description": cat["description"],
-                "amount": cat["amount"],
-                "amount_snapshot": cat["amount"],
-                "safety_flag": cat.get("safety_flag", False),
-                "date": day,
-                "remarks": remarks,
-                "logged_by": "System",
-                "created_at": (now_il - timedelta(days=i * 3)).isoformat(),
-                "depot": depot_val,
-                "route_id": f"RT-{100 + i}",
-                "route_name": f"City corridor {i + 1}",
-                "trip_id": f"TRIP-SEED-{i + 1:03d}" if i % 2 == 0 else "",
-                "duty_id": "",
-                "location_text": "Hyderabad" if i % 2 == 0 else "",
-                "cause_code": "SEED",
-                "related_incident_id": "INC-SEED-001" if i == 0 else "",
-                "status": "open" if i % 3 else "closed",
-                "opened_at": (now_il - timedelta(days=i * 3)).isoformat(),
-                "opened_by": "System",
-                "resolve_by": (now_il - timedelta(days=i * 3 - 2)).strftime("%Y-%m-%d"),
-                "close_remarks": "Closed in seed flow" if i % 3 == 0 else "",
-                "closed_at": (now_il - timedelta(days=i * 3 - 1)).isoformat() if i % 3 == 0 else "",
-                "closed_by": "System" if i % 3 == 0 else "",
-            })
-        if logged_docs:
-            await db.infractions_logged.insert_many(logged_docs)
+    # Separate infractions_logged seeding removed per unified infractions logic.
+    pass
     # Tender §5 — extra EBMS incident rules (defaults; TGSRTC formalizes in consultation)
     ebms_section5_rules = [
         {"rule_key": "geofence_stoppage_radius_m", "rule_value": "50", "category": "operations", "description": "EBMS tender 5(a): stoppage geofencing radius (m)"},

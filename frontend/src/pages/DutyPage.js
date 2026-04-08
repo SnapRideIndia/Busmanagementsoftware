@@ -44,7 +44,7 @@ export default function DutyPage() {
   const [filterBusId, setFilterBusId] = useState("");
   const [filterSearchQ, setFilterSearchQ] = useState("");
   const [page, setPage] = useState(1);
-  const [listMeta, setListMeta] = useState({ total: 0, pages: 1, limit: 20 });
+  const [listMeta, setListMeta] = useState({ total: 0, pages: 1, limit: 30 });
   const [form, setForm] = useState({
     driver_license: "",
     bus_id: "",
@@ -82,7 +82,7 @@ export default function DutyPage() {
         bus_id: filterBusId,
         q: filterSearchQ.trim(),
         page,
-        limit: 20,
+        limit: listMeta.limit,
       });
       const [d, drItems, busItems, routeItems] = await Promise.all([
         API.get(Endpoints.operations.duties.list(), { params }),
@@ -102,7 +102,7 @@ export default function DutyPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterDate, filterDepot, filterBusId, filterSearchQ, page]);
+  }, [filterDate, filterDepot, filterBusId, filterSearchQ, page, listMeta.limit]);
 
   useEffect(() => {
     load();
@@ -368,7 +368,14 @@ export default function DutyPage() {
         {!fetchError && !loading && duties.length === 0 ? (
           <Card className="w-full border-gray-200"><CardContent className="p-6 text-center text-sm text-gray-400">No duties for these filters</CardContent></Card>
         ) : null}
-        <TablePaginationBar page={page} pages={listMeta.pages} total={listMeta.total} limit={listMeta.limit} onPageChange={setPage} />
+        <TablePaginationBar 
+          page={page} 
+          pages={listMeta.pages} 
+          total={listMeta.total} 
+          limit={listMeta.limit} 
+          onPageChange={setPage} 
+          onLimitChange={(l) => setListMeta(prev => ({ ...prev, limit: l }))}
+        />
       </div>
 
       <Dialog open={open} onOpenChange={setOpen}>

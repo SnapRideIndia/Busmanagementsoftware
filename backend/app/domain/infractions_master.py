@@ -128,19 +128,24 @@ INFRACTION_MASTER = [
 def build_master_rows() -> list[dict]:
     rows: list[dict] = []
     for item in INFRACTION_MASTER:
-        slab = INFRACTION_SLABS[item["category"]]
+        cat = item["category"]
+        slab = INFRACTION_SLABS[cat]
+        esc_to = ESCALATION_CHAIN.get(cat, "")
+        esc_amount = INFRACTION_SLABS[esc_to].amount if esc_to else 0.0
         rows.append(
             {
                 "id": f"INF-{item['code']}",
                 "code": item["code"],
-                "category": item["category"],
+                "category": cat,
                 "table": item["table"],
                 "description": item["description"],
                 "amount": slab.amount,
                 "resolve_days": slab.resolve_days,
                 "safety_flag": bool(item["safety_flag"]),
-                "repeat_escalation": item["category"] in ESCALATION_CHAIN,
-                "is_capped_non_safety": item["category"] in {"A", "B", "C", "D"} and not bool(item["safety_flag"]),
+                "repeat_escalation": bool(esc_to),
+                "escalation_to_category": esc_to,
+                "escalation_amount": esc_amount,
+                "is_capped_non_safety": cat in {"A", "B", "C", "D"} and not bool(item["safety_flag"]),
                 "active": True,
             }
         )

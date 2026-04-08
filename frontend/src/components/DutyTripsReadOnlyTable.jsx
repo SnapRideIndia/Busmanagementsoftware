@@ -46,7 +46,7 @@ export default function DutyTripsReadOnlyTable({ trips, className = "" }) {
                     {(t.trip_status || "scheduled").replace(/_/g, " ")}
                   </Badge>
                 </TableCell>
-                <TableCell className="text-gray-700 max-w-[220px]">{reason || "—"}</TableCell>
+                <TableCell className="text-gray-700 whitespace-normal leading-relaxed">{reason || "—"}</TableCell>
               </TableRow>
             );
           })}

@@ -22,7 +22,7 @@ export default function TenderPage() {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [filterConcessionaire, setFilterConcessionaire] = useState("");
-  const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 20 });
+  const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 30 });
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(empty);
@@ -36,7 +36,7 @@ export default function TenderPage() {
       const { data } = await API.get(Endpoints.masters.tenders.list(), {
         params: buildQuery({
           page,
-          limit: 20,
+          limit: 30,
           search,
           status: filterStatus,
           concessionaire: filterConcessionaire,
@@ -164,7 +164,7 @@ export default function TenderPage() {
               </Button>
             </div>
           </div>
-          <Table>
+          <Table className="text-[12px]">
             <TableHeader>
               <TableRow className="table-header">
                 <TableHead>Tender ID</TableHead>
@@ -181,9 +181,9 @@ export default function TenderPage() {
               <TableLoadRows colSpan={8} loading={loading} error={fetchError} onRetry={load} isEmpty={tenders.length === 0} emptyMessage="No tenders found">
                 {tenders.map((t) => (
                   <TableRow key={t.tender_id} className="hover:bg-gray-50" data-testid={`tender-row-${t.tender_id}`}>
-                    <TableCell className="font-mono text-sm font-medium">{t.tender_id}</TableCell>
-                    <TableCell className="text-sm">{t.description}</TableCell>
-                    <TableCell className="text-sm">{t.concessionaire || "—"}</TableCell>
+                    <TableCell className="font-mono text-[12px] font-medium">{t.tender_id}</TableCell>
+                    <TableCell className="text-[12px]">{t.description}</TableCell>
+                    <TableCell className="text-[12px]">{t.concessionaire || "—"}</TableCell>
                     <TableCell className="text-right font-mono">{t.pk_rate}</TableCell>
                     <TableCell className="text-right font-mono">{t.energy_rate}</TableCell>
                     <TableCell className="text-right font-mono">

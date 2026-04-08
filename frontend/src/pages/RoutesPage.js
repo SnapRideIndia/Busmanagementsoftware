@@ -77,7 +77,7 @@ export default function RoutesPage() {
   const [filterActive, setFilterActive] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 20 });
+  const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 30 });
   const [depotNames, setDepotNames] = useState([]);
   const [masterStops, setMasterStops] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -111,7 +111,7 @@ export default function RoutesPage() {
     setFetchError(null);
     try {
       const { data } = await API.get(Endpoints.masters.routes.legacyList(), {
-        params: buildQuery({ depot: filterDepot, active: filterActive, search, page, limit: 20 }),
+        params: buildQuery({ depot: filterDepot, active: filterActive, search, page, limit: meta.limit }),
       });
       const u = unwrapListResponse(data);
       setRows(u.items);
@@ -122,7 +122,7 @@ export default function RoutesPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterDepot, filterActive, search, page]);
+  }, [filterDepot, filterActive, search, page, meta.limit]);
 
   useEffect(() => {
     load();
@@ -310,8 +310,8 @@ export default function RoutesPage() {
       </div>
 
       <Card className="border-gray-200 shadow-sm">
-        <CardContent className="p-0">
-          <Table>
+        <CardContent className="p-0 text-[12px]">
+          <Table className="text-[12px]">
             <TableHeader>
               <TableRow className="table-header">
                 <TableHead className="w-10" />
@@ -350,17 +350,17 @@ export default function RoutesPage() {
                           {expandedRouteId === r.route_id ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                         </Button>
                       </TableCell>
-                      <TableCell className="font-mono text-sm font-medium">{r.route_id}</TableCell>
-                    <TableCell className="text-sm max-w-[220px] truncate" title={r.name}>
+                      <TableCell className="font-mono text-[12px] font-medium">{r.route_id}</TableCell>
+                    <TableCell className="text-[12px] py-3 leading-relaxed" title={r.name}>
                       {r.name}
                     </TableCell>
-                    <TableCell className="text-sm text-gray-600">{r.origin || "—"}</TableCell>
-                    <TableCell className="text-sm text-gray-600">{r.destination || "—"}</TableCell>
-                    <TableCell className="text-right font-mono text-sm">
+                    <TableCell className="text-[12px] text-gray-600">{r.origin || "—"}</TableCell>
+                    <TableCell className="text-[12px] text-gray-600">{r.destination || "—"}</TableCell>
+                    <TableCell className="text-right font-mono text-[12px]">
                       {r.distance_km != null ? Number(r.distance_km).toLocaleString("en-IN") : "—"}
                     </TableCell>
-                    <TableCell className="text-sm">{r.depot || "—"}</TableCell>
-                    <TableCell className="text-center font-mono text-sm">{r.stop_count ?? (Array.isArray(r.stops) ? r.stops.length : 0)}</TableCell>
+                    <TableCell className="text-[12px]">{r.depot || "—"}</TableCell>
+                    <TableCell className="text-center font-mono text-[12px]">{r.stop_count ?? (Array.isArray(r.stops) ? r.stops.length : 0)}</TableCell>
                     <TableCell>
                       <Badge
                         className={
@@ -439,7 +439,14 @@ export default function RoutesPage() {
               </TableLoadRows>
             </TableBody>
           </Table>
-          <TablePaginationBar page={page} pages={meta.pages} total={meta.total} limit={meta.limit} onPageChange={setPage} />
+          <TablePaginationBar 
+            page={page} 
+            pages={meta.pages} 
+            total={meta.total} 
+            limit={meta.limit} 
+            onPageChange={setPage} 
+            onLimitChange={(l) => setMeta(prev => ({ ...prev, limit: l }))}
+          />
         </CardContent>
       </Card>
 

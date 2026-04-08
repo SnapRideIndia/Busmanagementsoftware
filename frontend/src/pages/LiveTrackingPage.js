@@ -135,7 +135,7 @@ function MapRecenter({ center }) {
   const map = useMap();
   useEffect(() => {
     map.setView(center, Math.max(map.getZoom(), 11));
-  }, [center[0], center[1], map]);
+  }, [center, map]);
   return null;
 }
 

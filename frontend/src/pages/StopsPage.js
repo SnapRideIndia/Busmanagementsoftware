@@ -35,7 +35,7 @@ export default function StopsPage() {
   const [filterActive, setFilterActive] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 20 });
+  const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 30 });
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(null);
 
@@ -44,7 +44,7 @@ export default function StopsPage() {
     setFetchError(null);
     try {
       const { data } = await API.get(Endpoints.masters.stops.list(), {
-        params: buildQuery({ region: filterRegion, active: filterActive, search, page, limit: 20 }),
+        params: buildQuery({ region: filterRegion, active: filterActive, search, page, limit: meta.limit }),
       });
       const u = unwrapListResponse(data);
       setRows(u.items);
@@ -55,7 +55,7 @@ export default function StopsPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterRegion, filterActive, search, page]);
+  }, [filterRegion, filterActive, search, page, meta.limit]);
 
   useEffect(() => {
     load();
@@ -202,7 +202,7 @@ export default function StopsPage() {
 
       <Card className="border-gray-200 shadow-sm">
         <CardContent className="p-0">
-          <Table>
+          <Table className="text-[12px]">
             <TableHeader>
               <TableRow className="table-header">
                 <TableHead>Stop ID</TableHead>
@@ -225,11 +225,11 @@ export default function StopsPage() {
               >
                 {rows.map((s) => (
                   <TableRow key={s.stop_id} className="hover:bg-gray-50" data-testid={`stop-row-${s.stop_id}`}>
-                    <TableCell className="font-mono text-sm font-medium">{s.stop_id}</TableCell>
-                    <TableCell className="text-sm">{s.name}</TableCell>
-                    <TableCell className="text-sm text-gray-600">{s.locality || "—"}</TableCell>
-                    <TableCell className="text-sm text-gray-600">{s.region || "—"}</TableCell>
-                    <TableCell className="text-right font-mono text-sm">{s.route_count ?? 0}</TableCell>
+                    <TableCell className="font-mono text-[12px] font-medium">{s.stop_id}</TableCell>
+                    <TableCell className="text-[12px]">{s.name}</TableCell>
+                    <TableCell className="text-[12px] text-gray-600">{s.locality || "—"}</TableCell>
+                    <TableCell className="text-[12px] text-gray-600">{s.region || "—"}</TableCell>
+                    <TableCell className="text-right font-mono text-[12px]">{s.route_count ?? 0}</TableCell>
                     <TableCell>
                       <Badge
                         className={
@@ -256,7 +256,14 @@ export default function StopsPage() {
               </TableLoadRows>
             </TableBody>
           </Table>
-          <TablePaginationBar page={page} pages={meta.pages} total={meta.total} limit={meta.limit} onPageChange={setPage} />
+          <TablePaginationBar 
+            page={page} 
+            pages={meta.pages} 
+            total={meta.total} 
+            limit={meta.limit} 
+            onPageChange={setPage} 
+            onLimitChange={(l) => setMeta(prev => ({ ...prev, limit: l }))}
+          />
         </CardContent>
       </Card>
 

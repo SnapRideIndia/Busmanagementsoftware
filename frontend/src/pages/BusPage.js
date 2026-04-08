@@ -31,7 +31,7 @@ export default function BusPage() {
   const [filterStatus, setFilterStatus] = useState("");
   const [fleetDepots, setFleetDepots] = useState([]);
   const [page, setPage] = useState(1);
-  const [listMeta, setListMeta] = useState({ total: 0, pages: 1, limit: 20 });
+  const [listMeta, setListMeta] = useState({ total: 0, pages: 1, limit: 30 });
   const [allBusesForAssign, setAllBusesForAssign] = useState([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(null);
@@ -52,7 +52,7 @@ export default function BusPage() {
     setFetchError(null);
     try {
       const [b, allBuses, tenderRows] = await Promise.all([
-        API.get(Endpoints.masters.buses.list(), { params: buildQuery({ depot: filterDepot, status: filterStatus, page, limit: 20 }) }),
+        API.get(Endpoints.masters.buses.list(), { params: buildQuery({ depot: filterDepot, status: filterStatus, page, limit: listMeta.limit }) }),
         fetchAllPaginated(Endpoints.masters.buses.list(), {}),
         fetchAllPaginated(Endpoints.masters.tenders.list(), {}),
       ]);
@@ -67,7 +67,7 @@ export default function BusPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterDepot, filterStatus, page]);
+  }, [filterDepot, filterStatus, page, listMeta.limit]);
   useEffect(() => {
     load();
   }, [load]);
@@ -142,7 +142,7 @@ export default function BusPage() {
 
       <Card className="border-gray-200 shadow-sm">
         <CardContent className="p-0">
-          <Table>
+          <Table className="text-[12px]">
             <TableHeader><TableRow className="table-header">
               <TableHead>Bus ID</TableHead><TableHead>Type</TableHead><TableHead>Capacity</TableHead>
               <TableHead>Tender</TableHead><TableHead>Depot</TableHead><TableHead>kWh/km</TableHead>
@@ -162,7 +162,7 @@ export default function BusPage() {
                     <TableCell className="font-mono font-medium">{b.bus_id}</TableCell>
                     <TableCell>{busTypeLabel(b.bus_type)}</TableCell>
                     <TableCell className="font-mono">{b.capacity}</TableCell>
-                    <TableCell className="font-mono text-sm">{b.tender_id || "-"}</TableCell>
+                    <TableCell className="font-mono text-[12px]">{b.tender_id || "-"}</TableCell>
                     <TableCell>{b.depot || "-"}</TableCell>
                     <TableCell className="font-mono">{b.kwh_per_km}</TableCell>
                     <TableCell>
@@ -182,7 +182,14 @@ export default function BusPage() {
               </TableLoadRows>
             </TableBody>
           </Table>
-          <TablePaginationBar page={page} pages={listMeta.pages} total={listMeta.total} limit={listMeta.limit} onPageChange={setPage} />
+          <TablePaginationBar 
+            page={page} 
+            pages={listMeta.pages} 
+            total={listMeta.total} 
+            limit={listMeta.limit} 
+            onPageChange={setPage} 
+            onLimitChange={(l) => setListMeta(prev => ({ ...prev, limit: l }))}
+          />
         </CardContent>
       </Card>
 

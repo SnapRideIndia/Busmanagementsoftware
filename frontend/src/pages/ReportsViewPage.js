@@ -144,7 +144,7 @@ export default function ReportsViewPage() {
     setLoading(true);
     setError(null);
     try {
-      const { data } = await API.get(Endpoints.reports.run(), { params: { ...baseParams, page, limit: 20 } });
+      const { data } = await API.get(Endpoints.reports.run(), { params: { ...baseParams, page, limit: 30 } });
       setReport(data);
     } catch (err) {
       const msg = formatApiError(err.response?.data?.detail) || err.message || "Failed to load report";
@@ -160,7 +160,7 @@ export default function ReportsViewPage() {
   }, [load]);
 
   const download = (fmt) => {
-    const q = new URLSearchParams({ ...baseParams, page: 1, limit: 20, fmt });
+    const q = new URLSearchParams({ ...baseParams, page: 1, limit: 30, fmt });
     const o = getBackendOrigin();
     window.open(`${o || ""}/api/reports/download?${q}`, "_blank");
   };
@@ -209,7 +209,7 @@ export default function ReportsViewPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <Table className="min-w-max">
+              <Table className="min-w-max text-[12px]">
                 <TableHeader>
                   <TableRow className="table-header">
                     {previewCols.map((c) => (
@@ -221,7 +221,7 @@ export default function ReportsViewPage() {
                   {report?.data?.map((row, i) => (
                     <TableRow key={i} className="hover:bg-gray-50">
                       {previewCols.map((c) => (
-                        <TableCell key={c} className="font-mono text-sm align-top whitespace-normal break-words">
+                        <TableCell key={c} className="font-mono text-[12px] align-top whitespace-normal break-words">
                           <span className="whitespace-pre-wrap break-words">
                             {formatReportCell(c, row[c])}
                           </span>

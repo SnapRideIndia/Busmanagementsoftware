@@ -1,30 +1,32 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
-import API, { formatApiError, buildQuery, unwrapListResponse, fetchAllPaginated } from "../lib/api";
+import API, { formatApiError, buildQuery, unwrapListResponse } from "../lib/api";
 import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import TableLoadRows from "../components/TableLoadRows";
-import { formatDateIN, formatDateTimeIN } from "../lib/dates";
 import { Card, CardContent } from "../components/ui/card";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../components/ui/collapsible";
-import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
-import { Label } from "../components/ui/label";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
-import { FileText, CheckCircle2, HelpCircle, Search, ChevronDown, MoreHorizontal } from "lucide-react";
-import { toast } from "sonner";
-import InfractionReportsPanel from "../components/InfractionReportsPanel";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "../components/ui/hover-card";
+import { Search, ExternalLink, Info, HelpCircle } from "lucide-react";
+
 const catColors = {
   A: "bg-gray-100 text-gray-700", B: "bg-blue-100 text-blue-700",
   C: "bg-yellow-100 text-yellow-700", D: "bg-orange-100 text-orange-700",
   E: "bg-red-100 text-red-700", F: "bg-red-200 text-red-800",
   G: "bg-red-300 text-red-900"
 };
+
+const categories = [
+  { cat: 'A', label: 'Minor / Documentation', color: 'bg-gray-100' },
+  { cat: 'B', label: 'Operational Sync', color: 'bg-blue-100' },
+  { cat: 'C', label: 'Major Maintenance', color: 'bg-yellow-100' },
+  { cat: 'D', label: 'Serious Violation', color: 'bg-orange-100' },
+  { cat: 'E', label: 'Critical Safety', color: 'bg-red-600 text-white' },
+  { cat: 'F', label: 'Severe Breakdown', color: 'bg-red-800 text-white' },
+  { cat: 'G', label: 'Fatal Accident', color: 'bg-black text-white' }
+];
 
 function capRuleLabel(row) {
   return row?.is_capped_non_safety ? "Capped (5%)" : "Non-capped";
@@ -37,677 +39,163 @@ function escalationLabel(row) {
   return "Next slab if not rectified";
 }
 
-/** Select dropdown inside log dialog: viewport height, trigger width, no wider than screen */
-const logModalSelectContentClass =
-  "z-[1300] max-h-[min(70svh,22rem)] w-[var(--radix-select-trigger-width)] min-w-[var(--radix-select-trigger-width)] max-w-[calc(100vw-1.5rem)] p-0 shadow-lg";
-
 export default function InfractionsPage() {
   const [catalogue, setCatalogue] = useState([]);
-  const [logged, setLogged] = useState([]);
-  const [tab, setTab] = useState("catalogue");
-  const [logOpen, setLogOpen] = useState(false);
-  const emptyLogForm = () => ({
-    bus_id: "",
-    driver_id: "",
-    infraction_code: "",
-    date: "",
-    remarks: "",
-    depot: "",
-    route_name: "",
-    route_id: "",
-    trip_id: "",
-    duty_id: "",
-    location_text: "",
-    cause_code: "",
-    deductible: "",
-    related_incident_id: "",
-  });
-  const [logForm, setLogForm] = useState(emptyLogForm);
-  const [buses, setBuses] = useState([]);
-  const [catalogueAll, setCatalogueAll] = useState([]);
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [logDepot, setLogDepot] = useState("");
-  const [logBusId, setLogBusId] = useState("");
-  const [logCategory, setLogCategory] = useState("");
-  const [logInfractionCode, setLogInfractionCode] = useState("");
-  const [logStatus, setLogStatus] = useState("");
   const [catalogueSearch, setCatalogueSearch] = useState("");
-  const [logSearch, setLogSearch] = useState("");
-  const [catPage, setCatPage] = useState(1);
-  const [catMeta, setCatMeta] = useState({ total: 0, pages: 1, limit: 20 });
-  const [logPage, setLogPage] = useState(1);
-  const [logMeta, setLogMeta] = useState({ total: 0, pages: 1, limit: 20 });
-  const [catLoading, setCatLoading] = useState(true);
-  const [catError, setCatError] = useState(null);
-  const [logLoading, setLogLoading] = useState(false);
-  const [logError, setLogError] = useState(null);
-  const [logAdvancedOpen, setLogAdvancedOpen] = useState(false);
-  const [closeInfractionOpen, setCloseInfractionOpen] = useState(false);
-  const [closeInfractionId, setCloseInfractionId] = useState("");
-  const [closeInfractionRemarks, setCloseInfractionRemarks] = useState("");
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(30);
+  const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 30 });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   const load = useCallback(async () => {
-    setCatLoading(true);
-    setCatError(null);
+    setLoading(true);
+    setError(null);
     try {
-      const [c, busItems] = await Promise.all([
-        API.get(Endpoints.infractions.catalogue(), {
-          params: buildQuery({ page: catPage, limit: 20, search: catalogueSearch }),
-        }),
-        fetchAllPaginated(Endpoints.masters.buses.list(), {}),
-      ]);
-      const cu = unwrapListResponse(c.data);
+      const { data } = await API.get(Endpoints.infractions.catalogue(), {
+        params: buildQuery({ page, limit, search: catalogueSearch }),
+      });
+      const cu = unwrapListResponse(data);
       setCatalogue(cu.items);
-      setCatMeta({ total: cu.total, pages: cu.pages, limit: cu.limit });
-      setBuses(busItems);
+      setMeta({ total: cu.total, pages: cu.pages, limit: cu.limit });
     } catch (err) {
-      setCatError(formatApiError(err.response?.data?.detail) || err.message || "Failed to load catalogue");
+      setError(formatApiError(err.response?.data?.detail) || err.message || "Failed to load catalogue");
       setCatalogue([]);
     } finally {
-      setCatLoading(false);
+      setLoading(false);
     }
-  }, [catPage, catalogueSearch]);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        setCatalogueAll(await fetchAllPaginated(Endpoints.infractions.catalogue(), {}));
-      } catch {
-        setCatalogueAll([]);
-      }
-    })();
-  }, []);
-
-  const loadLogged = useCallback(async () => {
-    setLogLoading(true);
-    setLogError(null);
-    try {
-      const params = buildQuery({
-        date_from: dateFrom,
-        date_to: dateTo,
-        depot: logDepot,
-        bus_id: logBusId,
-        category: logCategory,
-        infraction_code: logInfractionCode,
-        status: logStatus,
-        search: logSearch,
-        page: logPage,
-        limit: 20,
-      });
-      const { data } = await API.get(Endpoints.infractions.logged(), { params });
-      const u = unwrapListResponse(data);
-      setLogged(u.items);
-      setLogMeta({ total: u.total, pages: u.pages, limit: u.limit });
-    } catch (err) {
-      setLogError(formatApiError(err.response?.data?.detail) || err.message || "Failed to load logged infractions");
-      setLogged([]);
-    } finally {
-      setLogLoading(false);
-    }
-  }, [dateFrom, dateTo, logDepot, logBusId, logCategory, logInfractionCode, logStatus, logSearch, logPage]);
+  }, [page, limit, catalogueSearch]);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => {
-    setLogPage(1);
-  }, [dateFrom, dateTo, logDepot, logBusId, logCategory, logInfractionCode, logStatus, logSearch]);
-  useEffect(() => {
-    setCatPage(1);
-  }, [catalogueSearch]);
-  useEffect(() => {
-    if (tab === "logged") loadLogged();
-  }, [tab, loadLogged]);
+  useEffect(() => { setPage(1); }, [catalogueSearch, limit]);
 
-  useEffect(() => {
-    const bid = logForm.bus_id;
-    if (!bid) return;
-    const b = buses.find((x) => x.bus_id === bid);
-    const depot = b?.depot != null ? String(b.depot).trim() : "";
-    setLogForm((prev) => {
-      if (prev.bus_id !== bid) return prev;
-      return { ...prev, depot };
-    });
-  }, [logForm.bus_id, buses]);
-
-  const handleLog = async () => {
-    if (!logForm.infraction_code) {
-      toast.error("Select an infraction code");
-      return;
-    }
-    if (!logForm.bus_id) {
-      toast.error("Select a bus");
-      return;
-    }
-    try {
-      const payload = {
-        infraction_code: logForm.infraction_code,
-        bus_id: logForm.bus_id || undefined,
-        driver_id: logForm.driver_id || undefined,
-        date: logForm.date || undefined,
-        remarks: logForm.remarks || undefined,
-        depot: logForm.depot || undefined,
-        route_name: logForm.route_name || undefined,
-        route_id: logForm.route_id || undefined,
-        trip_id: logForm.trip_id || undefined,
-        duty_id: logForm.duty_id || undefined,
-        location_text: logForm.location_text || undefined,
-        cause_code: logForm.cause_code || undefined,
-        related_incident_id: logForm.related_incident_id || undefined,
-      };
-      if (logForm.deductible === "true") payload.deductible = true;
-      else if (logForm.deductible === "false") payload.deductible = false;
-      await API.post(Endpoints.infractions.log(), payload);
-      toast.success("Infraction logged");
-      setLogOpen(false);
-      setLogForm(emptyLogForm());
-      loadLogged();
-    } catch (err) {
-      toast.error(formatApiError(err.response?.data?.detail));
-    }
-  };
-
-  const openCloseInfractionDialog = (id) => {
-    setCloseInfractionId(id);
-    setCloseInfractionRemarks("");
-    setCloseInfractionOpen(true);
-  };
-
-  const submitCloseInfraction = async () => {
-    if (!closeInfractionId) return;
-    try {
-      await API.post(Endpoints.infractions.close(closeInfractionId), {
-        status: "closed",
-        close_remarks: closeInfractionRemarks.trim(),
-      });
-      toast.success("Infraction closed");
-      setCloseInfractionOpen(false);
-      setCloseInfractionId("");
-      loadLogged();
-    } catch (err) {
-      toast.error(formatApiError(err.response?.data?.detail));
-    }
-  };
-
-  const handleUnderReview = async (id) => {
-    try {
-      await API.post(Endpoints.infractions.close(id), { status: "under_review" });
-      toast.success("Set to under review");
-      loadLogged();
-    } catch (err) {
-      toast.error(formatApiError(err.response?.data?.detail));
-    }
-  };
-
-  const selectedBusForLog = buses.find((b) => b.bus_id === logForm.bus_id);
-  const depotFromBusLocked = Boolean(logForm.bus_id && String(selectedBusForLog?.depot || "").trim());
   return (
-    <div data-testid="infractions-page">
-      <div className="page-header">
-        <h1 className="page-title">Infractions</h1>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setLogOpen(true)} data-testid="log-infraction-btn">
-            <FileText size={14} className="mr-1.5" /> Log Infraction
-          </Button>
+    <div data-testid="infractions-page" className="space-y-6 max-w-7xl mx-auto">
+      <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-3">
+            <h1 className="text-3xl font-black tracking-tight text-gray-900">Infraction Catalogue</h1>
+            <HoverCard openDelay={0} closeDelay={100}>
+              <HoverCardTrigger asChild>
+                <div className="p-1.5 bg-gray-100 rounded-full cursor-help text-gray-400 hover:text-gray-900 hover:bg-gray-200 transition-all">
+                  <HelpCircle size={18} />
+                </div>
+              </HoverCardTrigger>
+              <HoverCardContent className="w-80 p-0 border-none shadow-2xl rounded-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+                <div className="p-4 bg-gray-900 text-white font-black text-[10px] uppercase tracking-[0.2em]">
+                  Schedule-S Category Guide
+                </div>
+                <div className="p-4 bg-white space-y-3">
+                  {categories.map((item) => (
+                    <div key={item.cat} className="flex items-center gap-3">
+                      <Badge className={`${item.color} w-6 h-6 p-0 flex items-center justify-center font-black border-none ring-1 ring-black/5`}>{item.cat}</Badge>
+                      <span className="text-[11px] font-bold text-gray-600">{item.label}</span>
+                    </div>
+                  ))}
+                  <div className="mt-4 pt-3 border-t border-gray-100 text-[10px] text-gray-400 font-medium leading-relaxed">
+                    Categories define the severity and deduction slab as per the concession agreement.
+                  </div>
+                </div>
+              </HoverCardContent>
+            </HoverCard>
+          </div>
+          <p className="text-gray-500 max-w-2xl leading-relaxed">
+            Reference for Schedule-S penalty codes, amounts, and escalation rules.
+            Active penalties are now managed directly within <Link to="/incidents" className="text-[#C8102E] font-bold hover:underline inline-flex items-center gap-1 mx-1">Incidents <ExternalLink size={12}/></Link>.
+          </p>
         </div>
       </div>
 
-      <p className="page-lead">
-        Manage Schedule-S infractions and review logged penalties.{" "}
-        <Link to="/incidents" className="text-[#C8102E] font-medium hover:underline">Incidents</Link>
-        {" · "}
-        <Link to="/gcc-kpi" className="text-[#C8102E] font-medium hover:underline">GCC KPI</Link>
-        {" · "}
-        <Link to="/deductions" className="text-gray-700 underline hover:text-[#C8102E]">Deductions</Link>.
-      </p>
-
-      {/* Tabs */}
-      <div className="flex gap-2 mb-4">
-        <Button variant={tab === "catalogue" ? "default" : "outline"} onClick={() => setTab("catalogue")} className={tab === "catalogue" ? "bg-[#C8102E] hover:bg-[#A50E25]" : ""}>Catalogue ({catMeta.total})</Button>
-        <Button variant={tab === "logged" ? "default" : "outline"} onClick={() => setTab("logged")} className={tab === "logged" ? "bg-[#C8102E] hover:bg-[#A50E25]" : ""}>Logged ({logMeta.total})</Button>
-      </div>
-      <Card className="mb-4 border-gray-200 shadow-sm">
-        <CardContent className="py-2.5 text-[12px] text-gray-600">
-          Category guide: A-B minor, C-D major, E critical safety, F severe breakdown, G fatal accident.
-        </CardContent>
+      <Card className="border-amber-100 bg-amber-50/50 shadow-sm rounded-2xl p-4 flex items-start gap-3">
+        <Info className="text-amber-600 shrink-0 mt-0.5" size={18} />
+        <div className="space-y-1">
+          <h4 className="text-xs font-black uppercase tracking-widest text-amber-900">Operational Notice</h4>
+          <p className="text-xs text-amber-800 leading-relaxed font-medium">
+            Infraction amounts are fixed at the time of incident reporting. Unrectified violations may trigger escalation 
+            to the next penalty slab if non-compliance continues beyond the defined resolution period.
+          </p>
+        </div>
       </Card>
 
-      {tab === "catalogue" && (
-        <Card className="border-gray-200 shadow-sm">
-          <CardContent className="p-0 space-y-0">
-            <div className="p-3 border-b bg-gray-50/50">
-              <div className="relative max-w-md">
-                <Search className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                <Input
-                  value={catalogueSearch}
-                  onChange={(e) => setCatalogueSearch(e.target.value)}
-                  placeholder="Search all catalogue rows..."
-                  className="pl-8 h-9 bg-white"
-                  data-testid="infractions-catalogue-search"
-                />
-              </div>
-            </div>
-            <Table className="text-[12px]">
-              <TableHeader><TableRow className="table-header">
-                <TableHead>Code</TableHead><TableHead>Category</TableHead><TableHead>Description</TableHead>
-                <TableHead className="text-right">Amount (Rs)</TableHead><TableHead>Safety</TableHead><TableHead className="text-right">Resolve days</TableHead><TableHead>Cap rule</TableHead><TableHead>Escalation</TableHead>
-              </TableRow></TableHeader>
-              <TableBody>
-                <TableLoadRows
-                  colSpan={9}
-                  loading={catLoading}
-                  error={catError}
-                  onRetry={load}
-                  isEmpty={catalogue.length === 0}
-                  emptyMessage="No catalogue entries"
-                >
-                  {catalogue.map((c) => (
-                    <TableRow key={c.id} className="hover:bg-[#FAFAFA]" data-testid={`cat-row-${c.code}`}>
-                      <TableCell className="font-mono font-medium">{c.code}</TableCell>
-                      <TableCell><Badge className={`${catColors[c.category]} hover:${catColors[c.category]}`}>{c.category}</Badge></TableCell>
-                      <TableCell className="text-sm">{c.description}</TableCell>
-                      <TableCell className="text-right font-mono font-medium text-[#DC2626]">Rs.{c.amount?.toLocaleString()}</TableCell>
-                      <TableCell>{c.safety_flag ? <Badge className="bg-red-100 text-red-700 hover:bg-red-100">Safety</Badge> : <Badge variant="secondary">No</Badge>}</TableCell>
-                      <TableCell className="text-right font-mono">{c.resolve_days ?? "—"}</TableCell>
-                      <TableCell className="text-xs">{capRuleLabel(c)}</TableCell>
-                      <TableCell className="text-xs">{escalationLabel(c)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableLoadRows>
-              </TableBody>
-            </Table>
-            <TablePaginationBar
-              page={catPage}
-              pages={catMeta.pages}
-              total={catMeta.total}
-              limit={catMeta.limit}
-              onPageChange={setCatPage}
-            />
-          </CardContent>
-        </Card>
-      )}
-
-      {tab === "logged" && (
-        <>
-          <TooltipProvider delayDuration={300}>
-            <div className="mb-4 space-y-3">
-              <Card className="border-gray-200 shadow-sm">
-                <CardContent className="p-3 flex flex-wrap gap-2 sm:gap-3 items-end">
-                  <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-40 h-9" aria-label="Date from" />
-                  <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-40 h-9" aria-label="Date to" />
-                  <Select value={logDepot || "all"} onValueChange={(v) => { setLogDepot(v === "all" ? "" : v); setLogBusId(""); }}>
-                    <SelectTrigger className="w-44 h-9"><SelectValue placeholder="All depots" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All depots</SelectItem>
-                      {[...new Set(buses.map((b) => b.depot).filter(Boolean))].sort().map((d) => (
-                        <SelectItem key={d} value={d}>{d}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Select value={logBusId || "all"} onValueChange={(v) => setLogBusId(v === "all" ? "" : v)}>
-                    <SelectTrigger className="w-40 h-9"><SelectValue placeholder="All buses" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All buses</SelectItem>
-                      {(logDepot ? buses.filter((b) => b.depot === logDepot) : buses).map((b) => (
-                        <SelectItem key={b.bus_id} value={b.bus_id}>{b.bus_id}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Select value={logInfractionCode || "all"} onValueChange={(v) => setLogInfractionCode(v === "all" ? "" : v)}>
-                    <SelectTrigger className="w-40 h-9"><SelectValue placeholder="All codes" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All codes</SelectItem>
-                      {[...catalogueAll].sort((a, b) => a.code.localeCompare(b.code)).map((c) => (
-                        <SelectItem key={c.code} value={c.code}>{c.code}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Select value={logCategory || "all"} onValueChange={(v) => setLogCategory(v === "all" ? "" : v)}>
-                    <SelectTrigger className="w-28 h-9"><SelectValue placeholder="All cat" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All</SelectItem>
-                      {Object.keys(catColors).map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  <Select value={logStatus || "all"} onValueChange={(v) => setLogStatus(v === "all" ? "" : v)}>
-                    <SelectTrigger className="w-36 h-9"><SelectValue placeholder="All status" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All</SelectItem>
-                      <SelectItem value="open">Open</SelectItem>
-                      <SelectItem value="under_review">Under review</SelectItem>
-                      <SelectItem value="closed">Closed</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <div className="relative min-w-[220px] flex-1">
-                    <Search className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                    <Input
-                      value={logSearch}
-                      onChange={(e) => setLogSearch(e.target.value)}
-                      placeholder="Search all logged infractions..."
-                      className="pl-8 h-9"
-                      data-testid="infractions-logged-search"
-                    />
-                  </div>
-                  <Button onClick={loadLogged} variant="outline" className="h-9">Refresh</Button>
-                  <Button
-                    onClick={() => {
-                      setDateFrom("");
-                      setDateTo("");
-                      setLogDepot("");
-                      setLogBusId("");
-                      setLogInfractionCode("");
-                      setLogCategory("");
-                      setLogStatus("");
-                      setLogSearch("");
-                    }}
-                    variant="ghost"
-                    className="h-9"
-                  >
-                    Clear
-                  </Button>
-                </CardContent>
-              </Card>
-              <InfractionReportsPanel
-                dateFrom={dateFrom}
-                dateTo={dateTo}
-                depot={logDepot}
-                busId={logBusId}
-                category={logCategory}
-                infractionCode={logInfractionCode}
-              />
-            </div>
-          <Card className="border-gray-200 shadow-sm overflow-x-auto">
-            <CardContent className="p-0 min-w-[960px]">
-              <Table className="text-[12px]">
-                <TableHeader><TableRow className="table-header">
-                  <TableHead>Detected</TableHead>
-                  <TableHead>Code</TableHead>
-                  <TableHead>Bus</TableHead>
-                  <TableHead>Depot</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Logged</TableHead>
-                  <TableHead className="text-right">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          className="inline-flex items-center justify-end gap-1 ml-auto w-full cursor-help rounded-sm bg-transparent p-0 text-left font-semibold text-inherit hover:opacity-90"
-                        >
-                          Action
-                          <HelpCircle className="h-3.5 w-3.5 shrink-0 opacity-60" aria-hidden />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="left" className="max-w-[260px] text-left font-normal leading-snug">
-                        Close fixes the penalty amount (no further slab escalation). Under review is workflow-only; escalation can still apply until you close.
-                      </TooltipContent>
-                    </Tooltip>
-                  </TableHead>
-                </TableRow></TableHeader>
-                <TableBody>
-                  <TableLoadRows
-                    colSpan={9}
-                    loading={logLoading}
-                    error={logError}
-                    onRetry={loadLogged}
-                    isEmpty={logged.length === 0}
-                    emptyMessage="No infractions logged"
-                  >
-                    {logged.map((l) => (
-                      <TableRow key={l.id} className="hover:bg-[#FAFAFA]" title={l.id}>
-                        <TableCell className="text-sm whitespace-nowrap">{formatDateIN(l.date)}</TableCell>
-                        <TableCell className="font-mono" title={l.id}>{l.infraction_code}</TableCell>
-                        <TableCell className="font-mono">{l.bus_id || "—"}</TableCell>
-                        <TableCell className="text-sm max-w-[100px] truncate">{l.depot || "—"}</TableCell>
-                        <TableCell className="text-sm max-w-[260px]">
-                          <div className="font-medium text-gray-900">{l.description}</div>
-                          <div className="mt-0.5"><Badge className={`${catColors[l.category]} hover:${catColors[l.category]}`}>{l.category}</Badge></div>
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-[#DC2626] whitespace-nowrap">Rs.{l.amount?.toLocaleString()}</TableCell>
-                        <TableCell>
-                          <Badge variant={l.status === "closed" ? "secondary" : "outline"}>{l.status || "open"}</Badge>
-                        </TableCell>
-                        <TableCell className="text-xs text-gray-600 whitespace-nowrap">
-                          <div>{formatDateTimeIN(l.created_at)}</div>
-                          <div className="truncate max-w-[120px]">{l.logged_by || "—"}</div>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {l.status !== "closed" ? (
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  type="button"
-                                  className="ml-auto h-8 w-8"
-                                  aria-label="Open actions"
-                                >
-                                  <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-44">
-                                {(l.status || "open") === "open" ? (
-                                  <DropdownMenuItem onClick={() => handleUnderReview(l.id)}>
-                                    Under review
-                                  </DropdownMenuItem>
-                                ) : null}
-                                <DropdownMenuItem onClick={() => openCloseInfractionDialog(l.id)}>
-                                  <CheckCircle2 size={13} className="mr-1.5" /> Close
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          ) : (
-                            <span className="text-xs text-gray-500">Closed</span>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableLoadRows>
-                </TableBody>
-              </Table>
-              <TablePaginationBar
-                page={logPage}
-                pages={logMeta.pages}
-                total={logMeta.total}
-                limit={logMeta.limit}
-                onPageChange={setLogPage}
-              />
-            </CardContent>
-          </Card>
-          </TooltipProvider>
-        </>
-      )}
-
-      <Dialog
-        open={closeInfractionOpen}
-        onOpenChange={(open) => {
-          setCloseInfractionOpen(open);
-          if (!open) {
-            setCloseInfractionId("");
-            setCloseInfractionRemarks("");
-          }
-        }}
-      >
-        <DialogContent className="sm:max-w-md" data-testid="close-infraction-dialog">
-          <DialogHeader>
-            <DialogTitle>Close infraction</DialogTitle>
-            <DialogDescription>
-              Stops further slab escalation for billing. Remarks are optional.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor="close-infraction-remarks">Remarks</Label>
+      <Card className="border-gray-200 shadow-xl overflow-hidden rounded-2xl bg-white">
+        <div className="p-4 bg-gray-50/50 border-b flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="relative w-full md:max-w-md">
+            <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <Input
-              id="close-infraction-remarks"
-              value={closeInfractionRemarks}
-              onChange={(e) => setCloseInfractionRemarks(e.target.value)}
-              placeholder="Optional note"
+              value={catalogueSearch}
+              onChange={(e) => setCatalogueSearch(e.target.value)}
+              placeholder="Search code or description..."
+              className="pl-10 h-10 bg-white border-gray-200 focus-visible:ring-[#C8102E] rounded-xl"
+              data-testid="infractions-catalogue-search"
             />
           </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setCloseInfractionOpen(false)}>
-              Cancel
-            </Button>
-            <Button type="button" className="bg-[#C8102E] hover:bg-[#A50E25]" onClick={submitCloseInfraction}>
-              Confirm close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Log Infraction Dialog */}
-      <Dialog
-        open={logOpen}
-        onOpenChange={(open) => {
-          setLogOpen(open);
-          if (!open) setLogAdvancedOpen(false);
-        }}
-      >
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto overflow-x-hidden w-[calc(100vw-1.5rem)] sm:w-full" data-testid="log-infraction-dialog">
-          <DialogHeader>
-            <DialogTitle>Log infraction</DialogTitle>
-            <DialogDescription>
-              Code and bus are required. Detected date is when it occurred (date only; defaults to today). Logged date/time is stored when you submit.{" "}
-              <Link to="/incidents" className="text-[#C8102E] font-medium hover:underline">Incidents</Link>
-              {" "}if a ticket exists.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2 min-w-0">
-              <Label>Infraction code <span className="text-red-600" aria-hidden>*</span></Label>
-              <Select value={logForm.infraction_code} onValueChange={(v) => setLogForm({ ...logForm, infraction_code: v })}>
-                <SelectTrigger data-testid="log-inf-code" className="w-full min-h-9 h-auto min-w-0 py-2 text-left [&>span]:line-clamp-none [&>span]:whitespace-normal">
-                  <SelectValue placeholder="Choose code" />
-                </SelectTrigger>
-                <SelectContent
-                  position="popper"
-                  sideOffset={6}
-                  align="start"
-                  collisionPadding={20}
-                  className={logModalSelectContentClass}
-                >
-                  {(catalogueAll.length ? catalogueAll : catalogue).map((c) => (
-                    <SelectItem
-                      key={c.code}
-                      value={c.code}
-                      className="group items-start whitespace-normal break-words py-2.5 pl-2 pr-8 text-left leading-snug focus:bg-gray-100 focus:text-gray-900 data-[highlighted]:bg-gray-100 data-[highlighted]:text-gray-900 dark:focus:bg-gray-800 dark:focus:text-gray-100 dark:data-[highlighted]:bg-gray-800 dark:data-[highlighted]:text-gray-100"
-                    >
-                      <span className="block">
-                        <span className="font-mono font-semibold">{c.code}</span>
-                        <span className="infraction-desc mt-0.5 block text-xs text-gray-600 group-data-[highlighted]:text-gray-800 dark:text-gray-400 dark:group-data-[highlighted]:text-gray-300">
-                          {c.description} · Rs.{c.amount?.toLocaleString?.() ?? c.amount}
-                        </span>
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-1 min-[480px]:grid-cols-2 gap-3 min-w-0">
-              <div className="space-y-2 min-w-0">
-                <Label>Bus <span className="text-red-600" aria-hidden>*</span></Label>
-                <Select value={logForm.bus_id || "none"} onValueChange={(v) => setLogForm({ ...logForm, bus_id: v === "none" ? "" : v })}>
-                  <SelectTrigger data-testid="log-inf-bus" className="w-full min-w-0">
-                    <SelectValue placeholder="Select bus" />
-                  </SelectTrigger>
-                  <SelectContent
-                    position="popper"
-                    sideOffset={6}
-                    align="start"
-                    collisionPadding={20}
-                    className={logModalSelectContentClass}
-                  >
-                    <SelectItem value="none">—</SelectItem>
-                    {buses.map((b) => (
-                      <SelectItem key={b.bus_id} value={b.bus_id}>
-                        {b.bus_id}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2 min-w-0">
-                <Label>Detected date</Label>
-                <Input type="date" value={logForm.date} onChange={(e) => setLogForm({ ...logForm, date: e.target.value })} className="min-w-0" aria-label="Detected date" />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Depot</Label>
-              <Input
-                value={logForm.depot}
-                onChange={(e) => setLogForm({ ...logForm, depot: e.target.value })}
-                disabled={depotFromBusLocked}
-                placeholder={depotFromBusLocked ? "Filled from bus" : "If no bus selected"}
-                className={depotFromBusLocked ? "bg-muted" : ""}
-              />
-            </div>
-            <p className="text-xs font-medium text-gray-500">Optional</p>
-            <div className="space-y-2">
-              <Label>Driver</Label>
-              <Input className="font-mono text-xs" value={logForm.driver_id} onChange={(e) => setLogForm({ ...logForm, driver_id: e.target.value })} placeholder="License number" />
-            </div>
-            <div className="space-y-2">
-              <Label>Incident ID</Label>
-              <Input className="font-mono text-xs" value={logForm.related_incident_id} onChange={(e) => setLogForm({ ...logForm, related_incident_id: e.target.value })} placeholder="INC-…" />
-            </div>
-            <div className="space-y-2">
-              <Label>Remarks</Label>
-              <Input value={logForm.remarks} onChange={(e) => setLogForm({ ...logForm, remarks: e.target.value })} placeholder="Notes" />
-            </div>
-            <Collapsible open={logAdvancedOpen} onOpenChange={setLogAdvancedOpen}>
-              <CollapsibleTrigger asChild>
-                <Button variant="ghost" type="button" className="flex h-9 w-full items-center justify-between px-2 font-medium hover:bg-muted/80">
-                  <span className="text-sm text-gray-700">More fields</span>
-                  <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${logAdvancedOpen ? "rotate-180" : ""}`} />
-                </Button>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="space-y-4 pt-2">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2"><Label>Route ID</Label>
-                    <Input className="font-mono text-xs" value={logForm.route_id} onChange={(e) => setLogForm({ ...logForm, route_id: e.target.value })} />
-                  </div>
-                  <div className="space-y-2"><Label>Route name</Label>
-                    <Input value={logForm.route_name} onChange={(e) => setLogForm({ ...logForm, route_name: e.target.value })} />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2"><Label>Trip ID</Label>
-                    <Input className="font-mono text-xs" value={logForm.trip_id} onChange={(e) => setLogForm({ ...logForm, trip_id: e.target.value })} />
-                  </div>
-                  <div className="space-y-2"><Label>Duty ID</Label>
-                    <Input className="font-mono text-xs" value={logForm.duty_id} onChange={(e) => setLogForm({ ...logForm, duty_id: e.target.value })} />
-                  </div>
-                </div>
-                <div className="space-y-2"><Label>Location</Label>
-                  <Input value={logForm.location_text} onChange={(e) => setLogForm({ ...logForm, location_text: e.target.value })} />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2"><Label>Cause code</Label>
-                    <Input className="font-mono text-xs" value={logForm.cause_code} onChange={(e) => setLogForm({ ...logForm, cause_code: e.target.value })} />
-                  </div>
-                  <div className="space-y-2"><Label>Deductible</Label>
-                    <Select value={logForm.deductible || "unset"} onValueChange={(v) => setLogForm({ ...logForm, deductible: v === "unset" ? "" : v })}>
-                      <SelectTrigger className="w-full min-w-0"><SelectValue placeholder="Unset" /></SelectTrigger>
-                      <SelectContent
-                        position="popper"
-                        sideOffset={6}
-                        align="start"
-                        collisionPadding={20}
-                        className={logModalSelectContentClass}
-                      >
-                        <SelectItem value="unset">Unset</SelectItem>
-                        <SelectItem value="true">Yes</SelectItem>
-                        <SelectItem value="false">No</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </CollapsibleContent>
-            </Collapsible>
-            <Button onClick={handleLog} className="w-full bg-[#C8102E] hover:bg-[#A50E25]" data-testid="log-inf-submit-btn">Log infraction</Button>
+          <div className="flex items-center gap-2 text-[10px] uppercase font-black tracking-widest text-gray-400">
+            <Info size={14} className="text-blue-500" /> Page {page} of {meta.pages}
           </div>
-        </DialogContent>
-      </Dialog>
+        </div>
+        
+        <CardContent className="p-0">
+          <Table className="text-[12px]">
+            <TableHeader>
+              <TableRow className="bg-gray-50/50 border-b table-header">
+                <TableHead className="w-[100px] font-black uppercase text-[10px] tracking-widest px-6">Code</TableHead>
+                <TableHead className="w-[60px] font-black uppercase text-[10px] tracking-widest">Category</TableHead>
+                <TableHead className="min-w-[400px] font-black uppercase text-[10px] tracking-widest">Description</TableHead>
+                <TableHead className="text-right font-black uppercase text-[10px] tracking-widest">Amount</TableHead>
+                <TableHead className="font-black uppercase text-[10px] tracking-widest pl-8">Safety</TableHead>
+                <TableHead className="text-right font-black uppercase text-[10px] tracking-widest">Resolution Days</TableHead>
+                <TableHead className="font-black uppercase text-[10px] tracking-widest pl-4">Capping Rule</TableHead>
+                <TableHead className="font-black uppercase text-[10px] tracking-widest">Escalation</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableLoadRows
+                colSpan={8}
+                loading={loading}
+                error={error}
+                onRetry={load}
+                isEmpty={catalogue.length === 0}
+                emptyMessage="No catalogue entries found"
+              >
+                {catalogue.map((c) => (
+                  <TableRow key={c.id} className="hover:bg-gray-50 transition-colors border-b last:border-0" data-testid={`cat-row-${c.code}`}>
+                    <TableCell className="font-mono font-bold text-[#C8102E] px-6 text-[12px]">{c.code}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className={`${catColors[c.category] || "bg-gray-100"} border-none text-[10px] font-black h-5 px-2`}>
+                        {c.category}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-[12px] font-medium text-gray-700 py-4 leading-relaxed pr-8 whitespace-normal break-words">
+                      {c.description}
+                    </TableCell>
+                    <TableCell className="text-right font-mono font-black text-gray-900 pr-4 text-[12px]">₹{c.amount?.toLocaleString()}</TableCell>
+                    <TableCell className="pl-8">
+                      {c.safety_flag ? (
+                        <Badge className="bg-red-50 text-red-600 border-red-100 text-[9px] font-black h-5 uppercase">Safety</Badge>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-gray-500 whitespace-nowrap text-[12px]">{c.resolve_days ?? "—"}d</TableCell>
+                    <TableCell className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter pl-8 font-mono whitespace-normal">{capRuleLabel(c)}</TableCell>
+                    <TableCell className="text-[10px] font-medium text-gray-600 whitespace-normal">{escalationLabel(c)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableLoadRows>
+            </TableBody>
+          </Table>
+          <div className="bg-gray-50/30">
+            <TablePaginationBar
+              page={page}
+              pages={meta.pages}
+              total={meta.total}
+              limit={limit}
+              onPageChange={setPage}
+              onLimitChange={setLimit}
+            />
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

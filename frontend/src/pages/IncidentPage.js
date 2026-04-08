@@ -57,6 +57,8 @@ import {
   ArrowRightCircle,
   CheckCircle2,
   Lock,
+  User,
+  Clock,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -88,17 +90,15 @@ const emptyForm = () => ({
   trip_id: "",
   duty_id: "",
   location_text: "",
-  related_infraction_id: "",
-  severity: "medium",
-  channel: "web",
   telephonic_reference: "",
+  infractions: [],
 });
 
 export default function IncidentPage() {
   const [incidents, setIncidents] = useState([]);
   const [meta, setMeta] = useState(null);
   const [page, setPage] = useState(1);
-  const [listMeta, setListMeta] = useState({ total: 0, pages: 1, limit: 20 });
+  const [listMeta, setListMeta] = useState({ total: 0, pages: 1, limit: 30 });
   const [buses, setBuses] = useState([]);
   const [drivers, setDrivers] = useState([]);
   const [open, setOpen] = useState(false);
@@ -110,9 +110,9 @@ export default function IncidentPage() {
   const [editForm, setEditForm] = useState({
     description: "",
     occurred_at: "",
-    vehicles_affected_count: "1",
     damage_summary: "",
     engineer_action: "",
+    infractions: [],
   });
   const [form, setForm] = useState(emptyForm);
   const [filterStatus, setFilterStatus] = useState("");
@@ -127,6 +127,8 @@ export default function IncidentPage() {
   const [noteText, setNoteText] = useState("");
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(null);
+  const [catalogue, setCatalogue] = useState([]);
+  const [catLoading, setCatLoading] = useState(false);
 
   const typeLabels = useMemo(() => {
     const m = {};
@@ -158,10 +160,17 @@ export default function IncidentPage() {
 
   const loadMeta = useCallback(async () => {
     try {
-      const { data } = await API.get(Endpoints.incidents.meta());
-      setMeta(data);
+      setCatLoading(true);
+      const [{ data: metaData }, { data: catData }] = await Promise.all([
+        API.get(Endpoints.incidents.meta()),
+        API.get(Endpoints.infractions.catalogue()),
+      ]);
+      setMeta(metaData);
+      setCatalogue(catData.items || []);
     } catch {
       toast.error("Could not load incident metadata");
+    } finally {
+      setCatLoading(false);
     }
   }, []);
 
@@ -178,7 +187,7 @@ export default function IncidentPage() {
         date_from: filterDateFrom,
         date_to: filterDateTo,
         page,
-        limit: 20,
+        limit: listMeta.limit,
       });
       const [i, busItems, driverItems] = await Promise.all([
         API.get(Endpoints.incidents.list(), { params }),
@@ -198,7 +207,7 @@ export default function IncidentPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterStatus, filterDepot, filterBusId, filterSeverity, filterType, filterDateFrom, filterDateTo, page]);
+  }, [filterStatus, filterDepot, filterBusId, filterSeverity, filterType, filterDateFrom, filterDateTo, page, listMeta.limit]);
 
   useEffect(() => {
     loadMeta();
@@ -210,7 +219,7 @@ export default function IncidentPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [filterStatus, filterDepot, filterBusId, filterSeverity, filterType, filterDateFrom, filterDateTo]);
+  }, [filterStatus, filterDepot, filterBusId, filterSeverity, filterType, filterDateFrom, filterDateTo, listMeta.limit]);
 
   const handleAdd = async () => {
     if (!form.incident_type || !form.description.trim()) {
@@ -231,6 +240,7 @@ export default function IncidentPage() {
         vehicles_affected_count: vehiclesCount,
         damage_summary: form.damage_summary || "",
         engineer_action: form.engineer_action || "",
+        infractions: form.infractions || [],
       });
       toast.success("Incident reported");
       setOpen(false);
@@ -293,6 +303,21 @@ export default function IncidentPage() {
     }
   };
 
+  const handleCloseInfraction = async (idx) => {
+    if (!selected) return;
+    const remarks = prompt("Enter closure remarks:");
+    if (remarks === null) return;
+    try {
+      await API.put(`${Endpoints.incidents.get(selected.id)}/infractions/${idx}/close`, { close_remarks: remarks });
+      toast.success("Infraction closed");
+      const { data } = await API.get(Endpoints.incidents.get(selected.id));
+      setSelected(data);
+      load();
+    } catch (err) {
+      toast.error(formatApiError(err.response?.data?.detail));
+    }
+  };
+
   const openEdit = (inc) => {
     setEditIncidentId(inc.id);
     setEditForm({
@@ -301,6 +326,10 @@ export default function IncidentPage() {
       vehicles_affected_count: String(inc.vehicles_affected_count || 1),
       damage_summary: inc.damage_summary || "",
       engineer_action: inc.engineer_action || "",
+      infractions: Array.isArray(inc.infractions) ? inc.infractions.map(inf => ({
+        infraction_code: inf.infraction_code,
+        description: inf.description
+      })) : [],
     });
     setEditOpen(true);
   };
@@ -322,6 +351,7 @@ export default function IncidentPage() {
         vehicles_affected_count: Number(editForm.vehicles_affected_count) || 1,
         damage_summary: editForm.damage_summary || "",
         engineer_action: editForm.engineer_action || "",
+        infractions: editForm.infractions || [],
       });
       toast.success("Incident updated");
       setEditOpen(false);
@@ -357,12 +387,21 @@ export default function IncidentPage() {
     return Array.from(s).sort();
   }, [buses]);
 
+  const finalizedDeduction = (inc) => {
+    if ((inc?.status || "") !== "closed") return "—";
+    const total = (inc?.infractions || []).reduce((sum, inf) => {
+      if (inf?.deductible === false) return sum;
+      return sum + Number(inf?.amount_current ?? inf?.amount_snapshot ?? inf?.amount ?? 0);
+    }, 0);
+    return `Rs.${total.toLocaleString()}`;
+  };
+
   return (
     <div data-testid="incident-page">
       <div className="page-header flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="page-title">Incidents</h1>
         <Button
-          onClick={() => setOpen(true)}
+          onClick={() => { setForm(emptyForm()); setOpen(true); }}
           className="bg-[#C8102E] hover:bg-[#A50E25]"
           data-testid="report-incident-btn"
         >
@@ -372,624 +411,500 @@ export default function IncidentPage() {
 
       <p className="text-sm text-gray-600 mb-4 max-w-4xl">Log, assign, and track incident cases.</p>
 
-      <div className="mb-4 flex flex-wrap items-end gap-3">
-        <div className="space-y-1">
-          <Label className="text-xs text-gray-500 uppercase">Status</Label>
-          <Select value={filterStatus || "all"} onValueChange={(v) => setFilterStatus(v === "all" ? "" : v)}>
-            <SelectTrigger className="w-[160px]" data-testid="incident-filter-status">
-              <SelectValue placeholder="All" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              {(meta?.statuses || ["open", "investigating", "resolved"]).map((st) => (
-                <SelectItem key={st} value={st}>{st.replace(/_/g, " ")}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      <div className="space-y-4">
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-xs text-gray-500">
+            Total incidents: <span className="font-semibold text-gray-800">{listMeta.total}</span>
+          </div>
         </div>
-        <div className="space-y-1">
-          <Label className="text-xs text-gray-500 uppercase">Depot</Label>
-          <Select value={filterDepot || "all"} onValueChange={(v) => { setFilterDepot(v === "all" ? "" : v); setFilterBusId(""); }}>
-            <SelectTrigger className="w-[160px]"><SelectValue placeholder="All" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              {[...new Set(buses.map((x) => x.depot).filter(Boolean))].sort().map((dep) => (
-                <SelectItem key={dep} value={dep}>{dep}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+
+        <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs text-gray-500 uppercase">Status</Label>
+              <Select value={filterStatus || "all"} onValueChange={(v) => setFilterStatus(v === "all" ? "" : v)}>
+                <SelectTrigger className="w-[160px]" data-testid="incident-filter-status"><SelectValue placeholder="All" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  {(meta?.statuses || ["open", "investigating", "resolved", "closed"]).map((st) => (
+                    <SelectItem key={st} value={st}>{st.replace(/_/g, " ")}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-gray-500 uppercase">Depot</Label>
+              <Select value={filterDepot || "all"} onValueChange={(v) => { setFilterDepot(v === "all" ? "" : v); setFilterBusId(""); }}>
+                <SelectTrigger className="w-[160px]"><SelectValue placeholder="All" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  {depotsFromBuses.map((dep) => <SelectItem key={dep} value={dep}>{dep}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-gray-500 uppercase">Bus</Label>
+              <Select value={filterBusId || "all"} onValueChange={(v) => setFilterBusId(v === "all" ? "" : v)}>
+                <SelectTrigger className="w-[120px]"><SelectValue placeholder="All" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  {(filterDepot ? buses.filter((x) => x.depot === filterDepot) : buses).map((x) => (
+                    <SelectItem key={x.bus_id} value={x.bus_id}>{x.bus_id}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-gray-500 uppercase">Severity</Label>
+              <Select value={filterSeverity || "all"} onValueChange={(v) => setFilterSeverity(v === "all" ? "" : v)}>
+                <SelectTrigger className="w-[120px]"><SelectValue placeholder="All" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  {(meta?.severities || ["low", "medium", "high"]).map((s) => (
+                    <SelectItem key={s} value={s}>{s}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-gray-500 uppercase">Type code</Label>
+              <Input className="w-28 font-mono text-xs h-9" value={filterType} onChange={(e) => setFilterType(e.target.value)} placeholder="Code" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-gray-500 uppercase">From</Label>
+              <Input type="date" className="w-36 h-9" value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-gray-500 uppercase">To</Label>
+              <Input type="date" className="w-36 h-9" value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)} />
+            </div>
         </div>
-        <div className="space-y-1">
-          <Label className="text-xs text-gray-500 uppercase">Bus</Label>
-          <Select value={filterBusId || "all"} onValueChange={(v) => setFilterBusId(v === "all" ? "" : v)}>
-            <SelectTrigger className="w-[120px]"><SelectValue placeholder="All" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              {(filterDepot ? buses.filter((x) => x.depot === filterDepot) : buses).map((x) => (
-                <SelectItem key={x.bus_id} value={x.bus_id}>{x.bus_id}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs text-gray-500 uppercase">Severity</Label>
-          <Select value={filterSeverity || "all"} onValueChange={(v) => setFilterSeverity(v === "all" ? "" : v)}>
-            <SelectTrigger className="w-[120px]"><SelectValue placeholder="All" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              {(meta?.severities || ["low", "medium", "high"]).map((s) => (
-                <SelectItem key={s} value={s}>{s}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs text-gray-500 uppercase">Type code</Label>
-          <Input className="w-28 font-mono text-xs h-9" value={filterType} onChange={(e) => setFilterType(e.target.value)} placeholder="Code" />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs text-gray-500 uppercase">From</Label>
-          <Input type="date" className="w-36 h-9" value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs text-gray-500 uppercase">To</Label>
-          <Input type="date" className="w-36 h-9" value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)} />
-        </div>
+
+        <Card className="border-gray-200 shadow-sm overflow-hidden">
+          <CardContent className="p-0 overflow-x-auto">
+            <Table className="min-w-max text-[12px]">
+                <TableHeader>
+                  <TableRow className="table-header">
+                    <TableHead>ID</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Channel</TableHead>
+                    <TableHead>Depot</TableHead>
+                    <TableHead>Infractions</TableHead>
+                    <TableHead>Bus</TableHead>
+                    <TableHead>Severity</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Reported</TableHead>
+                    <TableHead className="text-right">Deductions</TableHead>
+                    <TableHead className="text-right w-[108px]">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableLoadRows
+                    colSpan={11}
+                    loading={loading}
+                    error={fetchError}
+                    onRetry={load}
+                    isEmpty={incidents.length === 0}
+                    emptyMessage="No incidents"
+                  >
+                    {incidents.map((inc) => (
+                      <TableRow key={inc.id} className="hover:bg-gray-50" data-testid={`incident-row-${inc.id}`}>
+                        <TableCell className="font-mono whitespace-nowrap">{inc.id}</TableCell>
+                        <TableCell className="py-3">
+                          <span className="font-medium text-gray-900 block leading-snug">{typeLabels[inc.incident_type] || inc.incident_type}</span>
+                          <span className="block text-[10px] text-gray-500 font-mono mt-0.5">{inc.incident_type}</span>
+                        </TableCell>
+                        <TableCell className="capitalize">{inc.channel || "—"}</TableCell>
+                        <TableCell>{inc.depot || "—"}</TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-1">
+                            {(inc.infractions || []).map(inf => (
+                              <Badge key={inf.infraction_code} variant="outline" className="text-[10px] py-0 border-amber-200 bg-amber-50 text-amber-800">
+                                {inf.infraction_code}
+                              </Badge>
+                            ))}
+                            {(!inc.infractions || inc.infractions.length === 0) && <span className="text-gray-300">—</span>}
+                          </div>
+                        </TableCell>
+                        <TableCell className="font-mono whitespace-nowrap">{inc.bus_id || "—"}</TableCell>
+                        <TableCell><Badge className={cn("px-2 py-0.5", severityColor(inc.severity))}>{inc.severity}</Badge></TableCell>
+                        <TableCell><Badge variant="outline" className={cn("px-2 py-0.5", statusColor(inc.status))}>{inc.status?.replace(/_/g, " ")}</Badge></TableCell>
+                        <TableCell className="text-gray-500 whitespace-nowrap text-[12px]">{formatDateIN(inc.created_at?.slice(0, 10))}</TableCell>
+                        <TableCell className="text-right font-medium whitespace-nowrap">{finalizedDeduction(inc)}</TableCell>
+                        <TableCell className="text-right p-2">
+                           <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="h-4 w-4" /></Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-56 text-xs text-gray-700">
+                              <DropdownMenuItem onClick={() => openDetail(inc)} className="gap-2"><ClipboardList className="h-4 w-4 opacity-70" /> Details & Log</DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => openAssign(inc)} className="gap-2"><UserPlus className="h-4 w-4 opacity-70" /> Assign team</DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => openEdit(inc)} className="gap-2"><Pencil className="h-4 w-4 opacity-70" /> Edit metadata</DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuSub>
+                                <DropdownMenuSubTrigger className="gap-2"><PlayCircle className="h-4 w-4 opacity-70" /> Update status</DropdownMenuSubTrigger>
+                                <DropdownMenuPortal>
+                                  <DropdownMenuSubContent className="text-xs">
+                                    {inc.status === 'open' && <DropdownMenuItem onClick={() => setStatus(inc.id, 'investigating')}>Start investigation</DropdownMenuItem>}
+                                    {inc.status !== 'resolved' && inc.status !== 'closed' && <DropdownMenuItem onClick={() => setStatus(inc.id, 'resolved')}>Mark resolved</DropdownMenuItem>}
+                                    {inc.status === 'resolved' && <DropdownMenuItem onClick={() => setStatus(inc.id, 'closed')}>Close case</DropdownMenuItem>}
+                                  </DropdownMenuSubContent>
+                                </DropdownMenuPortal>
+                              </DropdownMenuSub>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableLoadRows>
+                </TableBody>
+            </Table>
+            <TablePaginationBar 
+              page={page} 
+              pages={listMeta.pages} 
+              total={listMeta.total} 
+              limit={listMeta.limit} 
+              onPageChange={setPage} 
+              onLimitChange={(l) => setListMeta(prev => ({ ...prev, limit: l }))}
+            />
+          </CardContent>
+        </Card>
       </div>
 
-      <Card className="border-gray-200 shadow-sm overflow-hidden">
-        <CardContent className="p-0 overflow-x-auto">
-          <Table className="min-w-max text-[12px]">
-            <TableHeader>
-              <TableRow className="table-header">
-                <TableHead>ID</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Channel</TableHead>
-                <TableHead>Depot</TableHead>
-                <TableHead>Team</TableHead>
-                <TableHead>Bus</TableHead>
-                <TableHead>Severity</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Reported</TableHead>
-                <TableHead>Resolved</TableHead>
-                <TableHead className="text-right w-[108px]">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableLoadRows
-                colSpan={11}
-                loading={loading}
-                error={fetchError}
-                onRetry={load}
-                isEmpty={incidents.length === 0}
-                emptyMessage="No incidents"
-              >
-                {incidents.map((inc) => (
-                  <TableRow
-                    key={inc.id}
-                    className="hover:bg-gray-50"
-                    data-testid={`incident-row-${inc.id}`}
-                  >
-                    <TableCell className="font-mono whitespace-nowrap">{inc.id}</TableCell>
-                    <TableCell className="max-w-[200px]">
-                      <span className="font-medium">{typeLabels[inc.incident_type] || inc.incident_type}</span>
-                      <span className="block text-xs text-gray-500 font-mono">{inc.incident_type}</span>
-                    </TableCell>
-                    <TableCell className="capitalize">{inc.channel || "—"}</TableCell>
-                    <TableCell>{inc.depot || "—"}</TableCell>
-                    <TableCell className="max-w-[120px] truncate whitespace-nowrap">{inc.assigned_team || "—"}</TableCell>
-                    <TableCell className="font-mono whitespace-nowrap">{inc.bus_id || "—"}</TableCell>
-                    <TableCell>
-                      <Badge className={severityColor(inc.severity)}>{inc.severity}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={statusColor(inc.status)}>{inc.status?.replace(/_/g, " ")}</Badge>
-                    </TableCell>
-                    <TableCell className="text-gray-500 whitespace-nowrap">
-                      {formatDateIN(inc.created_at?.slice(0, 10))}
-                    </TableCell>
-                    <TableCell className="text-gray-500 whitespace-nowrap">
-                      {(inc.status === "resolved" || inc.status === "closed")
-                        ? formatDateIN((inc.resolved_at || inc.updated_at || "").slice(0, 10))
-                        : "—"}
-                    </TableCell>
-                    <TableCell className="text-right p-2">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-gray-600 hover:text-[#1F2937]"
-                            aria-label="Actions"
-                            data-testid={`incident-actions-btn-${inc.id}`}
-                          >
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-56">
-                          <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                          <DropdownMenuItem onClick={() => openDetail(inc)} className="gap-2">
-                            <ClipboardList className="h-4 w-4 text-gray-500" />
-                            Activity log & notes
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => openAssign(inc)} className="gap-2">
-                            <UserPlus className="h-4 w-4 text-gray-500" />
-                            Assign team
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => openEdit(inc)} className="gap-2">
-                            <Pencil className="h-4 w-4 text-gray-500" />
-                            Edit incident
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuSub>
-                            <DropdownMenuSubTrigger className="gap-2">
-                              {statusColor(inc.status).includes("bg-") ? (
-                                <div className={cn("w-2 h-2 rounded-full", statusColor(inc.status).split(" ")[0])} />
-                              ) : (
-                                <PlayCircle className="h-4 w-4" />
-                              )}
-                              Update status
-                            </DropdownMenuSubTrigger>
-                            <DropdownMenuPortal>
-                              <DropdownMenuSubContent>
-                                {inc.status === "open" && (
-                                  <DropdownMenuItem
-                                    onClick={() => setStatus(inc.id, "investigating")}
-                                    className="gap-2"
-                                  >
-                                    <PlayCircle className="h-4 w-4 text-amber-600" />
-                                    Start investigation
-                                  </DropdownMenuItem>
-                                )}
-                                {(inc.status === "investigating" || inc.status === "assigned") && (
-                                  <DropdownMenuItem
-                                    onClick={() => setStatus(inc.id, "in_progress")}
-                                    className="gap-2"
-                                  >
-                                    <ArrowRightCircle className="h-4 w-4 text-cyan-600" />
-                                    Mark in progress
-                                  </DropdownMenuItem>
-                                )}
-                                {inc.status !== "resolved" && inc.status !== "closed" && (
-                                  <DropdownMenuItem
-                                    onClick={() => setStatus(inc.id, "resolved")}
-                                    className="gap-2"
-                                  >
-                                    <CheckCircle2 className="h-4 w-4 text-green-600" />
-                                    Mark resolved
-                                  </DropdownMenuItem>
-                                )}
-                                {inc.status === "resolved" && (
-                                  <DropdownMenuItem
-                                    onClick={() => setStatus(inc.id, "closed")}
-                                    className="gap-2"
-                                  >
-                                    <Lock className="h-4 w-4 text-gray-600" />
-                                    Close case
-                                  </DropdownMenuItem>
-                                )}
-                                {inc.status === "closed" && (
-                                  <div className="px-2 py-1.5 text-xs text-gray-400 italic">Case finalized</div>
-                                )}
-                              </DropdownMenuSubContent>
-                            </DropdownMenuPortal>
-                          </DropdownMenuSub>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableLoadRows>
-            </TableBody>
-          </Table>
-          <TablePaginationBar page={page} pages={listMeta.pages} total={listMeta.total} limit={listMeta.limit} onPageChange={setPage} />
-        </CardContent>
-      </Card>
-
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto" data-testid="incident-dialog">
-          <DialogHeader>
-            <DialogTitle>Report incident</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
+       <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-lg max-h-[95vh] overflow-y-auto" data-testid="incident-dialog">
+          <DialogHeader><DialogTitle>Report incident</DialogTitle></DialogHeader>
+          <div className="space-y-4 pt-2">
             <div className="space-y-2">
-              <Label>Type</Label>
-              <Select
-                value={form.incident_type}
-                onValueChange={(v) => setForm({ ...form, incident_type: v })}
-                disabled={!meta?.incident_types?.length}
-              >
+              <Label>Incident Type</Label>
+              <Select value={form.incident_type} onValueChange={(v) => setForm({ ...form, incident_type: v })} disabled={!meta?.incident_types?.length}>
                 <SelectTrigger data-testid="incident-type-select">
-                  <SelectValue
-                    placeholder={meta?.incident_types?.length ? "Select type" : "Loading types…"}
-                  />
+                  <SelectValue placeholder={meta?.incident_types?.length ? "Select type" : "Loading types..."} />
                 </SelectTrigger>
-                <SelectContent className="max-h-[min(24rem,70vh)]">
+                <SelectContent className="max-h-[300px]">
                   {incidentTypeGroups.map(({ key, label, items }) => (
                     <SelectGroup key={key}>
-                      <SelectLabel className="text-xs font-normal text-gray-500">{label}</SelectLabel>
-                      {items.map((t) => (
-                        <SelectItem key={t.code} value={t.code}>
-                          {t.label}
-                        </SelectItem>
-                      ))}
+                      <SelectLabel className="text-[10px] text-gray-400 uppercase border-b pb-1 mb-1">{label}</SelectLabel>
+                      {items.map((t) => <SelectItem key={t.code} value={t.code}>{t.label}</SelectItem>)}
                     </SelectGroup>
                   ))}
                 </SelectContent>
               </Select>
             </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>Channel</Label>
-                <Select
-                  value={form.channel}
-                  onValueChange={(v) => setForm({ ...form, channel: v })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
+                <Select value={form.channel} onValueChange={(v) => setForm({ ...form, channel: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {(meta?.channels || ["web", "telephonic", "other"]).map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {c}
-                      </SelectItem>
-                    ))}
+                    {(meta?.channels || ["web", "telephonic", "mobile", "other"]).map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
                 <Label>Severity</Label>
-                <Select
-                  value={form.severity}
-                  onValueChange={(v) => setForm({ ...form, severity: v })}
-                >
-                  <SelectTrigger data-testid="incident-severity">
-                    <SelectValue />
-                  </SelectTrigger>
+                <Select value={form.severity} onValueChange={(v) => setForm({ ...form, severity: v })}>
+                  <SelectTrigger data-testid="incident-severity"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {(meta?.severities || ["low", "medium", "high"]).map((s) => (
-                      <SelectItem key={s} value={s}>
-                        {s}
-                      </SelectItem>
-                    ))}
+                    {["low", "medium", "high"].map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
             </div>
-            {form.channel === "telephonic" && (
-              <div className="space-y-2">
-                <Label>Telephonic reference (no full phone #)</Label>
-                <Input
-                  value={form.telephonic_reference}
-                  onChange={(e) => setForm({ ...form, telephonic_reference: e.target.value })}
-                  placeholder="e.g. control room ticket TC-1024"
-                />
-              </div>
-            )}
+
             <div className="space-y-2">
               <Label>Description</Label>
-              <Textarea
-                value={form.description}
-                onChange={(e) => setForm({ ...form, description: e.target.value })}
-                rows={4}
-                data-testid="incident-description"
-                placeholder="What happened, location context, immediate actions…"
-              />
+              <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} placeholder="What happened..." />
             </div>
-            <div className="rounded-md border border-gray-200 bg-white p-3 space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label>Occurred</Label>
-                  <Input
-                    type="datetime-local"
-                    value={form.occurred_at}
-                    onChange={(e) => setForm({ ...form, occurred_at: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Vehicles affected</Label>
-                  <div className="text-sm text-gray-700">
-                    {(Array.isArray(form.vehicles_affected) ? form.vehicles_affected.length : 0) || (form.bus_id ? 1 : 1)}
-                  </div>
-                </div>
-              </div>
+
+            {/* Unified Infraction Linker */}
+            <div className="rounded-md border border-amber-200 bg-amber-50/20 p-3 space-y-3">
+              <Label className="text-amber-900 font-bold flex items-center gap-2"> <ClipboardList className="h-4 w-4" /> Link Penalties </Label>
               <div className="space-y-2">
-                <Label>Add affected bus</Label>
-                <Select
-                  value="none"
-                  onValueChange={(v) => {
+                <Select value="none" onValueChange={(v) => {
                     if (!v || v === "none") return;
-                    const cur = Array.isArray(form.vehicles_affected) ? form.vehicles_affected : [];
-                    if (cur.includes(v)) return;
-                    setForm({ ...form, vehicles_affected: [...cur, v] });
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select bus" />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-[18rem]">
-                    <SelectItem value="none">—</SelectItem>
-                    {buses.map((b) => (
-                      <SelectItem key={b.bus_id} value={b.bus_id}>
-                        {b.bus_id}
+                    const cat = catalogue.find(c => c.code === v);
+                    if (!cat) return;
+                    if ((form.infractions || []).some(x => x.infraction_code === v)) return;
+                    setForm({ ...form, infractions: [...(form.infractions || []), { infraction_code: v, description: cat.description }] });
+                  }}>
+                  <SelectTrigger className="h-8 text-xs border-amber-200 bg-white"><SelectValue placeholder="Add infraction code..." /></SelectTrigger>
+                  <SelectContent className="max-h-[200px]">
+                    <SelectItem value="none">— Select Code —</SelectItem>
+                    {catalogue.map(c => (
+                      <SelectItem key={c.code} value={c.code} className="text-[11px]">
+                         <span className="font-mono font-bold mr-2">{c.code}</span> — {c.description.slice(0, 40)}...
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                {(form.vehicles_affected || []).length > 0 ? (
-                  <div className="flex flex-wrap gap-2">
-                    {form.vehicles_affected.map((id) => (
-                      <button
-                        key={id}
-                        type="button"
-                        className="px-2 py-1 rounded-md border text-xs font-mono text-gray-700 hover:bg-gray-50"
-                        title="Remove"
-                        onClick={() =>
-                          setForm({
-                            ...form,
-                            vehicles_affected: form.vehicles_affected.filter((x) => x !== id),
-                          })
-                        }
-                      >
-                        {id} ×
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-              <div className="space-y-2">
-                <Label>Damage</Label>
-                <Textarea value={form.damage_summary} onChange={(e) => setForm({ ...form, damage_summary: e.target.value })} rows={2} />
-              </div>
-              <div className="space-y-2">
-                <Label>Engineer action</Label>
-                <Textarea value={form.engineer_action} onChange={(e) => setForm({ ...form, engineer_action: e.target.value })} rows={2} />
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {(form.infractions || []).map(inf => (
+                    <Badge key={inf.infraction_code} className="bg-amber-100 text-amber-900 border-amber-200 gap-2 px-2 py-1">
+                      {inf.infraction_code}
+                      <button type="button" onClick={() => setForm({ ...form, infractions: form.infractions.filter(x => x.infraction_code !== inf.infraction_code) })}>×</button>
+                    </Badge>
+                  ))}
+                </div>
               </div>
             </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Occurrence Time</Label>
+                <Input type="datetime-local" value={form.occurred_at} onChange={(e) => setForm({ ...form, occurred_at: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Driver Code</Label>
+                <Select value={form.driver_id || "none"} onValueChange={(v) => setForm({ ...form, driver_id: v === "none" ? "" : v })}>
+                  <SelectTrigger><SelectValue placeholder="Optional" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">—</SelectItem>
+                    {drivers.map(dr => <SelectItem key={dr.license_number} value={dr.license_number}>{dr.name} ({dr.license_number})</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>Depot</Label>
-                <Select
-                  value={form.depot || "none"}
-                  onValueChange={(v) => setForm({ ...form, depot: v === "none" ? "" : v })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Optional" />
-                  </SelectTrigger>
+                <Select value={form.depot || "none"} onValueChange={(v) => setForm({ ...form, depot: v === "none" ? "" : v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">—</SelectItem>
-                    {depotsFromBuses.map((dep) => (
-                      <SelectItem key={dep} value={dep}>
-                        {dep}
-                      </SelectItem>
-                    ))}
+                    {depotsFromBuses.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Route name</Label>
-                <Input
-                  value={form.route_name}
-                  onChange={(e) => setForm({ ...form, route_name: e.target.value })}
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>Route ID</Label>
-                <Input
-                  className="font-mono text-xs"
-                  value={form.route_id}
-                  onChange={(e) => setForm({ ...form, route_id: e.target.value })}
-                  placeholder="Stable route id"
-                />
-              </div>
-              <div className="space-y-2" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>Trip ID</Label>
-                <Input
-                  className="font-mono text-xs"
-                  value={form.trip_id}
-                  onChange={(e) => setForm({ ...form, trip_id: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Duty ID</Label>
-                <Input
-                  className="font-mono text-xs"
-                  value={form.duty_id}
-                  onChange={(e) => setForm({ ...form, duty_id: e.target.value })}
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Location / landmark</Label>
-              <Input
-                value={form.location_text}
-                onChange={(e) => setForm({ ...form, location_text: e.target.value })}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>Bus</Label>
-                <Select
-                  value={form.bus_id || "none"}
-                  onValueChange={(v) => setForm({ ...form, bus_id: v === "none" ? "" : v })}
-                >
-                  <SelectTrigger data-testid="incident-bus">
-                    <SelectValue placeholder="Optional" />
-                  </SelectTrigger>
+                <Label>Bus ID</Label>
+                <Select value={form.bus_id || "none"} onValueChange={(v) => setForm({ ...form, bus_id: v === "none" ? "" : v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">—</SelectItem>
-                    {buses.map((b) => (
-                      <SelectItem key={b.bus_id} value={b.bus_id}>
-                        {b.bus_id}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Driver</Label>
-                <Select
-                  value={form.driver_id || "none"}
-                  onValueChange={(v) => setForm({ ...form, driver_id: v === "none" ? "" : v })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Optional" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">—</SelectItem>
-                    {drivers.map((dr) => (
-                      <SelectItem key={dr.license_number} value={dr.license_number}>
-                        {dr.name} ({dr.license_number})
-                      </SelectItem>
-                    ))}
+                    {(form.depot ? buses.filter(b => b.depot === form.depot) : buses).map(b => <SelectItem key={b.bus_id} value={b.bus_id}>{b.bus_id}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
             </div>
           </div>
-          <DialogFooter>
-            <Button onClick={handleAdd} className="bg-[#C8102E] hover:bg-[#A50E25]" data-testid="incident-save-btn">
-              Submit
-            </Button>
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button onClick={handleAdd} className="bg-[#C8102E] hover:bg-[#A50E25]">Report Incident</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={assignOpen} onOpenChange={setAssignOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Assign team — {selected?.id}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-2">
-              <Label>Team</Label>
-              <Select value={assignTeam || "none"} onValueChange={(v) => setAssignTeam(v === "none" ? "" : v)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select team" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">—</SelectItem>
-                  {(meta?.assignment_teams || []).map((t) => (
-                    <SelectItem key={t} value={t}>
-                      {t}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Assignee name (optional)</Label>
-              <Input value={assignTo} onChange={(e) => setAssignTo(e.target.value)} />
-            </div>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Assign team — {selected?.id}</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-3">
+             <div className="p-3 bg-gray-50 rounded border text-[11px] leading-relaxed text-gray-600 italic">
+               Select the team responsible for managing this incident. Escalation emails will be sent to members of the selected team.
+             </div>
+             <div className="space-y-2">
+                <Label>Resolution Team</Label>
+                <Select value={assignTeam || "none"} onValueChange={(v) => setAssignTeam(v === "none" ? "" : v)}>
+                  <SelectTrigger><SelectValue placeholder="Select team" /></SelectTrigger>
+                  <SelectContent>
+                    {(meta?.assignment_teams || ["depot_manager", "safety_cell", "technical_team"]).map(t => (
+                      <SelectItem key={t} value={t}>{t.replace(/_/g, ' ').toUpperCase()}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+             </div>
+             <div className="space-y-2">
+                <Label>Individual Assignee (Optional)</Label>
+                <Input value={assignTo} onChange={(e) => setAssignTo(e.target.value)} placeholder="Personnel name" className="text-sm" />
+             </div>
           </div>
-          <DialogFooter>
-            <Button onClick={saveAssign}>Save</Button>
-          </DialogFooter>
+          <DialogFooter><Button onClick={saveAssign} className="w-full bg-[#1F2937]">Confirm Assignment</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Edit incident — {editIncidentId}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <Label>Description</Label>
-              <Textarea
-                rows={3}
-                value={editForm.description}
-                onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
-              />
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Edit Incident Meta — {editIncidentId}</DialogTitle></DialogHeader>
+          <div className="space-y-5 mt-4">
+            <div className="space-y-2">
+              <Label>Incident Description</Label>
+              <Textarea rows={3} value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Occurred</Label>
-                <Input
-                  type="datetime-local"
-                  value={editForm.occurred_at}
-                  onChange={(e) => setEditForm({ ...editForm, occurred_at: e.target.value })}
-                />
+
+            <div className="rounded-lg border border-amber-200 bg-amber-50/20 p-4 space-y-3">
+              <Label className="text-amber-900 font-bold flex items-center gap-2 px-1"><ClipboardList className="h-4 w-4" /> Manage Penalties</Label>
+              <div className="space-y-3">
+                <Select value="none" onValueChange={(v) => {
+                    if (!v || v === "none") return;
+                    const cat = catalogue.find(c => c.code === v);
+                    if (!cat) return;
+                    if (editForm.infractions?.some(x => x.infraction_code === v)) return;
+                    setEditForm({ ...editForm, infractions: [...(editForm.infractions || []), { infraction_code: v, description: cat.description }] });
+                  }}>
+                  <SelectTrigger className="h-9 text-xs border-amber-200 bg-white"><SelectValue placeholder="Add penalty code..." /></SelectTrigger>
+                  <SelectContent className="max-h-[240px]">
+                    {catalogue.map(c => (
+                      <SelectItem key={c.code} value={c.code} className="text-[11px] py-1.5 border-b border-gray-50 last:border-0 text-gray-700">
+                         <div className="flex flex-col">
+                            <span className="font-mono font-bold text-amber-800">{c.code} — ₹{c.amount}</span>
+                            <span className="text-gray-500 text-[10px] leading-snug">{c.description}</span>
+                         </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {(editForm.infractions || []).map(inf => (
+                    <Badge key={inf.infraction_code} className="bg-white text-gray-700 border-amber-200 px-2 py-1 gap-2 shadow-sm font-medium">
+                      <span className="font-mono text-amber-900">{inf.infraction_code}</span>
+                      <button type="button" onClick={() => setEditForm({ ...editForm, infractions: editForm.infractions.filter(x => x.infraction_code !== inf.infraction_code) })}
+                        className="text-red-400 hover:text-red-600 text-lg leading-[0]">×</button>
+                    </Badge>
+                  ))}
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <Label>Vehicles affected count</Label>
-                <Input
-                  type="number"
-                  min="1"
-                  value={editForm.vehicles_affected_count}
-                  onChange={(e) => setEditForm({ ...editForm, vehicles_affected_count: e.target.value })}
-                />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Occurrence Time</Label>
+                <Input type="datetime-local" value={editForm.occurred_at} onChange={(e) => setEditForm({ ...editForm, occurred_at: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Affected Count</Label>
+                <Input type="number" min="1" value={editForm.vehicles_affected_count} onChange={(e) => setEditForm({ ...editForm, vehicles_affected_count: e.target.value })} />
               </div>
             </div>
-            <div className="space-y-1.5">
-              <Label>Damage summary</Label>
-              <Textarea
-                rows={2}
-                value={editForm.damage_summary}
-                onChange={(e) => setEditForm({ ...editForm, damage_summary: e.target.value })}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Engineer action</Label>
-              <Textarea
-                rows={2}
-                value={editForm.engineer_action}
-                onChange={(e) => setEditForm({ ...editForm, engineer_action: e.target.value })}
-              />
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Damage Summary</Label>
+                <Textarea rows={2} value={editForm.damage_summary} onChange={(e) => setEditForm({ ...editForm, damage_summary: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Engineer Action</Label>
+                <Textarea rows={2} value={editForm.engineer_action} onChange={(e) => setEditForm({ ...editForm, engineer_action: e.target.value })} />
+              </div>
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={saveEdit} className="bg-[#C8102E] hover:bg-[#A50E25]">
-              Save changes
-            </Button>
+          <DialogFooter className="mt-6 border-t pt-4">
+            <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
+            <Button onClick={saveEdit} className="bg-[#1F2937]">Update Case</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Activity log — {selected?.id}</DialogTitle>
-          </DialogHeader>
-          {selected && (
-            <div className="space-y-3 text-sm">
-              <p className="text-gray-600">{selected.description}</p>
-              <ul className="border rounded-md divide-y max-h-64 overflow-y-auto">
-                {(selected.activity_log || []).length === 0 && (
-                  <li className="p-3 text-gray-400">No activity yet</li>
-                )}
-                {[...(selected.activity_log || [])].reverse().map((e, idx) => (
-                  <li key={idx} className="p-3">
-                    <div className="font-medium text-gray-800">{e.action}</div>
-                    <div className="text-gray-600">{e.detail}</div>
-                    <div className="text-xs text-gray-400 mt-1">
-                      {e.by} · {e.at?.replace("T", " ").slice(0, 19)}
+        <DialogContent className="max-w-4xl max-h-[95vh] overflow-y-auto p-0 border-none bg-gray-50 shadow-2xl">
+          <div className="flex flex-col md:flex-row h-full min-h-[600px]">
+            <div className="flex-1 p-8 bg-white overflow-y-auto">
+               <DialogHeader className="mb-8 p-0">
+                 <div className="flex items-center gap-3">
+                    <Badge variant="outline" className="font-mono text-gray-400 border-gray-200"># {selected?.id}</Badge>
+                    <DialogTitle className="text-2xl font-black tracking-tight text-gray-900">Incident Workspace</DialogTitle>
+                 </div>
+               </DialogHeader>
+
+               <div className="grid grid-cols-2 gap-x-12 gap-y-6 mb-10">
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-gray-400 uppercase tracking-widest font-black">Category</Label>
+                    <p className="text-base font-bold text-gray-800">{typeLabels[selected?.incident_type] || selected?.incident_type}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-gray-400 uppercase tracking-widest font-black">Status</Label>
+                    <div><Badge className={cn("px-2.5 py-1 text-[10px] uppercase font-bold", statusColor(selected?.status))}>{selected?.status}</Badge></div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-gray-400 uppercase tracking-widest font-black">Registration</Label>
+                    <p className="font-mono text-base font-bold text-gray-700">{selected?.bus_id || "NOT-SET"}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-gray-400 uppercase tracking-widest font-black">Depot Context</Label>
+                    <p className="text-base font-bold text-gray-700">{selected?.depot || "General Pool"}</p>
+                  </div>
+               </div>
+
+               <div className="mb-10">
+                  <Label className="text-[10px] text-gray-400 uppercase tracking-widest font-black block mb-3">Incident Narrative</Label>
+                  <div className="p-5 bg-gray-50 rounded-xl text-sm text-gray-700 leading-relaxed border border-gray-100 italic shadow-inner">
+                    "{selected?.description || "No description provided."}"
+                  </div>
+               </div>
+
+               <div className="space-y-5">
+                  <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                    <h4 className="text-sm font-black text-amber-900 flex items-center gap-2"> <ClipboardList className="h-4 w-4" /> Linked Penalties</h4>
+                    <span className="text-[10px] text-amber-600 font-bold bg-amber-50 px-3 py-1 rounded-full border border-amber-100">Flattened Deductions</span>
+                  </div>
+                  <div className="grid gap-4">
+                    {(selected?.infractions || []).map((inf, idx) => (
+                      <div key={idx} className="bg-white border border-amber-100 rounded-xl p-4 shadow-sm flex items-start justify-between hover:shadow-md transition-shadow">
+                         <div className="space-y-2 flex-1 pr-6">
+                           <div className="flex items-center gap-2">
+                             <Badge className="font-mono text-[10px] bg-amber-600 text-white border-none px-2">{inf.infraction_code}</Badge>
+                             <Badge variant="outline" className={cn("text-[9px] font-black h-5 px-2 tracking-tight", inf.status === 'closed' ? "text-green-700 border-green-200 bg-green-50" : "text-amber-700 border-amber-200 bg-amber-50")}>
+                                {inf.status?.toUpperCase() || 'OPEN'}
+                             </Badge>
+                           </div>
+                           <p className="text-xs text-gray-800 font-bold leading-snug">{inf.description}</p>
+                           <div className="flex items-center gap-3">
+                              <span className="text-[10px] text-gray-400 font-bold uppercase tracking-tighter">Fine Amount:</span>
+                              <span className="text-sm font-black text-gray-900 font-mono">₹{(inf.amount_current || inf.amount).toLocaleString()}</span>
+                           </div>
+                           {inf.closed_at && (
+                             <div className="mt-3 pt-3 border-t border-dashed border-gray-100">
+                                <div className="flex items-center gap-2 text-green-700">
+                                   <CheckCircle2 className="h-3 w-3" />
+                                   <span className="text-[10px] font-bold">Verified by Depot on {inf.closed_at.slice(0,10)}</span>
+                                </div>
+                                <p className="text-[10px] text-gray-500 mt-1 pl-5">Remarks: {inf.close_remarks}</p>
+                             </div>
+                           )}
+                         </div>
+                         {inf.status !== 'closed' && (
+                           <Button variant="outline" size="sm" className="h-8 text-[11px] border-amber-200 text-amber-700 hover:bg-amber-600 hover:text-white transition-colors shrink-0 font-black px-4" onClick={() => handleCloseInfraction(idx)}>
+                             Verify & Resolve
+                           </Button>
+                         )}
+                      </div>
+                    ))}
+                    {(!selected?.infractions || selected.infractions.length === 0) && (
+                      <div className="py-12 text-center border-2 border-dashed border-gray-100 rounded-2xl text-gray-400 text-xs italic">
+                         No penalties attached to this instance.
+                      </div>
+                    )}
+                  </div>
+               </div>
+            </div>
+
+            {/* Right Column: Activity Stream */}
+            <div className="w-full md:w-[360px] bg-gray-50 border-l border-gray-200 p-8 flex flex-col">
+              <div className="flex items-center gap-2 mb-8 border-b border-gray-200 pb-4">
+                 <h4 className="font-black text-xs uppercase tracking-[0.2em] text-gray-400">Activity Stream</h4>
+              </div>
+              <ul className="flex-1 space-y-8 overflow-y-auto pr-2 scrollbar-hide">
+                {[...(selected?.activity_log || [])].reverse().map((e, idx) => (
+                  <li key={idx} className="relative pl-6 border-l-2 border-gray-200 group">
+                    <div className="absolute -left-[7px] top-0 w-3 h-3 rounded-full bg-white border-2 border-gray-300 group-hover:border-[#C8102E] transition-colors shadow-sm" />
+                    <div className="text-[12px] font-black text-gray-900 leading-tight">{e.action}</div>
+                    <div className="text-[11px] text-gray-600 mt-1.5 leading-relaxed">{e.detail}</div>
+                    <div className="text-[10px] text-gray-400 mt-2 uppercase font-black tracking-tighter flex items-center gap-2">
+                       <User size={10} /> {e.by} <span className="opacity-30">|</span> <Clock size={10} /> {e.at?.split('T')[0]}
                     </div>
                   </li>
                 ))}
               </ul>
-              <div className="space-y-2">
-                <Label>Add note</Label>
-                <Textarea value={noteText} onChange={(e) => setNoteText(e.target.value)} rows={2} />
-                <Button size="sm" variant="secondary" onClick={addNote}>
-                  Add note
-                </Button>
+              <div className="mt-8 pt-8 border-t border-gray-200 space-y-4">
+                <Label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Internal Dispatch Note</Label>
+                <Textarea value={noteText} onChange={(e) => setNoteText(e.target.value)} rows={3} className="text-xs bg-white border-none shadow-sm resize-none focus-visible:ring-1 focus-visible:ring-gray-300 p-3 rounded-lg" placeholder="Enter remarks for the log..." />
+                <Button size="sm" className="w-full text-[11px] h-10 bg-gray-900 hover:bg-black text-white font-black uppercase tracking-widest border-none transition-all shadow-lg active:scale-95" onClick={addNote}>Post Entry</Button>
               </div>
             </div>
-          )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>
   );
 }
-
 

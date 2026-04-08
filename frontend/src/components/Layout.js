@@ -47,10 +47,10 @@ const navGroups = [
     label: "Operations",
     items: [
       { to: "/duties", label: "Duty Roster", icon: ClipboardList },
-      { to: "/incidents", label: "Incidents", icon: AlertTriangle },
+      { to: "/incidents", label: "Incidents & Penalties", icon: AlertTriangle },
       { to: "/alerts-center", label: "Alerts Center", icon: AlertTriangle },
       { to: "/deductions", label: "Deductions", icon: Calculator },
-      { to: "/infractions", label: "Infractions", icon: Scale },
+      { to: "/infractions", label: "Infraction Catalogue", icon: Scale },
       { to: "/energy", label: "Energy", icon: Zap },
     ],
   },

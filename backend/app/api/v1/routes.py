@@ -82,6 +82,7 @@ from app.schemas.requests import (
     IncidentNoteReq,
     IncidentUpdateReq,
     InfractionCloseReq,
+    InfractionEntryReq,
     InfractionReq,
     InfractionLogReq,
     LoginReq,
@@ -145,6 +146,58 @@ def _add_days_ymd(ymd: str, days: int) -> str:
     return (dt + timedelta(days=max(0, int(days)))).strftime("%Y-%m-%d")
 
 
+def _incident_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _incident_public_doc(doc: dict) -> dict:
+    if not doc:
+        return {}
+    doc.pop("_id", None)
+    return doc
+
+
+def _append_incident_activity(log: list | None, *, action: str, user_name: str, detail: str = "") -> list:
+    if log is None:
+        log = []
+    log.append({
+        "at": _incident_now_iso(),
+        "action": action,
+        "by": user_name,
+        "detail": detail
+    })
+    return log
+
+
+async def _get_flattened_infractions(period_start: str, period_end: str, bus_ids: list[str] = None) -> list[dict]:
+    """Fetch infractions from unified incidents collection and flatten them into rows."""
+    # Find incidents within period. Using occurred_at as defined in the schema.
+    # period_start/end are usually YYYY-MM-DD. 
+    # occurred_at is ISO string. We can use string range.
+    q: dict = {"occurred_at": {"$gte": period_start, "$lte": period_end + "T23:59:59"}}
+    if bus_ids:
+        q["bus_id"] = {"$in": bus_ids}
+    
+    cursor = db.incidents.find(q, {"_id": 0})
+    flat = []
+    async for inc in cursor:
+        base_meta = {
+            "incident_id": inc.get("id"),
+            "bus_id": inc.get("bus_id"),
+            "depot": inc.get("depot"),
+            "driver_id": inc.get("driver_id"),
+            "date": (inc.get("occurred_at") or "")[:10],
+            "route_id": inc.get("route_id"),
+            "duty_id": inc.get("duty_id"),
+            "trip_id": inc.get("trip_id"),
+        }
+        for inf in (inc.get("infractions") or []):
+            row = dict(base_meta)
+            row.update(inf)
+            flat.append(row)
+    return flat
+
+
 def _resolve_infraction_amount(row: dict, *, as_of_ymd: str) -> float:
     """Compute the effective penalty for an infraction, applying repeated
     slab escalation for each resolve-period that elapses without closure.
@@ -163,7 +216,7 @@ def _resolve_infraction_amount(row: dict, *, as_of_ymd: str) -> float:
     if category not in ESCALATION_CHAIN:
         return base
     if row.get("status") == "closed":
-        return base
+        return float(row.get("amount_current", base) or 0)
     resolve_by = str(row.get("resolve_by") or "").strip()
     if not resolve_by or resolve_by >= as_of_ymd:
         return base
@@ -1943,10 +1996,7 @@ async def apply_deductions(
         elif rt == "system":
             system_deduction += amount
         breakdown.append({"rule": rule["name"], "type": rt, "percent": pct, "amount": round(amount, 2)})
-    infraction_q: dict = {"date": {"$gte": period_start, "$lte": period_end}}
-    if scope_bus_ids:
-        infraction_q["bus_id"] = {"$in": scope_bus_ids}
-    infraction_rows = await db.infractions_logged.find(infraction_q, {"_id": 0}).to_list(10000)
+    infraction_rows = await _get_flattened_infractions(period_start, period_end, scope_bus_ids)
     infraction_rollup = _infraction_deduction_rollup(infraction_rows, base_payment, as_of_ymd=period_end)
     infractions_deduction = infraction_rollup["total_applied"]
     total_deduction = availability_deduction + performance_deduction + system_deduction + infractions_deduction
@@ -2063,10 +2113,7 @@ async def generate_invoice(req: BillingGenerateReq, _: dict = Depends(require_pe
             performance_deduction += amount
         elif rt == "system":
             system_deduction += amount
-    infraction_q: dict = {"date": {"$gte": period_start, "$lte": period_end}}
-    if bus_ids:
-        infraction_q["bus_id"] = {"$in": bus_ids}
-    infraction_rows = await db.infractions_logged.find(infraction_q, {"_id": 0}).to_list(10000)
+    infraction_rows = await _get_flattened_infractions(period_start, period_end, bus_ids)
     infraction_rollup = _infraction_deduction_rollup(infraction_rows, base_payment, as_of_ymd=period_end)
     infractions_deduction = infraction_rollup["total_applied"]
     total_deduction = availability_deduction + performance_deduction + system_deduction + infractions_deduction
@@ -2975,12 +3022,15 @@ async def _collect_report_rows(
                 q["bus_id"] = {"$in": ids}
             else:
                 return "service_wise_infractions", []
-        if route:
-            q["route_name"] = {"$regex": route, "$options": "i"}
         cat = _norm_q(category)
+        data = await _get_flattened_infractions(date_from or "1970-01-01", date_to or "2099-12-31")
+        # Filter by service if provided
+        if route:
+            regex = re.compile(route, re.I)
+            data = [r for r in data if regex.search(r.get("route_name", ""))]
         if cat:
-            q["category"] = cat.upper()
-        data = await db.infractions_logged.find(q, {"_id": 0}).to_list(10000)
+            data = [r for r in data if r.get("category", "").upper() == cat.upper()]
+        
         agg: dict[tuple[str, str], dict] = {}
         for r in data:
             svc = str(r.get("route_name", "") or "UNASSIGNED")
@@ -3094,9 +3144,26 @@ async def _collect_report_rows(
         if rel:
             q["related_incident_id"] = rel
         st = _norm_q(status)
-        if st:
-            q["status"] = st
-        data = await db.infractions_logged.find(q, {"_id": 0}).sort("created_at", -1).to_list(5000)
+        
+        # Fetch all for the period
+        data = await _get_flattened_infractions(date_from or "1970-01-01", date_to or "2099-12-31")
+        
+        # Apply filters in-memory
+        filtered = []
+        for r in data:
+            if bid and r.get("bus_id") != bid: continue
+            if dep and r.get("depot") != dep: continue
+            if driver_id and r.get("driver_id") != driver_id: continue
+            if infraction_code and r.get("infraction_code") != infraction_code: continue
+            if rid and r.get("route_id") != rid: continue
+            if rn:
+                if rn.lower() not in (r.get("route_name") or "").lower(): continue
+            if rel and r.get("incident_id") != rel: continue
+            if st and r.get("status") != st: continue
+            filtered.append(r)
+        
+        data = sorted(filtered, key=lambda x: x.get("date", ""), reverse=True)
+        
         if report_type == "infractions_logged":
             return "infractions_logged", data
         if report_type == "infractions_driver_wise":
@@ -3767,6 +3834,40 @@ async def get_incident(incident_id: str, user: dict = Depends(get_current_user))
     return _incident_public_doc(doc)
 
 
+def _resolve_infractions_list(request_infractions: list, occurred_at: str) -> list[dict]:
+    """Helper to take a list of InfractionEntryReq and return fully-hydrated infraction snapshots."""
+    now_date = (occurred_at or datetime.now(timezone.utc).isoformat())[:10]
+    out = []
+    for entry in request_infractions:
+        code = str(entry.code if hasattr(entry, "code") else entry.get("code", "")).strip().upper()
+        if not code:
+            continue
+        master = MASTER_BY_CODE.get(code)
+        if not master:
+            continue # skipped if not in catalogue
+        
+        # Calculate resolve_by date
+        res_days = int(master.get("resolve_days", 1))
+        res_by = _add_days_ymd(now_date, res_days)
+        
+        out.append({
+            "infraction_code": master["code"],
+            "category": master["category"],
+            "description": master["description"],
+            "amount": master["amount"],
+            "amount_snapshot": master["amount"], # base frozen at creation
+            "resolve_days": res_days,
+            "resolve_by": res_by,
+            "safety_flag": bool(master.get("safety_flag")),
+            "deductible": entry.deductible if hasattr(entry, "deductible") else entry.get("deductible", True),
+            "status": "open",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "closed_at": None,
+            "close_remarks": ""
+        })
+    return out
+
+
 @router.post("/incidents")
 async def create_incident(req: IncidentCreateReq, user: dict = Depends(require_permission("operations.incidents.create"))):
     code = normalize_incident_type(req.incident_type)
@@ -3799,9 +3900,8 @@ async def create_incident(req: IncidentCreateReq, user: dict = Depends(require_p
         if not drv_ok:
             raise HTTPException(status_code=400, detail=f"Unknown driver_id (license): {driver_id}")
     rel_inf = (req.related_infraction_id or "").strip()
-    if rel_inf:
-        if not await db.infractions_logged.find_one({"id": rel_inf}, {"_id": 1}):
-            raise HTTPException(status_code=400, detail=f"related_infraction_id not found: {rel_inf}")
+    # related_infraction_id is legacy; new system embeds infractions directly. 
+    # Validations against db.infractions_logged removed.
     vehicles = [v.strip() for v in (req.vehicles_affected or []) if str(v).strip()]
     if vehicles:
         # Validate vehicles against bus master
@@ -3817,6 +3917,23 @@ async def create_incident(req: IncidentCreateReq, user: dict = Depends(require_p
     vehicles_count = len(vehicles) if vehicles else (req.vehicles_affected_count or (1 if bus_id else 1))
 
     name = user.get("name", "") or user.get("email", "")
+    # Unified Infractions Logic
+    infractions_to_log = list(req.infractions)
+    
+    # Auto-attach logic (Choice 3.A)
+    auto_mappings = {
+        "OVERSPEED": "E01",
+        "OVERSPEED_CRITICAL": "E01",
+        "ITS_GPS_FAILURE": "B08",
+        "ROUTE_DEVIATION": "B06",
+    }
+    if code in auto_mappings:
+        auto_code = auto_mappings[code]
+        if not any(inf.code == auto_code for inf in infractions_to_log):
+            infractions_to_log.append(InfractionEntryReq(code=auto_code, deductible=True))
+
+    resolved_infractions = await _resolve_infractions_list(infractions_to_log, req.occurred_at)
+
     doc = {
         "id": f"INC-{uuid.uuid4().hex[:8].upper()}",
         "incident_type": code,
@@ -3838,6 +3955,7 @@ async def create_incident(req: IncidentCreateReq, user: dict = Depends(require_p
         "severity": req.severity,
         "channel": req.channel,
         "telephonic_reference": (req.telephonic_reference or "").strip(),
+        "infractions": resolved_infractions,
         "status": IncidentStatus.OPEN.value,
         "assigned_team": "",
         "assigned_to": "",
@@ -3966,9 +4084,85 @@ async def update_incident(
                 user_name=name,
                 detail="Engineer / O&M action updated",
             )
+    
+    # Handle infractions update
+    inf_list = list(existing.get("infractions") or [])
+    if req.infractions is not None:
+        # Resolve new list from request
+        inf_list = await _resolve_infractions_list(req.infractions, existing.get("occurred_at", ""))
+        updates["infractions"] = inf_list
+        log = _append_incident_activity(
+            log,
+            action="infractions_update",
+            user_name=name,
+            detail=f"Infractions list updated ({len(inf_list)} codes)",
+        )
+
+    # Auto-close infractions only at final stage (closed).
+    if updates.get("status") == IncidentStatus.CLOSED.value:
+        now_iso = _incident_now_iso()
+        closed_any = False
+        as_of_ymd = now_iso[:10]
+        for inf in inf_list:
+            if inf.get("status") != "closed":
+                # Freeze deduction at close time (with escalation up to close date).
+                inf["amount_current"] = _resolve_infraction_amount(inf, as_of_ymd=as_of_ymd)
+                inf["status"] = "closed"
+                inf["closed_at"] = now_iso
+                closed_any = True
+        if closed_any:
+            updates["infractions"] = inf_list
+            log = _append_incident_activity(
+                log,
+                action="infractions_close",
+                user_name=name,
+                detail="All open infractions closed with incident",
+            )
+
     updates["activity_log"] = log
     await db.incidents.update_one({"id": incident_id}, {"$set": updates})
     return {"message": "Incident updated", "id": incident_id}
+
+
+@router.put("/incidents/{incident_id}/infractions/{idx}/close")
+async def close_specific_infraction(
+    incident_id: str,
+    idx: int,
+    req: InfractionCloseReq,
+    user: dict = Depends(require_permission("operations.incidents.update")),
+):
+    """Close one specific infraction within an incident."""
+    existing = await db.incidents.find_one({"id": incident_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    
+    inf_list = list(existing.get("infractions") or [])
+    if idx < 0 or idx >= len(inf_list):
+        raise HTTPException(status_code=400, detail="Invalid infraction index")
+    
+    inf = inf_list[idx]
+    if inf.get("status") == "closed":
+        return {"message": "Infraction already closed"}
+    
+    name = user.get("name", "") or user.get("email", "")
+    now_iso = _incident_now_iso()
+    inf["status"] = "closed"
+    inf["closed_at"] = now_iso
+    inf["close_remarks"] = req.close_remarks
+    
+    log = existing.get("activity_log") or []
+    log = _append_incident_activity(
+        log,
+        action="infractions_close",
+        user_name=name,
+        detail=f"Infraction {inf.get('infraction_code')} closed manually",
+    )
+    
+    await db.incidents.update_one(
+        {"id": incident_id}, 
+        {"$set": {"infractions": inf_list, "activity_log": log, "updated_at": now_iso}}
+    )
+    return {"message": "Infraction closed"}
 
 
 @router.put("/incidents/{incident_id}/status-legacy")
@@ -5787,6 +5981,33 @@ async def update_infraction_item(inf_id: str, req: InfractionReq, _: dict = Depe
 async def delete_infraction_item(inf_id: str, _: dict = Depends(require_permission("operations.infractions.delete"))):
     raise HTTPException(status_code=400, detail="Catalogue is read-only (tender-frozen)")
 
+@router.get("/infractions/logged/stats")
+async def get_infraction_log_stats(
+    period_start: str = "",
+    period_end: str = "",
+    bus_id: str = "",
+    depot: str = "",
+    user: dict = Depends(get_current_user),
+):
+    """Aggregated stats from unified incidents."""
+    if not period_end:
+        period_end = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if not period_start:
+        period_start = _add_days_ymd(period_end, -30)
+
+    rows = await _get_flattened_infractions(period_start, period_end, [bus_id] if bus_id else None)
+    
+    total_amount = sum(float(r.get("amount", 0)) for r in rows)
+    safety_count = sum(1 for r in rows if r.get("safety_flag"))
+    
+    return {
+        "total_count": len(rows),
+        "total_amount": round(total_amount, 2),
+        "safety_infractions": safety_count,
+        "open_count": sum(1 for r in rows if r.get("status") != "closed"),
+        "closed_count": sum(1 for r in rows if r.get("status") == "closed"),
+    }
+
 @router.get("/infractions/logged")
 async def list_logged_infractions(
     date_from: str = "",
@@ -6054,3 +6275,83 @@ async def delete_business_rule(rule_key: str, _: dict = Depends(require_permissi
         raise HTTPException(status_code=404, detail="Rule not found")
     return {"message": "Rule deleted"}
 
+
+# ══════════════════════════════════════════════════════════
+# UNIFIED INFRACTIONS HELPERS
+# ══════════════════════════════════════════════════════════
+
+async def _resolve_infractions_list(inf_reqs: list[InfractionEntryReq], occurred_at: str) -> list[dict]:
+    """Take infraction requests (codes) and resolve them against the master catalogue."""
+    if not inf_reqs:
+        return []
+        
+    resolved = []
+    occ_date = occurred_at[:10]
+    
+    for req in inf_reqs:
+        master = await db.infraction_catalogue.find_one({"code": req.code}, {"_id": 0})
+        if not master:
+            continue # or raise error? usually we validate in request
+            
+        category = str(master.get("category") or "A").upper()
+        # Default resolve days from slabs if not set in master
+        resolve_days = int(master.get("resolve_days") or INFRACTION_SLABS.get(category, INFRACTION_SLABS["A"]).resolve_days)
+        
+        entry = {
+            "infraction_code": master["code"],
+            "category": category,
+            "description": master["description"],
+            "amount": float(master["amount"]),
+            "amount_current": float(master["amount"]), # current as of resolution
+            "amount_snapshot": float(master["amount"]), # amount stuck since closure
+            "safety_flag": bool(master.get("safety_flag", False)),
+            "deductible": bool(req.deductible),
+            "status": "open",
+            "resolve_by": _add_days_ymd(occ_date, resolve_days),
+            "resolve_days": resolve_days,
+            "opened_at": datetime.now(timezone.utc).isoformat(),
+            "closed_at": "",
+            "close_remarks": ""
+        }
+        resolved.append(entry)
+        
+    return resolved
+
+
+@router.put("/incidents/{incident_id}/infractions/{idx}/close")
+async def close_incident_infraction(
+    incident_id: str,
+    idx: int,
+    req: InfractionCloseReq,
+    user: dict = Depends(require_permission("operations.incidents.update")),
+):
+    existing = await db.incidents.find_one({"id": incident_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    
+    infractions = list(existing.get("infractions") or [])
+    if idx < 0 or idx >= len(infractions):
+        raise HTTPException(status_code=400, detail="Invalid infraction index")
+    
+    inf = infractions[idx]
+    if inf.get("status") == "closed":
+        return {"message": "Already closed", "id": incident_id, "idx": idx}
+        
+    inf["status"] = "closed"
+    inf["close_remarks"] = (req.close_remarks or "").strip()
+    inf["closed_at"] = _incident_now_iso()
+    inf["closed_by"] = user.get("name", "") or user.get("email", "")
+    
+    log = existing.get("activity_log") or []
+    log = _append_incident_activity(
+        log,
+        action="infractions_close",
+        user_name=user.get("name", ""),
+        detail=f"Infraction {inf.get('infraction_code')} verified & resolved",
+    )
+    
+    await db.incidents.update_one(
+        {"id": incident_id}, 
+        {"$set": {"infractions": infractions, "activity_log": log, "updated_at": _incident_now_iso()}}
+    )
+    return {"message": "Infraction resolved", "id": incident_id, "idx": idx}
