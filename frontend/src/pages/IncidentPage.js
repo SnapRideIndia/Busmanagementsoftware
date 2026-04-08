@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import API, { formatApiError, buildQuery, unwrapListResponse, fetchAllPaginated } from "../lib/api";
+import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import TableLoadRows from "../components/TableLoadRows";
 import { formatDateIN } from "../lib/dates";
+import { cn } from "../lib/utils";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
@@ -38,12 +40,18 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuPortal,
 } from "../components/ui/dropdown-menu";
 import {
   Plus,
   ClipboardList,
   UserPlus,
+  Pencil,
   MoreHorizontal,
   PlayCircle,
   ArrowRightCircle,
@@ -55,6 +63,13 @@ import { toast } from "sonner";
 function localDatetimeInputValue(d = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function toDatetimeLocalValue(isoLike) {
+  if (!isoLike) return "";
+  const dt = new Date(isoLike);
+  if (Number.isNaN(dt.getTime())) return "";
+  return localDatetimeInputValue(dt);
 }
 
 const emptyForm = () => ({
@@ -89,7 +104,16 @@ export default function IncidentPage() {
   const [open, setOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [selected, setSelected] = useState(null);
+  const [editIncidentId, setEditIncidentId] = useState("");
+  const [editForm, setEditForm] = useState({
+    description: "",
+    occurred_at: "",
+    vehicles_affected_count: "1",
+    damage_summary: "",
+    engineer_action: "",
+  });
   const [form, setForm] = useState(emptyForm);
   const [filterStatus, setFilterStatus] = useState("");
   const [filterDepot, setFilterDepot] = useState("");
@@ -134,7 +158,7 @@ export default function IncidentPage() {
 
   const loadMeta = useCallback(async () => {
     try {
-      const { data } = await API.get("/incidents/meta");
+      const { data } = await API.get(Endpoints.incidents.meta());
       setMeta(data);
     } catch {
       toast.error("Could not load incident metadata");
@@ -157,9 +181,9 @@ export default function IncidentPage() {
         limit: 20,
       });
       const [i, busItems, driverItems] = await Promise.all([
-        API.get("/incidents", { params }),
-        fetchAllPaginated("/buses", {}),
-        fetchAllPaginated("/drivers", {}),
+        API.get(Endpoints.incidents.list(), { params }),
+        fetchAllPaginated(Endpoints.masters.buses.list(), {}),
+        fetchAllPaginated(Endpoints.masters.drivers.list(), {}),
       ]);
       const iu = unwrapListResponse(i.data);
       setIncidents(iu.items);
@@ -200,7 +224,7 @@ export default function IncidentPage() {
     try {
       const vehicles = Array.isArray(form.vehicles_affected) ? form.vehicles_affected.filter(Boolean) : [];
       const vehiclesCount = vehicles.length || (form.bus_id ? 1 : Number(form.vehicles_affected_count) || 1);
-      await API.post("/incidents", {
+      await API.post(Endpoints.incidents.create(), {
         ...form,
         occurred_at: String(form.occurred_at).trim(),
         vehicles_affected: vehicles,
@@ -219,7 +243,7 @@ export default function IncidentPage() {
 
   const setStatus = async (id, status) => {
     try {
-      await API.put(`/incidents/${id}`, { status });
+      await API.put(Endpoints.incidents.update(id), { status });
       toast.success("Status updated");
       load();
     } catch (err) {
@@ -243,7 +267,7 @@ export default function IncidentPage() {
   const saveAssign = async () => {
     if (!selected) return;
     try {
-      await API.put(`/incidents/${selected.id}`, {
+      await API.put(Endpoints.incidents.update(selected.id), {
         assigned_team: assignTeam,
         assigned_to: assignTo,
       });
@@ -258,11 +282,50 @@ export default function IncidentPage() {
   const addNote = async () => {
     if (!selected || !noteText.trim()) return;
     try {
-      await API.post(`/incidents/${selected.id}/notes`, { note: noteText.trim() });
+      await API.post(Endpoints.incidents.addNote(selected.id), { note: noteText.trim() });
       toast.success("Note added");
       setNoteText("");
-      const { data } = await API.get(`/incidents/${selected.id}`);
+      const { data } = await API.get(Endpoints.incidents.get(selected.id));
       setSelected(data);
+      load();
+    } catch (err) {
+      toast.error(formatApiError(err.response?.data?.detail));
+    }
+  };
+
+  const openEdit = (inc) => {
+    setEditIncidentId(inc.id);
+    setEditForm({
+      description: inc.description || "",
+      occurred_at: toDatetimeLocalValue(inc.occurred_at || inc.created_at),
+      vehicles_affected_count: String(inc.vehicles_affected_count || 1),
+      damage_summary: inc.damage_summary || "",
+      engineer_action: inc.engineer_action || "",
+    });
+    setEditOpen(true);
+  };
+
+  const saveEdit = async () => {
+    if (!editIncidentId) return;
+    if (!editForm.description.trim()) {
+      toast.error("Description is required");
+      return;
+    }
+    if (!editForm.occurred_at) {
+      toast.error("Occurred time is required");
+      return;
+    }
+    try {
+      await API.put(Endpoints.incidents.update(editIncidentId), {
+        description: editForm.description.trim(),
+        occurred_at: editForm.occurred_at,
+        vehicles_affected_count: Number(editForm.vehicles_affected_count) || 1,
+        damage_summary: editForm.damage_summary || "",
+        engineer_action: editForm.engineer_action || "",
+      });
+      toast.success("Incident updated");
+      setEditOpen(false);
+      setEditIncidentId("");
       load();
     } catch (err) {
       toast.error(formatApiError(err.response?.data?.detail));
@@ -376,7 +439,7 @@ export default function IncidentPage() {
 
       <Card className="border-gray-200 shadow-sm overflow-hidden">
         <CardContent className="p-0 overflow-x-auto">
-          <Table className="min-w-max">
+          <Table className="min-w-max text-[12px]">
             <TableHeader>
               <TableRow className="table-header">
                 <TableHead>ID</TableHead>
@@ -407,112 +470,113 @@ export default function IncidentPage() {
                     className="hover:bg-gray-50"
                     data-testid={`incident-row-${inc.id}`}
                   >
-                    <TableCell className="font-mono text-sm whitespace-nowrap">{inc.id}</TableCell>
-                    <TableCell className="text-sm max-w-[200px]">
+                    <TableCell className="font-mono whitespace-nowrap">{inc.id}</TableCell>
+                    <TableCell className="max-w-[200px]">
                       <span className="font-medium">{typeLabels[inc.incident_type] || inc.incident_type}</span>
                       <span className="block text-xs text-gray-500 font-mono">{inc.incident_type}</span>
                     </TableCell>
-                    <TableCell className="text-sm capitalize">{inc.channel || "—"}</TableCell>
-                    <TableCell className="text-sm">{inc.depot || "—"}</TableCell>
-                    <TableCell className="text-sm max-w-[120px] truncate whitespace-nowrap">{inc.assigned_team || "—"}</TableCell>
-                    <TableCell className="font-mono text-sm whitespace-nowrap">{inc.bus_id || "—"}</TableCell>
+                    <TableCell className="capitalize">{inc.channel || "—"}</TableCell>
+                    <TableCell>{inc.depot || "—"}</TableCell>
+                    <TableCell className="max-w-[120px] truncate whitespace-nowrap">{inc.assigned_team || "—"}</TableCell>
+                    <TableCell className="font-mono whitespace-nowrap">{inc.bus_id || "—"}</TableCell>
                     <TableCell>
                       <Badge className={severityColor(inc.severity)}>{inc.severity}</Badge>
                     </TableCell>
                     <TableCell>
                       <Badge className={statusColor(inc.status)}>{inc.status?.replace(/_/g, " ")}</Badge>
                     </TableCell>
-                    <TableCell className="text-sm text-gray-500 whitespace-nowrap">
+                    <TableCell className="text-gray-500 whitespace-nowrap">
                       {formatDateIN(inc.created_at?.slice(0, 10))}
                     </TableCell>
-                    <TableCell className="text-sm text-gray-500 whitespace-nowrap">
+                    <TableCell className="text-gray-500 whitespace-nowrap">
                       {(inc.status === "resolved" || inc.status === "closed")
                         ? formatDateIN((inc.resolved_at || inc.updated_at || "").slice(0, 10))
                         : "—"}
                     </TableCell>
                     <TableCell className="text-right p-2">
-                      <div className="inline-flex items-center justify-end gap-0.5">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-gray-600 hover:text-[#1F2937]"
-                          onClick={() => openDetail(inc)}
-                          title="Activity log & notes"
-                          data-testid={`incident-log-${inc.id}`}
-                        >
-                          <ClipboardList className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-gray-600 hover:text-[#1F2937]"
-                          onClick={() => openAssign(inc)}
-                          title="Assign team"
-                          data-testid={`incident-assign-${inc.id}`}
-                        >
-                          <UserPlus className="h-4 w-4" />
-                        </Button>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-gray-600 hover:text-[#1F2937]"
-                              aria-label="Status actions"
-                              data-testid={`incident-more-${inc.id}`}
-                            >
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-52">
-                            <DropdownMenuLabel className="text-xs font-normal text-gray-500">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-gray-600 hover:text-[#1F2937]"
+                            aria-label="Actions"
+                            data-testid={`incident-actions-btn-${inc.id}`}
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-56">
+                          <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                          <DropdownMenuItem onClick={() => openDetail(inc)} className="gap-2">
+                            <ClipboardList className="h-4 w-4 text-gray-500" />
+                            Activity log & notes
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => openAssign(inc)} className="gap-2">
+                            <UserPlus className="h-4 w-4 text-gray-500" />
+                            Assign team
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => openEdit(inc)} className="gap-2">
+                            <Pencil className="h-4 w-4 text-gray-500" />
+                            Edit incident
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuSub>
+                            <DropdownMenuSubTrigger className="gap-2">
+                              {statusColor(inc.status).includes("bg-") ? (
+                                <div className={cn("w-2 h-2 rounded-full", statusColor(inc.status).split(" ")[0])} />
+                              ) : (
+                                <PlayCircle className="h-4 w-4" />
+                              )}
                               Update status
-                            </DropdownMenuLabel>
-                            {inc.status === "open" && (
-                              <DropdownMenuItem
-                                onClick={() => setStatus(inc.id, "investigating")}
-                                className="gap-2"
-                              >
-                                <PlayCircle className="h-4 w-4 text-amber-600" />
-                                Start investigation
-                              </DropdownMenuItem>
-                            )}
-                            {(inc.status === "investigating" || inc.status === "assigned") && (
-                              <DropdownMenuItem
-                                onClick={() => setStatus(inc.id, "in_progress")}
-                                className="gap-2"
-                              >
-                                <ArrowRightCircle className="h-4 w-4 text-cyan-600" />
-                                Mark in progress
-                              </DropdownMenuItem>
-                            )}
-                            {inc.status !== "resolved" && inc.status !== "closed" && (
-                              <DropdownMenuItem
-                                onClick={() => setStatus(inc.id, "resolved")}
-                                className="gap-2"
-                              >
-                                <CheckCircle2 className="h-4 w-4 text-green-600" />
-                                Mark resolved
-                              </DropdownMenuItem>
-                            )}
-                            {inc.status === "resolved" && (
-                              <DropdownMenuItem
-                                onClick={() => setStatus(inc.id, "closed")}
-                                className="gap-2"
-                              >
-                                <Lock className="h-4 w-4 text-gray-600" />
-                                Close case
-                              </DropdownMenuItem>
-                            )}
-                            {inc.status === "closed" && (
-                              <div className="px-2 py-1.5 text-sm text-gray-400">Case closed</div>
-                            )}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
+                            </DropdownMenuSubTrigger>
+                            <DropdownMenuPortal>
+                              <DropdownMenuSubContent>
+                                {inc.status === "open" && (
+                                  <DropdownMenuItem
+                                    onClick={() => setStatus(inc.id, "investigating")}
+                                    className="gap-2"
+                                  >
+                                    <PlayCircle className="h-4 w-4 text-amber-600" />
+                                    Start investigation
+                                  </DropdownMenuItem>
+                                )}
+                                {(inc.status === "investigating" || inc.status === "assigned") && (
+                                  <DropdownMenuItem
+                                    onClick={() => setStatus(inc.id, "in_progress")}
+                                    className="gap-2"
+                                  >
+                                    <ArrowRightCircle className="h-4 w-4 text-cyan-600" />
+                                    Mark in progress
+                                  </DropdownMenuItem>
+                                )}
+                                {inc.status !== "resolved" && inc.status !== "closed" && (
+                                  <DropdownMenuItem
+                                    onClick={() => setStatus(inc.id, "resolved")}
+                                    className="gap-2"
+                                  >
+                                    <CheckCircle2 className="h-4 w-4 text-green-600" />
+                                    Mark resolved
+                                  </DropdownMenuItem>
+                                )}
+                                {inc.status === "resolved" && (
+                                  <DropdownMenuItem
+                                    onClick={() => setStatus(inc.id, "closed")}
+                                    className="gap-2"
+                                  >
+                                    <Lock className="h-4 w-4 text-gray-600" />
+                                    Close case
+                                  </DropdownMenuItem>
+                                )}
+                                {inc.status === "closed" && (
+                                  <div className="px-2 py-1.5 text-xs text-gray-400 italic">Case finalized</div>
+                                )}
+                              </DropdownMenuSubContent>
+                            </DropdownMenuPortal>
+                          </DropdownMenuSub>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -826,6 +890,67 @@ export default function IncidentPage() {
           </div>
           <DialogFooter>
             <Button onClick={saveAssign}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit incident — {editIncidentId}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label>Description</Label>
+              <Textarea
+                rows={3}
+                value={editForm.description}
+                onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Occurred</Label>
+                <Input
+                  type="datetime-local"
+                  value={editForm.occurred_at}
+                  onChange={(e) => setEditForm({ ...editForm, occurred_at: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Vehicles affected count</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={editForm.vehicles_affected_count}
+                  onChange={(e) => setEditForm({ ...editForm, vehicles_affected_count: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Damage summary</Label>
+              <Textarea
+                rows={2}
+                value={editForm.damage_summary}
+                onChange={(e) => setEditForm({ ...editForm, damage_summary: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Engineer action</Label>
+              <Textarea
+                rows={2}
+                value={editForm.engineer_action}
+                onChange={(e) => setEditForm({ ...editForm, engineer_action: e.target.value })}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={saveEdit} className="bg-[#C8102E] hover:bg-[#A50E25]">
+              Save changes
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

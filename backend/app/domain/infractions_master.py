@@ -73,6 +73,8 @@ INFRACTION_MASTER = [
     {"code": "A18", "category": "A", "table": "A", "description": "Oil spillage on wheel rims, hubs, tyres, etc", "safety_flag": False},
     {"code": "A19", "category": "A", "table": "A", "description": "Discoloration or unpainted repair work inside the bus or on any of its items", "safety_flag": False},
     {"code": "A20", "category": "A", "table": "A", "description": "Not maintaining USB charging ports in operating condition", "safety_flag": False},
+    {"code": "A21", "category": "A", "table": "A", "description": "No driver provided for scheduled duty/trip", "safety_flag": False},
+    {"code": "A22", "category": "A", "table": "A", "description": "No conductor provided for scheduled duty/trip", "safety_flag": False},
     # Table B
     {"code": "B01", "category": "B", "table": "B", "description": "To operate with defective front, side and/or back brake lights", "safety_flag": True},
     {"code": "B02", "category": "B", "table": "B", "description": "Section of handrail loose or with sharp edges", "safety_flag": True},

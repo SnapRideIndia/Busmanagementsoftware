@@ -12,6 +12,7 @@ import logging
 import os
 import random
 import re
+import textwrap
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -23,6 +24,8 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Res
 from fastapi.responses import FileResponse, StreamingResponse
 from fpdf import FPDF
 from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, Side
+from openpyxl.utils import get_column_letter
 
 from app.api.deps import get_current_user, require_permission, require_any_permission, permissions_for_role
 from app.core.config import settings
@@ -143,6 +146,18 @@ def _add_days_ymd(ymd: str, days: int) -> str:
 
 
 def _resolve_infraction_amount(row: dict, *, as_of_ymd: str) -> float:
+    """Compute the effective penalty for an infraction, applying repeated
+    slab escalation for each resolve-period that elapses without closure.
+
+    Example (category A, resolve_days=1, logged resolve_by = 2026-04-02):
+      as_of = 2026-04-02  → still within deadline  → Rs.100 (A)
+      as_of = 2026-04-03  → 1 period overdue       → Rs.500 (B)
+      as_of = 2026-04-04  → 2 periods overdue      → Rs.1000 (C)
+      as_of = 2026-04-05  → 3 periods overdue      → Rs.1500 (D)
+      as_of = 2026-04-06  → 4+ periods overdue     → Rs.3000 (E, ceiling)
+    """
+    from datetime import date as _date
+
     category = str(row.get("category") or "").upper()
     base = float(row.get("amount_snapshot", row.get("amount", 0)) or 0)
     if category not in ESCALATION_CHAIN:
@@ -152,9 +167,27 @@ def _resolve_infraction_amount(row: dict, *, as_of_ymd: str) -> float:
     resolve_by = str(row.get("resolve_by") or "").strip()
     if not resolve_by or resolve_by >= as_of_ymd:
         return base
-    next_cat = ESCALATION_CHAIN.get(category, category)
-    next_amt = INFRACTION_SLABS.get(next_cat, INFRACTION_SLABS[category]).amount
-    return min(float(next_amt), ESCALATION_CEILING_RS)
+
+    # How many resolve-day periods have elapsed past the deadline?
+    try:
+        rb = _date.fromisoformat(resolve_by)
+        ao = _date.fromisoformat(as_of_ymd[:10])
+        resolve_days = int(row.get("resolve_days") or 1) or 1
+        overdue_days = (ao - rb).days
+        steps = max(0, overdue_days // resolve_days)
+    except (ValueError, TypeError):
+        steps = 1  # fallback: at least one escalation
+
+    # Walk the escalation chain for each step
+    cur_cat = category
+    for _ in range(steps):
+        nxt = ESCALATION_CHAIN.get(cur_cat)
+        if not nxt:
+            break  # reached end of chain (E→E)
+        cur_cat = nxt
+
+    escalated_amt = INFRACTION_SLABS.get(cur_cat, INFRACTION_SLABS[category]).amount
+    return min(float(escalated_amt), ESCALATION_CEILING_RS)
 
 
 def _infraction_deduction_rollup(rows: list[dict], monthly_due: float, *, as_of_ymd: str) -> dict:
@@ -559,13 +592,31 @@ async def get_dashboard(
 
 @router.get("/tenders")
 async def list_tenders(
+    search: str = "",
+    status: str = "",
+    concessionaire: str = "",
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     user: dict = Depends(get_current_user),
 ):
+    q: dict = {}
+    st = _norm_q(status)
+    if st:
+        q["status"] = st
+    con = (concessionaire or "").strip()
+    if con:
+        q["concessionaire"] = {"$regex": re.escape(con), "$options": "i"}
+    s = (search or "").strip()
+    if s:
+        pat = {"$regex": re.escape(s), "$options": "i"}
+        q["$or"] = [
+            {"tender_id": pat},
+            {"description": pat},
+            {"concessionaire": pat},
+        ]
     p, lim = normalize_page_limit(page, limit)
-    total = await db.tenders.count_documents({})
-    cur = db.tenders.find({}, {"_id": 0}).sort("tender_id", 1).skip((p - 1) * lim).limit(lim)
+    total = await db.tenders.count_documents(q)
+    cur = db.tenders.find(q, {"_id": 0}).sort("tender_id", 1).skip((p - 1) * lim).limit(lim)
     items = await cur.to_list(lim)
     return paged_payload(items, total=total, page=page, limit=limit)
 
@@ -2608,6 +2659,14 @@ REPORTS_CATALOG = [
         ],
     },
     {
+        "id": "infractions_catalogue",
+        "name": "All infractions catalogue",
+        "description": "Tender-frozen Schedule-S A-G master list (all infractions).",
+        "category": "Infraction",
+        "report_type": "infractions_catalogue",
+        "filters": ["category", "infraction_code"],
+    },
+    {
         "id": "infractions_logged",
         "name": "Service wise infractions report",
         "description": "Tender head u: service wise infractions report with lifecycle and deduction status.",
@@ -2967,12 +3026,24 @@ async def _collect_report_rows(
         return "incidents", data
 
     if report_type in (
+        "infractions_catalogue",
         "infractions_logged",
         "infractions_driver_wise",
         "infractions_vehicle_wise",
         "infractions_conductor_wise",
         "incident_penalty_report",
     ):
+        if report_type == "infractions_catalogue":
+            cq: dict = {"code": {"$in": sorted(MASTER_BY_CODE.keys())}}
+            cat = _norm_q(category)
+            if cat:
+                cq["category"] = cat.upper()
+            icode = _norm_q(infraction_code)
+            if icode:
+                cq["code"] = icode.upper()
+            rows = await db.infraction_catalogue.find(cq, {"_id": 0}).sort("code", 1).to_list(1000)
+            return "infractions_catalogue", rows
+
         q: dict = {}
         dm = _trip_energy_date_match(date_from, date_to)
         if dm:
@@ -3448,6 +3519,19 @@ async def download_report(
             "status",
             "remarks",
             "created_at",
+        ]
+    elif report_type == "infractions_catalogue":
+        cols = [
+            "code",
+            "category",
+            "table",
+            "description",
+            "amount",
+            "resolve_days",
+            "safety_flag",
+            "is_capped_non_safety",
+            "repeat_escalation",
+            "active",
         ]
     elif report_type == "infractions_driver_wise":
         cols = ["driver_id", "category", "count", "total_amount"]
@@ -4354,16 +4438,58 @@ async def get_km_details(
 # DUTY ASSIGNMENTS
 # ══════════════════════════════════════════════════════════
 
-@router.get("/duties")
-async def list_duties(
+
+def _duty_text_search_filter(q: str) -> dict:
+    esc = re.escape((q or "").strip())
+    pat = {"$regex": esc, "$options": "i"}
+    return {
+        "$or": [
+            {"driver_name": pat},
+            {"driver_license": pat},
+            {"route_name": pat},
+            {"start_point": pat},
+            {"end_point": pat},
+            {"bus_id": pat},
+            {"trips": {"$elemMatch": {"trip_id": pat}}},
+        ]
+    }
+
+
+def _apply_duty_trip_ids(duty_id: str, trips: list) -> list:
+    """Assign each trip a stable server-owned id: ``{duty_id}-T{trip_number}`` (e.g. DTY-A1B2C3D4-T1)."""
+    out = []
+    for i, raw in enumerate(trips or []):
+        t = dict(raw) if isinstance(raw, dict) else {}
+        tn = t.get("trip_number", i + 1)
+        try:
+            tn_int = int(tn)
+        except (TypeError, ValueError):
+            tn_int = i + 1
+        t["trip_number"] = tn_int
+        t["trip_id"] = f"{duty_id}-T{tn_int}"
+        out.append(t)
+    return out
+
+
+def _duty_trip_sms_fragment(t: dict) -> str:
+    num = t.get("trip_number", "")
+    direction = (t.get("direction") or "").strip().title() or "Trip"
+    st, et = t.get("start_time", ""), t.get("end_time", "")
+    frag = f"Trip {num}: {direction} scheduled {st}-{et}."
+    a_st = (t.get("actual_start_time") or "").strip()
+    a_et = (t.get("actual_end_time") or "").strip()
+    if a_st or a_et:
+        frag += f" Actual {a_st or '—'}-{a_et or '—'}."
+    return frag + " "
+
+
+def _duties_mongo_filter(
     date: str = "",
     driver_license: str = "",
     bus_id: str = "",
     depot: str = "",
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
-    user: dict = Depends(get_current_user),
-):
+    q: str = "",
+) -> dict:
     query: dict = {}
     if date:
         query["date"] = date
@@ -4376,6 +4502,42 @@ async def list_duties(
     d = _norm_q(depot)
     if d:
         query["depot"] = d
+    sq = _norm_q(q)
+    if sq:
+        search_clause = _duty_text_search_filter(sq)
+        query = {"$and": [query, search_clause]} if query else search_clause
+    return query
+
+
+def _duty_trip_cancel_reason_export(t: dict) -> str:
+    st = (t.get("trip_status") or "").strip().lower()
+    if st not in ("cancelled", "not_operated"):
+        return ""
+    code = (t.get("cancel_reason_code") or "none").strip().lower()
+    custom = (t.get("cancel_reason_custom") or "").strip()
+    if code == "other":
+        return custom or "Other"
+    if code == "no_driver":
+        return "No driver"
+    if code == "no_conductor":
+        return "No conductor"
+    if code in ("", "none"):
+        return ""
+    return code.replace("_", " ")
+
+
+@router.get("/duties")
+async def list_duties(
+    date: str = "",
+    driver_license: str = "",
+    bus_id: str = "",
+    depot: str = "",
+    q: str = "",
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    user: dict = Depends(get_current_user),
+):
+    query = _duties_mongo_filter(date, driver_license, bus_id, depot, q)
     p, lim = normalize_page_limit(page, limit)
     total = await db.duty_assignments.count_documents(query)
     cur = (
@@ -4383,6 +4545,420 @@ async def list_duties(
     )
     items = await cur.to_list(lim)
     return paged_payload(items, total=total, page=page, limit=limit)
+
+
+@router.get("/duties/summary-metrics")
+async def duties_summary_metrics(
+    date: str = "",
+    bus_id: str = "",
+    depot: str = "",
+    q: str = "",
+    user: dict = Depends(get_current_user),
+):
+    """Totals for duty summary (same filters as list/export; not limited by pagination)."""
+    query = _duties_mongo_filter(date, "", bus_id, depot, q)
+    pipeline = [
+        {"$match": query},
+        {
+            "$group": {
+                "_id": None,
+                "duty_count": {"$sum": 1},
+                "sms_sent_count": {"$sum": {"$cond": [{"$eq": ["$sms_sent", True]}, 1, 0]}},
+                "trip_legs": {"$sum": {"$size": {"$ifNull": ["$trips", []]}}},
+            }
+        },
+    ]
+    agg = await db.duty_assignments.aggregate(pipeline).to_list(1)
+    row = agg[0] if agg else {}
+    dc = int(row.get("duty_count", 0) or 0)
+    sms_sent = int(row.get("sms_sent_count", 0) or 0)
+    trips = int(row.get("trip_legs", 0) or 0)
+    return {
+        "duty_count": dc,
+        "trip_legs": trips,
+        "sms_sent": sms_sent,
+        "sms_pending": max(0, dc - sms_sent),
+    }
+
+
+def _duty_summary_build_excel(
+    items: list,
+    filter_line: str,
+    truncated: bool,
+    max_rows: int,
+    metrics: dict,
+    generated_line: str,
+) -> io.BytesIO:
+    headers = [
+        "Duty ID",
+        "Date",
+        "Depot",
+        "Driver",
+        "Phone",
+        "Bus",
+        "Route",
+        "From",
+        "To",
+        "Duty SMS sent",
+        "Trip #",
+        "Direction",
+        "Trip ID",
+        "Sched dep",
+        "Sched arr",
+        "Actual dep",
+        "Actual arr",
+        "Trip status",
+        "Cancellation / note",
+    ]
+    ncol = len(headers)
+    thin = Side(style="thin", color="B8B8B8")
+    grid = Border(left=thin, right=thin, top=thin, bottom=thin)
+    title_font = Font(bold=True, size=16, color="000000")
+    hdr_font = Font(bold=True, size=10, color="000000")
+    body_font = Font(size=10, color="000000")
+    small_font = Font(size=9, color="000000")
+    wrap_lt = Alignment(wrap_text=True, vertical="top", horizontal="left")
+    wrap_top = Alignment(wrap_text=True, vertical="top", horizontal="center")
+    center_ac = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Duty summary"
+
+    def merge_banner(row: int, text: str, *, font, fill=None, align=Alignment(vertical="center", horizontal="left", wrap_text=True)):
+        rng = f"A{row}:{get_column_letter(ncol)}{row}"
+        ws.merge_cells(rng)
+        c = ws.cell(row, 1, _excel_cell_value(text))
+        c.font = font
+        if fill:
+            c.fill = fill
+        c.alignment = align
+
+    r = 1
+    merge_banner(r, "Duty assignment summary — TGSRTC", font=title_font, align=Alignment(vertical="center", horizontal="left"))
+    ws.row_dimensions[r].height = 30
+    r += 1
+    merge_banner(r, filter_line, font=small_font)
+    ws.row_dimensions[r].height = 22
+    r += 1
+    mline = (
+        f"Duties: {metrics.get('duty_count', 0)} | Trip legs: {metrics.get('trip_legs', 0)} | "
+        f"SMS sent: {metrics.get('sms_sent', 0)} | SMS pending: {metrics.get('sms_pending', 0)}"
+    )
+    merge_banner(r, mline, font=Font(size=10, bold=True, color="000000"))
+    ws.row_dimensions[r].height = 20
+    r += 1
+    merge_banner(r, generated_line, font=Font(size=9, italic=True, color="000000"))
+    ws.row_dimensions[r].height = 18
+    r += 1
+    if truncated:
+        merge_banner(
+            r,
+            f"Note: only the first {max_rows} duties are included. Narrow filters to export the rest.",
+            font=Font(size=9, color="000000"),
+        )
+        ws.row_dimensions[r].height = 20
+        r += 1
+
+    header_row = r
+    for ci, h in enumerate(headers, start=1):
+        cell = ws.cell(header_row, ci, h)
+        cell.font = hdr_font
+        cell.alignment = center_ac
+        cell.border = grid
+    ws.row_dimensions[header_row].height = 22
+    ws.freeze_panes = f"A{header_row + 1}"
+
+    data_start = header_row + 1
+    r = data_start
+    wrap_cols = {4, 7, 8, 9, 13, 19}
+
+    def append_row(vals: list):
+        nonlocal r
+        for ci, raw in enumerate(vals, start=1):
+            cell = ws.cell(r, ci, raw)
+            cell.font = body_font
+            cell.border = grid
+            if ci in wrap_cols:
+                cell.alignment = wrap_lt
+            elif ci in (11, 12, 14, 15, 16, 17, 18):
+                cell.alignment = wrap_top
+            else:
+                cell.alignment = Alignment(vertical="top", horizontal="left", wrap_text=True)
+        r += 1
+
+    for duty in items:
+        did = duty.get("id", "")
+        ddate = duty.get("date", "")
+        ddepot = duty.get("depot", "")
+        drv = duty.get("driver_name", "")
+        phone = duty.get("driver_phone", "")
+        bus = duty.get("bus_id", "")
+        rname = duty.get("route_name", "")
+        sp = duty.get("start_point", "")
+        ep = duty.get("end_point", "")
+        sms_yes = "Yes" if duty.get("sms_sent") else "No"
+        trips = duty.get("trips") or []
+        if not trips:
+            append_row(
+                [
+                    _excel_cell_value(did),
+                    _excel_cell_value(ddate),
+                    _excel_cell_value(ddepot),
+                    _excel_cell_value(drv),
+                    _excel_cell_value(phone),
+                    _excel_cell_value(bus),
+                    _excel_cell_value(rname),
+                    _excel_cell_value(sp),
+                    _excel_cell_value(ep),
+                    sms_yes,
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                ],
+            )
+            continue
+        for t in trips:
+            if not isinstance(t, dict):
+                continue
+            append_row(
+                [
+                    _excel_cell_value(did),
+                    _excel_cell_value(ddate),
+                    _excel_cell_value(ddepot),
+                    _excel_cell_value(drv),
+                    _excel_cell_value(phone),
+                    _excel_cell_value(bus),
+                    _excel_cell_value(rname),
+                    _excel_cell_value(sp),
+                    _excel_cell_value(ep),
+                    sms_yes,
+                    _excel_cell_value(t.get("trip_number", "")),
+                    _excel_cell_value(t.get("direction", "")),
+                    _excel_cell_value(t.get("trip_id", "")),
+                    _excel_cell_value(t.get("start_time", "")),
+                    _excel_cell_value(t.get("end_time", "")),
+                    _excel_cell_value(t.get("actual_start_time", "")),
+                    _excel_cell_value(t.get("actual_end_time", "")),
+                    _excel_cell_value(t.get("trip_status", "")),
+                    _excel_cell_value(_duty_trip_cancel_reason_export(t)),
+                ],
+            )
+
+    for c in range(1, ncol + 1):
+        letter = get_column_letter(c)
+        maxlen = len(str(ws.cell(header_row, c).value or ""))
+        for row in ws.iter_rows(min_row=data_start, max_row=ws.max_row, min_col=c, max_col=c):
+            for cell in row:
+                if cell.value is not None:
+                    for part in str(cell.value).splitlines():
+                        maxlen = max(maxlen, len(part))
+        if c in (4, 7, 8, 9):
+            wch = min(max(maxlen * 1.12 + 2.5, 14), 48)
+        elif c == 13:
+            wch = min(max(maxlen * 1.1 + 2, 12), 36)
+        elif c == 19:
+            wch = min(max(maxlen * 1.08 + 2, 16), 52)
+        elif c in (1, 2, 6, 11, 12, 14, 15, 16, 17, 18):
+            wch = min(max(maxlen * 1.05 + 1.8, 10), 22)
+        else:
+            wch = min(max(maxlen * 1.08 + 2, 11), 28)
+        ws.column_dimensions[letter].width = wch
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
+def _duty_summary_build_pdf(
+    items: list,
+    filter_line: str,
+    truncated: bool,
+    max_rows: int,
+    metrics: dict,
+    generated_line: str,
+) -> io.BytesIO:
+    pdf = FPDF(orientation="L", unit="mm", format="A4")
+    pdf.set_margins(10, 10, 10)
+    pdf.set_auto_page_break(auto=True, margin=14)
+    pdf.add_page()
+    epw = pdf.epw
+
+    def draw_table_header():
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_text_color(0, 0, 0)
+        weights = [0.05, 0.07, 0.12, 0.055, 0.055, 0.055, 0.055, 0.075, 0.415]
+        labs = ["Trip", "Dir", "Trip ID", "Sch dep", "Sch arr", "Act dep", "Act arr", "Status", "Cancellation / note"]
+        col_w = [epw * w for w in weights]
+        for i, w in enumerate(col_w):
+            pdf.cell(w, 6.5, _fpdf_cell_text(labs[i], 22), border=1, align="C", fill=False)
+        pdf.ln()
+        pdf.set_font("Helvetica", "", 7)
+        return col_w
+
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("Helvetica", "B", 15)
+    pdf.cell(epw, 11, _fpdf_cell_text("  Duty assignment summary", 80), ln=True, fill=False)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(epw, 5.5, _fpdf_cell_text(f"  {filter_line}", 200), ln=True)
+    mtxt = (
+        f"  Duties: {metrics.get('duty_count', 0)} | Trip legs: {metrics.get('trip_legs', 0)} | "
+        f"SMS sent: {metrics.get('sms_sent', 0)} | SMS pending: {metrics.get('sms_pending', 0)}"
+    )
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(epw, 5.5, _fpdf_cell_text(mtxt, 200), ln=True)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.cell(epw, 4.5, _fpdf_cell_text(f"  {generated_line}", 200), ln=True)
+    if truncated:
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.cell(epw, 5, _fpdf_cell_text(f"  Export limited to the first {max_rows} duties.", 200), ln=True)
+    pdf.ln(3)
+
+    col_w = draw_table_header()
+
+    for duty in items:
+        if pdf.get_y() > 175:
+            pdf.add_page()
+            col_w = draw_table_header()
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(0, 0, 0)
+        b1 = f"  {duty.get('id', '')}  |  {duty.get('date', '')}  |  Bus {duty.get('bus_id', '')}  |  {duty.get('driver_name', '')}"
+        pdf.cell(epw, 5.5, _fpdf_cell_text(b1, 200), ln=True, fill=False)
+        pdf.set_font("Helvetica", "", 8)
+        b2 = (
+            f"  {duty.get('route_name', '')}  |  {duty.get('start_point', '')} - {duty.get('end_point', '')}  |  "
+            f"Duty SMS: {'Yes' if duty.get('sms_sent') else 'No'}"
+        )
+        pdf.cell(epw, 5, _fpdf_cell_text(b2, 220), ln=True, fill=False)
+        pdf.ln(1)
+        trips = duty.get("trips") or []
+        if not trips:
+            pdf.set_font("Helvetica", "I", 8)
+            pdf.cell(epw, 5, _fpdf_cell_text("  No trips on this duty.", 120), ln=True)
+            pdf.ln(2)
+            continue
+        ri = 0
+        for t in trips:
+            if not isinstance(t, dict):
+                continue
+            note = _duty_trip_cancel_reason_export(t)
+            row = [
+                t.get("trip_number", ""),
+                t.get("direction", ""),
+                t.get("trip_id", ""),
+                t.get("start_time", ""),
+                t.get("end_time", ""),
+                t.get("actual_start_time", ""),
+                t.get("actual_end_time", ""),
+                (t.get("trip_status", "") or "").replace("_", " "),
+                note,
+            ]
+            note_txt = _fpdf_cell_text(row[-1], 800)
+            wrap_w = max(18, int(col_w[-1] / 1.55))
+            note_lines = textwrap.wrap(note_txt, width=wrap_w) or [""]
+            line_h = 3.5
+            row_h = max(7.5, line_h * len(note_lines) + 2.0)
+            if pdf.get_y() + row_h > 188:
+                pdf.add_page()
+                col_w = draw_table_header()
+            y0 = pdf.get_y()
+            x0 = pdf.l_margin
+            pdf.set_font("Helvetica", "", 7)
+            pdf.set_text_color(0, 0, 0)
+            for i in range(8):
+                pdf.cell(
+                    col_w[i],
+                    row_h,
+                    _fpdf_cell_text(row[i], 22),
+                    border=1,
+                    align="C",
+                    fill=False,
+                )
+            x_note = x0 + sum(col_w[:-1])
+            pdf.rect(x_note, y0, col_w[-1], row_h, style="D")
+            pdf.set_xy(x_note + 0.6, y0 + 1.0)
+            pdf.set_font("Helvetica", "", 7)
+            pdf.multi_cell(col_w[-1] - 1.2, line_h, "\n".join(note_lines), border=0)
+            pdf.set_xy(pdf.l_margin, y0 + row_h)
+            ri += 1
+        pdf.ln(3)
+
+    buf = io.BytesIO()
+    pdf.output(buf)
+    buf.seek(0)
+    return buf
+
+
+@router.get("/duties/summary-export")
+async def duties_summary_export(
+    fmt: str = Query("excel", description="excel or pdf"),
+    date: str = "",
+    bus_id: str = "",
+    depot: str = "",
+    q: str = "",
+    user: dict = Depends(get_current_user),
+):
+    """Download duty summary as Excel (flat trip rows) or PDF (per-duty blocks)."""
+    f = (fmt or "excel").strip().lower()
+    if f not in ("excel", "pdf"):
+        raise HTTPException(status_code=400, detail="fmt must be excel or pdf")
+    query = _duties_mongo_filter(date, "", bus_id, depot, q)
+    max_rows = 2500
+    items = await db.duty_assignments.find(query, {"_id": 0}).sort([("date", -1), ("id", -1)]).limit(max_rows).to_list(max_rows)
+    truncated = False
+    if len(items) >= max_rows:
+        truncated = await db.duty_assignments.count_documents(query) > max_rows
+    date_safe = re.sub(r"[^\d\-]", "_", date or "all")[:32]
+    filter_line = f"Date: {date or 'All'} | Depot: {depot or 'All'} | Bus: {bus_id or 'All'} | Search: {q or '—'}"
+
+    m_pipeline = [
+        {"$match": query},
+        {
+            "$group": {
+                "_id": None,
+                "duty_count": {"$sum": 1},
+                "sms_sent_count": {"$sum": {"$cond": [{"$eq": ["$sms_sent", True]}, 1, 0]}},
+                "trip_legs": {"$sum": {"$size": {"$ifNull": ["$trips", []]}}},
+            }
+        },
+    ]
+    agg_m = await db.duty_assignments.aggregate(m_pipeline).to_list(1)
+    row_m = agg_m[0] if agg_m else {}
+    dc = int(row_m.get("duty_count", 0) or 0)
+    sms_s = int(row_m.get("sms_sent_count", 0) or 0)
+    trip_n = int(row_m.get("trip_legs", 0) or 0)
+    metrics = {
+        "duty_count": dc,
+        "trip_legs": trip_n,
+        "sms_sent": sms_s,
+        "sms_pending": max(0, dc - sms_s),
+    }
+    generated_line = datetime.now(timezone.utc).strftime("Generated (UTC): %Y-%m-%d %H:%M")
+
+    if f == "excel":
+        buf = _duty_summary_build_excel(items, filter_line, truncated, max_rows, metrics, generated_line)
+        fname = f"duty_summary_{date_safe}.xlsx"
+        return StreamingResponse(
+            buf,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={fname}"},
+        )
+
+    buf = _duty_summary_build_pdf(items, filter_line, truncated, max_rows, metrics, generated_line)
+    fname = f"duty_summary_{date_safe}.pdf"
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={fname}"},
+    )
+
 
 @router.post("/duties")
 async def create_duty(req: DutyReq, user: dict = Depends(require_permission("operations.duties.create"))):
@@ -4392,8 +4968,18 @@ async def create_duty(req: DutyReq, user: dict = Depends(require_permission("ope
     bus = await db.buses.find_one({"bus_id": req.bus_id}, {"_id": 0})
     if not bus:
         raise HTTPException(status_code=404, detail="Bus not found")
+    rid = (req.route_id or "").strip()
+    route = await db.routes.find_one({"route_id": rid}, {"_id": 0})
+    if not route:
+        raise HTTPException(status_code=404, detail="Route not found")
     doc = req.model_dump()
-    doc["id"] = f"DTY-{str(uuid.uuid4())[:8].upper()}"
+    duty_id_new = f"DTY-{str(uuid.uuid4())[:8].upper()}"
+    doc["id"] = duty_id_new
+    doc["trips"] = _apply_duty_trip_ids(duty_id_new, doc.get("trips", []))
+    doc["route_id"] = rid
+    doc["route_name"] = (route.get("name") or "").strip()
+    doc["start_point"] = (route.get("origin") or "").strip()
+    doc["end_point"] = (route.get("destination") or "").strip()
     doc["driver_name"] = driver.get("name", req.driver_name)
     doc["driver_phone"] = driver.get("phone", req.driver_phone)
     doc["depot"] = bus.get("depot", "")
@@ -4408,6 +4994,15 @@ async def create_duty(req: DutyReq, user: dict = Depends(require_permission("ope
 @router.put("/duties/{duty_id}")
 async def update_duty(duty_id: str, req: DutyReq, _: dict = Depends(require_permission("operations.duties.update"))):
     update = req.model_dump()
+    update["trips"] = _apply_duty_trip_ids(duty_id, update.get("trips", []))
+    rid = (req.route_id or "").strip()
+    route = await db.routes.find_one({"route_id": rid}, {"_id": 0})
+    if not route:
+        raise HTTPException(status_code=404, detail="Route not found")
+    update["route_id"] = rid
+    update["route_name"] = (route.get("name") or "").strip()
+    update["start_point"] = (route.get("origin") or "").strip()
+    update["end_point"] = (route.get("destination") or "").strip()
     driver = await db.drivers.find_one({"license_number": req.driver_license}, {"_id": 0})
     if driver:
         update["driver_name"] = driver.get("name", "")
@@ -4431,7 +5026,7 @@ async def send_duty_sms(duty_id: str, _: dict = Depends(require_permission("oper
         raise HTTPException(status_code=404, detail="Duty not found")
     trips_text = ""
     for t in duty.get("trips", []):
-        trips_text += f"Trip {t['trip_number']}: {t.get('direction','').title()} {t['start_time']}-{t['end_time']}. "
+        trips_text += _duty_trip_sms_fragment(t if isinstance(t, dict) else {})
     sms_message = (
         f"TGSRTC Duty Alert: Dear {duty['driver_name']}, "
         f"your duty on {duty['date']}: "
@@ -4451,7 +5046,7 @@ async def send_all_duty_sms(date: str = Query(...), _: dict = Depends(require_pe
     for duty in duties:
         trips_text = ""
         for t in duty.get("trips", []):
-            trips_text += f"Trip {t['trip_number']}: {t.get('direction','').title()} {t['start_time']}-{t['end_time']}. "
+            trips_text += _duty_trip_sms_fragment(t if isinstance(t, dict) else {})
         sms_message = (
             f"TGSRTC Duty Alert: Dear {duty['driver_name']}, "
             f"your duty on {duty['date']}: "
@@ -5106,13 +5701,37 @@ async def compute_fee_pk(
 
 @router.get("/infractions/catalogue")
 async def list_infraction_catalogue(
+    search: str = "",
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     user: dict = Depends(get_current_user),
 ):
+    # Keep DB-backed catalogue aligned with tender-frozen master codes.
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for inf in build_master_rows():
+        payload = dict(inf)
+        payload["created_at"] = payload.get("created_at", now_iso)
+        await db.infraction_catalogue.update_one(
+            {"code": payload["code"]},
+            {"$set": payload},
+            upsert=True,
+        )
     p, lim = normalize_page_limit(page, limit)
     allowed_codes = sorted(MASTER_BY_CODE.keys())
     q = {"code": {"$in": allowed_codes}}
+    st = (search or "").strip()
+    if st:
+        esc = re.escape(st)
+        q["$and"] = [
+            {"code": {"$in": allowed_codes}},
+            {
+                "$or": [
+                    {"code": {"$regex": esc, "$options": "i"}},
+                    {"category": {"$regex": esc, "$options": "i"}},
+                    {"description": {"$regex": esc, "$options": "i"}},
+                ]
+            },
+        ]
     total = await db.infraction_catalogue.count_documents(q)
     cur = db.infraction_catalogue.find(q, {"_id": 0}).sort("code", 1).skip((p - 1) * lim).limit(lim)
     items = await cur.to_list(lim)
@@ -5162,6 +5781,7 @@ async def list_logged_infractions(
     route_name: str = "",
     related_incident_id: str = "",
     status: str = "",
+    search: str = "",
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     user: dict = Depends(get_current_user),
@@ -5200,6 +5820,21 @@ async def list_logged_infractions(
     st = _norm_q(status)
     if st:
         q["status"] = st
+    stext = (search or "").strip()
+    if stext:
+        esc = re.escape(stext)
+        q["$or"] = [
+            {"id": {"$regex": esc, "$options": "i"}},
+            {"infraction_code": {"$regex": esc, "$options": "i"}},
+            {"bus_id": {"$regex": esc, "$options": "i"}},
+            {"depot": {"$regex": esc, "$options": "i"}},
+            {"description": {"$regex": esc, "$options": "i"}},
+            {"status": {"$regex": esc, "$options": "i"}},
+            {"logged_by": {"$regex": esc, "$options": "i"}},
+            {"driver_id": {"$regex": esc, "$options": "i"}},
+            {"route_name": {"$regex": esc, "$options": "i"}},
+            {"related_incident_id": {"$regex": esc, "$options": "i"}},
+        ]
     p, lim = normalize_page_limit(page, limit)
     total = await db.infractions_logged.count_documents(q)
     cur = db.infractions_logged.find(q, {"_id": 0}).sort("created_at", -1).skip((p - 1) * lim).limit(lim)

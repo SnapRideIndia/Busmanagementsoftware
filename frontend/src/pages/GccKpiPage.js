@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
 import API, { buildQuery, formatApiError, fetchAllPaginated, getBackendOrigin } from "../lib/api";
+import { Endpoints } from "../lib/endpoints";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -35,7 +36,7 @@ export default function GccKpiPage() {
   useEffect(() => {
     (async () => {
       try {
-        const items = await fetchAllPaginated("/buses", {});
+        const items = await fetchAllPaginated(Endpoints.masters.buses.list(), {});
         setBuses(items);
         setFleetDepots([...new Set(items.map((b) => b.depot).filter(Boolean))].sort());
       } catch {
@@ -61,7 +62,7 @@ export default function GccKpiPage() {
     setKpiError(null);
     try {
       const params = buildQuery({ period_start: periodStart, period_end: periodEnd, depot, bus_id: busId });
-      const { data } = await API.get("/kpi/gcc-engine", { params });
+      const { data } = await API.get(Endpoints.kpi.gccEngine(), { params });
       setKpi(data);
     } catch (err) {
       setKpiError(formatApiError(err.response?.data?.detail) || err.message || "Failed to load KPI");
@@ -84,7 +85,7 @@ export default function GccKpiPage() {
           page: pageNum,
           limit: FEE_PK_LIMIT,
         });
-        const { data } = await API.get("/fee-pk/compute", { params });
+        const { data } = await API.get(Endpoints.kpi.feePkCompute(), { params });
         setFeePk(data);
       } catch (err) {
         const msg = formatApiError(err.response?.data?.detail) || err.message || "Failed to load Fee/PK";

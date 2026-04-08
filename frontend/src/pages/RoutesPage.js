@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, Fragment } from "react";
 import { Link } from "react-router-dom";
 import API, { buildQuery, unwrapListResponse, fetchAllPaginated, messageFromAxiosError } from "../lib/api";
+import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import TableLoadRows from "../components/TableLoadRows";
 import { Button } from "../components/ui/button";
@@ -86,7 +87,7 @@ export default function RoutesPage() {
   useEffect(() => {
     (async () => {
       try {
-        const depots = await fetchAllPaginated("/depots", {});
+        const depots = await fetchAllPaginated(Endpoints.masters.depots.list(), {});
         setDepotNames(depots.map((d) => d.name).filter(Boolean).sort());
       } catch {
         setDepotNames([]);
@@ -97,7 +98,7 @@ export default function RoutesPage() {
   useEffect(() => {
     (async () => {
       try {
-        const stops = await fetchAllPaginated("/stop-master", {});
+        const stops = await fetchAllPaginated(Endpoints.masters.stops.list(), {});
         setMasterStops([...stops].sort((a, b) => String(a.name).localeCompare(String(b.name))));
       } catch {
         setMasterStops([]);
@@ -109,7 +110,7 @@ export default function RoutesPage() {
     setLoading(true);
     setFetchError(null);
     try {
-      const { data } = await API.get("/route-master", {
+      const { data } = await API.get(Endpoints.masters.routes.legacyList(), {
         params: buildQuery({ depot: filterDepot, active: filterActive, search, page, limit: 20 }),
       });
       const u = unwrapListResponse(data);
@@ -149,10 +150,10 @@ export default function RoutesPage() {
     };
     try {
       if (editingId) {
-        await API.put(`/bus-routes/${encodeURIComponent(editingId)}`, payload);
+        await API.put(Endpoints.masters.routes.update(editingId), payload);
         toast.success("Route updated");
       } else {
-        await API.post("/bus-routes", { ...payload, route_id: routeId });
+        await API.post(Endpoints.masters.routes.create(), { ...payload, route_id: routeId });
         toast.success("Route created");
       }
       setOpen(false);
@@ -167,7 +168,7 @@ export default function RoutesPage() {
   const handleDelete = async (routeId) => {
     if (!window.confirm(`Delete route "${routeId}"?`)) return;
     try {
-      await API.delete(`/bus-routes/${encodeURIComponent(routeId)}`);
+      await API.delete(Endpoints.masters.routes.remove(routeId));
       toast.success("Deleted");
       load();
     } catch (err) {

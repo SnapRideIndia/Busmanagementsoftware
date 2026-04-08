@@ -84,43 +84,42 @@ async def run_seed_data():
                 "name": u["name"], "role": u["role"], "created_at": datetime.now(timezone.utc).isoformat()
             })
     # Tenders
-    if await db.tenders.count_documents({}) == 0:
-        tenders = [
-            {"tender_id": "TND-001", "pk_rate": 85, "energy_rate": 8.5, "subsidy_rate": 5, "subsidy_type": "per_km", "description": "Hyderabad City Routes Phase-1", "status": "active", "created_at": datetime.now(timezone.utc).isoformat()},
-            {"tender_id": "TND-002", "pk_rate": 92, "energy_rate": 9.0, "subsidy_rate": 4, "subsidy_type": "per_km", "description": "Secunderabad Express Routes", "status": "active", "created_at": datetime.now(timezone.utc).isoformat()},
-            {"tender_id": "TND-003", "pk_rate": 78, "energy_rate": 8.0, "subsidy_rate": 8000, "subsidy_type": "per_bus", "description": "Warangal City Services", "status": "active", "created_at": datetime.now(timezone.utc).isoformat()},
-        ]
-        await db.tenders.insert_many(tenders)
+    await db.tenders.delete_many({})
+    tenders = [
+        {"tender_id": "TND-001", "concessionaire": "City EV Operations Pvt Ltd", "pk_rate": 85, "energy_rate": 8.5, "subsidy_rate": 5, "subsidy_type": "per_km", "description": "Hyderabad City Routes Phase-1", "status": "active", "created_at": datetime.now(timezone.utc).isoformat()},
+        {"tender_id": "TND-002", "concessionaire": "Metro Mobility Services LLP", "pk_rate": 92, "energy_rate": 9.0, "subsidy_rate": 4, "subsidy_type": "per_km", "description": "Secunderabad Express Routes", "status": "active", "created_at": datetime.now(timezone.utc).isoformat()},
+        {"tender_id": "TND-003", "concessionaire": "Warangal Green Transit Co", "pk_rate": 78, "energy_rate": 8.0, "subsidy_rate": 8000, "subsidy_type": "per_bus", "description": "Warangal City Services", "status": "active", "created_at": datetime.now(timezone.utc).isoformat()},
+    ]
+    await db.tenders.insert_many(tenders)
     depot_names = ["Miyapur Depot", "LB Nagar Depot", "Secunderabad Depot", "Warangal Depot"]
-    if await db.depots.count_documents({}) == 0:
-        now_d = datetime.now(timezone.utc).isoformat()
-        await db.depots.insert_many(
-            [
-                {
-                    "name": n,
-                    "code": "",
-                    "address": "Telangana, India",
-                    "active": True,
-                    "created_at": now_d,
-                    "updated_at": now_d,
-                }
-                for n in depot_names
-            ]
-        )
-    # Buses
-    if await db.buses.count_documents({}) == 0:
-        buses = []
-        for i in range(1, 11):
-            bt = random.choice(["12m_ac", "9m_ac", "12m_non_ac"])
-            kwh = {"12m_ac": 1.3, "9m_ac": 1.0, "12m_non_ac": 1.1}.get(bt, 1.0)
-            tid = random.choice(["TND-001", "TND-002", "TND-003"])
-            buses.append({
-                "bus_id": f"TS-{str(i).zfill(3)}", "bus_type": bt, "capacity": random.choice([32, 40, 50]),
-                "tender_id": tid, "depot": random.choice(depot_names),
-                "status": "active" if i <= 8 else random.choice(["maintenance", "inactive"]),
-                "kwh_per_km": kwh, "created_at": datetime.now(timezone.utc).isoformat()
-            })
-        await db.buses.insert_many(buses)
+    await db.depots.delete_many({})
+    now_d = datetime.now(timezone.utc).isoformat()
+    await db.depots.insert_many(
+        [
+            {
+                "name": n,
+                "code": "",
+                "address": "Telangana, India",
+                "active": True,
+                "created_at": now_d,
+                "updated_at": now_d,
+            }
+            for n in depot_names
+        ]
+    )
+    await db.buses.delete_many({})
+    buses = []
+    for i in range(1, 11):
+        bt = random.choice(["12m_ac", "9m_ac", "12m_non_ac"])
+        kwh = {"12m_ac": 1.3, "9m_ac": 1.0, "12m_non_ac": 1.1}.get(bt, 1.0)
+        tid = random.choice(["TND-001", "TND-002", "TND-003"])
+        buses.append({
+            "bus_id": f"TS-{str(i).zfill(3)}", "bus_type": bt, "capacity": random.choice([32, 40, 50]),
+            "tender_id": tid, "depot": random.choice(depot_names),
+            "status": "active" if i <= 8 else random.choice(["maintenance", "inactive"]),
+            "kwh_per_km": kwh, "created_at": datetime.now(timezone.utc).isoformat()
+        })
+    await db.buses.insert_many(buses)
     # Top up active fleet for live-tracking / telemetry demos (idempotent)
     target_fleet = 40
     for _ in range(80):
@@ -152,18 +151,18 @@ async def run_seed_data():
         )
     # Drivers
     driver_names = ["Ravi Kumar", "Suresh Reddy", "Venkat Rao", "Anjali Devi", "Prasad M", "Lakshmi K", "Srinivas P", "Kavitha B"]
-    if await db.drivers.count_documents({}) == 0:
-        drivers = []
-        for i, name in enumerate(driver_names):
-            drivers.append({
-                "id": f"DRV-{str(i+1).zfill(3)}",
-                "name": name, "license_number": f"TS-DL-{2020+i}-{str(random.randint(1000,9999))}",
-                "phone": f"98{random.randint(10000000, 99999999)}",
-                "bus_id": f"TS-{str(i+1).zfill(3)}" if i < 8 else "",
-                "status": "active", "rating": round(random.uniform(3.6, 5.0), 1),
-                "penalties": [], "created_at": datetime.now(timezone.utc).isoformat()
-            })
-        await db.drivers.insert_many(drivers)
+    await db.drivers.delete_many({})
+    drivers = []
+    for i, name in enumerate(driver_names):
+        drivers.append({
+            "id": f"DRV-{str(i+1).zfill(3)}",
+            "name": name, "license_number": f"TS-DL-{2020+i}-{str(random.randint(1000,9999))}",
+            "phone": f"98{random.randint(10000000, 99999999)}",
+            "bus_id": f"TS-{str(i+1).zfill(3)}" if i < 8 else "",
+            "status": "active", "rating": round(random.uniform(3.6, 5.0), 1),
+            "penalties": [], "created_at": datetime.now(timezone.utc).isoformat()
+        })
+    await db.drivers.insert_many(drivers)
     await db.role_permissions.delete_many({"role_id": {"$nin": list(ALLOWED_ROLE_IDS)}})
     for rid in ALLOWED_ROLE_IDS:
         if not await db.role_permissions.find_one({"role_id": rid}):
@@ -184,28 +183,28 @@ async def run_seed_data():
                 )
 
     await _resync_stale_role_permissions()
-    if await db.conductors.count_documents({}) == 0:
-        c_names = [
-            "Kiran Rao", "Neha Sharma", "Arun Prasad", "Divya Iyer", "Imran Khan",
-            "Sunita Devi", "Vikram Singh", "Meera Joshi", "Rahul Nair", "Fatima Begum",
-            "Harish Goud", "Priya Kulkarni", "Naveen Babu", "Deepa Reddy",
-        ]
-        cond = []
-        for i, name in enumerate(c_names):
-            cond.append(
-                {
-                    "conductor_id": f"CND-{str(i + 1).zfill(4)}",
-                    "name": name,
-                    "badge_no": f"BDG-{2100 + i}",
-                    "phone": f"97{random.randint(10000000, 99999999)}",
-                    "depot": random.choice(depot_names),
-                    "status": "active" if random.random() > 0.08 else "inactive",
-                    "rating": round(random.uniform(3.7, 5.0), 1),
-                    "total_trips": random.randint(120, 2200),
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                }
-            )
-        await db.conductors.insert_many(cond)
+    await db.conductors.delete_many({})
+    c_names = [
+        "Kiran Rao", "Neha Sharma", "Arun Prasad", "Divya Iyer", "Imran Khan",
+        "Sunita Devi", "Vikram Singh", "Meera Joshi", "Rahul Nair", "Fatima Begum",
+        "Harish Goud", "Priya Kulkarni", "Naveen Babu", "Deepa Reddy",
+    ]
+    cond = []
+    for i, name in enumerate(c_names):
+        cond.append(
+            {
+                "conductor_id": f"CND-{str(i + 1).zfill(4)}",
+                "name": name,
+                "badge_no": f"BDG-{2100 + i}",
+                "phone": f"97{random.randint(10000000, 99999999)}",
+                "depot": random.choice(depot_names),
+                "status": "active" if random.random() > 0.08 else "inactive",
+                "rating": round(random.uniform(3.7, 5.0), 1),
+                "total_trips": random.randint(120, 2200),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+    await db.conductors.insert_many(cond)
 
     # Unified 30-day synchronized operational dataset (replace mode).
     await db.duty_assignments.delete_many({})
@@ -665,16 +664,11 @@ async def run_seed_data():
         {"stop_id": "ST-HYD-KAC", "name": "Kacheguda", "locality": "Kacheguda", "landmark": "Railway colony", "region": "Hyderabad", "lat": 17.3897, "lng": 78.5033, "active": True},
         {"stop_id": "ST-HYD-NAM", "name": "Nampally", "locality": "Nampally", "landmark": "Opp. railway station", "region": "Hyderabad", "lat": 17.3856, "lng": 78.4694, "active": True},
     ]
+    await db.stop_master.delete_many({})
     now_sm = datetime.now(timezone.utc).isoformat()
     for sm in stop_master_seed:
-        ex = await db.stop_master.find_one({"stop_id": sm["stop_id"]})
-        doc = {**sm, "updated_at": now_sm}
-        if ex:
-            doc["created_at"] = ex.get("created_at", now_sm)
-            await db.stop_master.replace_one({"stop_id": sm["stop_id"]}, doc)
-        else:
-            doc["created_at"] = now_sm
-            await db.stop_master.insert_one(doc)
+        doc = {**sm, "updated_at": now_sm, "created_at": now_sm}
+        await db.stop_master.insert_one(doc)
 
     def _seq(ids: list[str]) -> list[dict]:
         return [{"stop_id": sid, "seq": i + 1} for i, sid in enumerate(ids)]
@@ -745,9 +739,9 @@ async def run_seed_data():
     ]
     for _r in route_seed_docs:
         _r["stop_sequence"] = _seq(_hyd_route_stop_ids.get(_r["route_id"], []))
-    if await db.routes.count_documents({}) == 0:
-        now_r = datetime.now(timezone.utc).isoformat()
-        await db.routes.insert_many([{**r, "created_at": now_r, "updated_at": now_r} for r in route_seed_docs])
+    await db.routes.delete_many({})
+    now_r = datetime.now(timezone.utc).isoformat()
+    await db.routes.insert_many([{**r, "created_at": now_r, "updated_at": now_r} for r in route_seed_docs])
     # Backfill stop_sequence on demo routes when empty (shared Stop master)
     now_rs = datetime.now(timezone.utc).isoformat()
     for _r in route_seed_docs:

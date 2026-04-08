@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import API, { formatApiError, buildQuery, unwrapListResponse } from "../lib/api";
+import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import TableLoadRows from "../components/TableLoadRows";
 import { Button } from "../components/ui/button";
@@ -30,7 +31,7 @@ export default function DepotsPage() {
     setLoading(true);
     setFetchError(null);
     try {
-      const { data } = await API.get("/depots", { params: buildQuery({ active: filterActive, page, limit: 20 }) });
+      const { data } = await API.get(Endpoints.masters.depots.list(), { params: buildQuery({ active: filterActive, page, limit: 20 }) });
       const u = unwrapListResponse(data);
       setDepots(u.items);
       setMeta({ total: u.total, pages: u.pages, limit: u.limit });
@@ -54,10 +55,10 @@ export default function DepotsPage() {
         active: !!form.active,
       };
       if (editingOriginalName) {
-        await API.put(`/depots/${encodeURIComponent(editingOriginalName)}`, payload);
+        await API.put(Endpoints.masters.depots.update(editingOriginalName), payload);
         toast.success("Depot updated");
       } else {
-        await API.post("/depots", payload);
+        await API.post(Endpoints.masters.depots.create(), payload);
         toast.success("Depot added");
       }
       setOpen(false);
@@ -72,7 +73,7 @@ export default function DepotsPage() {
   const handleDelete = async (name) => {
     if (!window.confirm(`Delete depot "${name}"?`)) return;
     try {
-      await API.delete(`/depots/${encodeURIComponent(name)}`);
+      await API.delete(Endpoints.masters.depots.remove(name));
       toast.success("Deleted");
       load();
     } catch (err) {

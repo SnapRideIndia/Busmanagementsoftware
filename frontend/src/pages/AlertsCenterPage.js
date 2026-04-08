@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import API, { buildQuery, fetchAllPaginated, formatApiError } from "../lib/api";
+import { Endpoints } from "../lib/endpoints";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -83,7 +84,7 @@ export default function AlertsCenterPage() {
   useEffect(() => {
     (async () => {
       try {
-        const buses = await fetchAllPaginated("/buses", {});
+        const buses = await fetchAllPaginated(Endpoints.masters.buses.list(), {});
         setAllBuses(buses);
         setDepots([...new Set(buses.map((b) => b.depot).filter(Boolean))].sort());
       } catch {
@@ -112,7 +113,7 @@ export default function AlertsCenterPage() {
           page: pageOverride,
           limit: 20,
         });
-        const { data } = await API.get("/alerts/center", { params });
+        const { data } = await API.get(Endpoints.alerts.center(), { params });
         setRows(data.items || []);
         setSummary(data.summary || { active: 0, resolved: 0, high: 0, medium: 0, low: 0 });
         setMeta({

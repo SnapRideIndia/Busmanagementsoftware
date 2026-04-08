@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.domain.incident_evidence import normalize_occurred_at_iso
 from app.domain.incident_types import IncidentChannel, IncidentSeverity, IncidentStatus
@@ -62,6 +62,7 @@ class ResetPasswordReq(BaseModel):
 
 class TenderReq(BaseModel):
     tender_id: str
+    concessionaire: str = ""
     pk_rate: float
     energy_rate: float
     subsidy_rate: float = 0
@@ -316,16 +317,46 @@ class TripDetail(BaseModel):
     direction: str = "outward"
 
 
+class DutyTripReq(BaseModel):
+    """One leg on a duty. ``start_time`` / ``end_time`` are scheduled departure / arrival.
+
+    ``trip_id`` is not accepted from the client; the API sets ``{duty_id}-T{n}`` on create/update.
+    """
+
+    trip_number: int
+    start_time: str = ""
+    end_time: str = ""
+    direction: str = "outward"
+    actual_start_time: str = ""
+    actual_end_time: str = ""
+    trip_status: str = Field(default="scheduled", max_length=32)
+    cancel_reason_code: str = Field(default="none", max_length=32)
+    cancel_reason_custom: str = Field(default="", max_length=500)
+
+    @model_validator(mode="after")
+    def validate_cancel_reason(self):
+        st = (self.trip_status or "").strip().lower()
+        if st in ("cancelled", "not_operated"):
+            code = (self.cancel_reason_code or "").strip().lower()
+            if code in ("", "none"):
+                raise ValueError("cancel_reason_code is required when trip_status is cancelled or not_operated")
+            if code == "other" and not (self.cancel_reason_custom or "").strip():
+                raise ValueError("cancel_reason_custom is required when cancel_reason_code is other")
+        return self
+
+
 class DutyReq(BaseModel):
     driver_license: str
     driver_name: str = ""
     driver_phone: str = ""
     bus_id: str
-    route_name: str
-    start_point: str
-    end_point: str
+    route_id: str = Field(..., min_length=1, max_length=64)
+    # Snapshot fields (filled from route master on save).
+    route_name: str = Field(default="", max_length=256)
+    start_point: str = Field(default="", max_length=256)
+    end_point: str = Field(default="", max_length=256)
     date: str
-    trips: list = []
+    trips: list[DutyTripReq] = Field(default_factory=list)
 
 
 class TripKmKeysReq(BaseModel):

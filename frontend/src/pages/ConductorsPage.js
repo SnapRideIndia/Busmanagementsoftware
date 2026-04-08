@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import API, { formatApiError, buildQuery, unwrapListResponse, fetchAllPaginated, messageFromAxiosError } from "../lib/api";
+import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import TableLoadRows from "../components/TableLoadRows";
 import { Button } from "../components/ui/button";
@@ -39,7 +40,7 @@ export default function ConductorsPage() {
   useEffect(() => {
     (async () => {
       try {
-        const depots = await fetchAllPaginated("/depots", {});
+        const depots = await fetchAllPaginated(Endpoints.masters.depots.list(), {});
         setDepotNames(depots.map((x) => x.name).filter(Boolean).sort());
       } catch {
         setDepotNames([]);
@@ -52,7 +53,7 @@ export default function ConductorsPage() {
     setFetchError(null);
     try {
       const res = await API.get(
-        "/conductors",
+        Endpoints.masters.conductors.list(),
         { params: buildQuery({ depot: filterDepot, status: filterStatus, page, limit: 20 }) }
       );
       const u = unwrapListResponse(res.data);
@@ -78,10 +79,10 @@ export default function ConductorsPage() {
         total_trips: Number(form.total_trips) || 0,
       };
       if (editing) {
-        await API.put(`/conductors/${editing}`, payload);
+        await API.put(Endpoints.masters.conductors.update(editing), payload);
         toast.success("Conductor updated");
       } else {
-        await API.post("/conductors", payload);
+        await API.post(Endpoints.masters.conductors.create(), payload);
         toast.success("Conductor added");
       }
       setOpen(false);
@@ -96,7 +97,7 @@ export default function ConductorsPage() {
   const handleDelete = async (id) => {
     if (!window.confirm("Delete this conductor?")) return;
     try {
-      await API.delete(`/conductors/${id}`);
+      await API.delete(Endpoints.masters.conductors.remove(id));
       toast.success("Deleted");
       load();
     } catch (err) {

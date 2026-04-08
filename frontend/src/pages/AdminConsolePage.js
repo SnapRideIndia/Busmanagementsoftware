@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import API, { formatApiError, unwrapListResponse, messageFromAxiosError } from "../lib/api";
+import { Endpoints } from "../lib/endpoints";
 import AsyncPanel from "../components/AsyncPanel";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -63,10 +64,10 @@ export default function AdminConsolePage() {
     setError(null);
     try {
       const [uRes, rRes, cRes, mRes] = await Promise.all([
-        API.get("/users", { params: { page: 1, limit: 100 } }),
-        API.get("/roles"),
-        API.get("/permissions/catalog"),
-        API.get("/permissions/matrix"),
+        API.get(Endpoints.admin.users(), { params: { page: 1, limit: 100 } }),
+        API.get(Endpoints.admin.roles()),
+        API.get(Endpoints.admin.permissionsCatalog()),
+        API.get(Endpoints.admin.permissionsMatrix()),
       ]);
       const u = unwrapListResponse(uRes.data);
       setUsers(u.items);
@@ -121,9 +122,9 @@ export default function AdminConsolePage() {
   const savePermissions = async () => {
     setPermSaving(true);
     try {
-      await API.put(`/permissions/roles/${permRole}`, { permission_ids: permDraft });
+      await API.put(Endpoints.admin.setRolePermissions(permRole), { permission_ids: permDraft });
       toast.success("Permissions saved");
-      const { data } = await API.get("/permissions/matrix");
+      const { data } = await API.get(Endpoints.admin.permissionsMatrix());
       setPermMatrix(data?.matrix || {});
     } catch (err) {
       toast.error(formatApiError(err.response?.data?.detail) || err.message || "Save failed");
@@ -138,7 +139,7 @@ export default function AdminConsolePage() {
 
   const handleRoleChange = async (userId, newRole) => {
     try {
-      await API.put(`/users/${userId}/role`, { role: newRole });
+      await API.put(Endpoints.admin.setUserRole(userId), { role: newRole });
       setUsers((prev) => prev.map((x) => (x.user_id === userId || x._id === userId ? { ...x, role: newRole } : x)));
       toast.success("Role updated");
     } catch (err) {

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import API, { formatApiError, buildQuery, unwrapListResponse, fetchAllPaginated } from "../lib/api";
+import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import TableLoadRows from "../components/TableLoadRows";
 import AsyncPanel from "../components/AsyncPanel";
@@ -47,7 +48,10 @@ export default function EnergyPage() {
         page: dataPage,
         limit: 20,
       });
-      const [e, busItems] = await Promise.all([API.get("/energy", { params }), fetchAllPaginated("/buses", {})]);
+      const [e, busItems] = await Promise.all([
+        API.get(Endpoints.energy.root(), { params }),
+        fetchAllPaginated(Endpoints.masters.buses.list(), {}),
+      ]);
       const eu = unwrapListResponse(e.data);
       setData(eu.items);
       setDataMeta({ total: eu.total, pages: eu.pages, limit: eu.limit });
@@ -72,7 +76,7 @@ export default function EnergyPage() {
         page: reportPage,
         limit: 20,
       });
-      const { data: r } = await API.get("/energy/report", { params });
+      const { data: r } = await API.get(Endpoints.energy.report(), { params });
       setReport(r);
       setReportMeta({
         row_total: r.row_total ?? (r.report || []).length,
@@ -96,7 +100,7 @@ export default function EnergyPage() {
 
   const handleAdd = async () => {
     try {
-      await API.post("/energy", { ...form, units_charged: Number(form.units_charged), tariff_rate: Number(form.tariff_rate) });
+      await API.post(Endpoints.energy.root(), { ...form, units_charged: Number(form.units_charged), tariff_rate: Number(form.tariff_rate) });
       toast.success("Charging data added"); setAddOpen(false); setForm({ bus_id: "", date: "", units_charged: "", tariff_rate: "8.5" }); load();
     } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
   };

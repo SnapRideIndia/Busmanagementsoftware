@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import API, { formatApiError, buildQuery, unwrapListResponse } from "../lib/api";
+import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import AsyncPanel from "../components/AsyncPanel";
 import { Button } from "../components/ui/button";
@@ -22,7 +23,7 @@ export default function SettingsPage() {
     setLoading(true);
     setFetchError(null);
     try {
-      const { data } = await API.get("/settings", { params: buildQuery({ page, limit: 20 }) });
+      const { data } = await API.get(Endpoints.settings.root(), { params: buildQuery({ page, limit: 20 }) });
       const u = unwrapListResponse(data);
       setSettings(u.items);
       setMeta({ total: u.total, pages: u.pages, limit: u.limit });
@@ -44,7 +45,7 @@ export default function SettingsPage() {
 
   const handleSave = async (key) => {
     try {
-      await API.post("/settings", { key, value: editValues[key] });
+      await API.post(Endpoints.settings.root(), { key, value: editValues[key] });
       toast.success(`${key} updated`); load();
     } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
   };
@@ -52,7 +53,7 @@ export default function SettingsPage() {
   const handleSaveAll = async () => {
     try {
       for (const [key, value] of Object.entries(editValues)) {
-        await API.post("/settings", { key, value });
+        await API.post(Endpoints.settings.root(), { key, value });
       }
       toast.success("All settings saved"); load();
     } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
@@ -124,7 +125,7 @@ function NewSettingForm({ onSave }) {
   const handleAdd = async () => {
     if (!key) { toast.error("Key is required"); return; }
     try {
-      await API.post("/settings", { key, value });
+      await API.post(Endpoints.settings.root(), { key, value });
       toast.success("Setting added"); setKey(""); setValue(""); onSave();
     } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
   };

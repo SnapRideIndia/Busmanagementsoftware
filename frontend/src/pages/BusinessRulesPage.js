@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import API, { buildQuery, unwrapListResponse } from "../lib/api";
+import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -35,7 +36,7 @@ export default function BusinessRulesPage() {
     setFetchError(null);
     try {
       const params = buildQuery({ category, page, limit: 20 });
-      const { data } = await API.get("/business-rules", { params });
+      const { data } = await API.get(Endpoints.businessRules.root(), { params });
       const u = unwrapListResponse(data);
       setRules(u.items);
       setListMeta({ total: u.total, pages: u.pages, limit: u.limit });
@@ -60,7 +61,7 @@ export default function BusinessRulesPage() {
 
   const handleSave = async (rule) => {
     try {
-      await API.post("/business-rules", { rule_key: rule.rule_key, rule_value: editValues[rule.rule_key], category: rule.category, description: rule.description });
+      await API.post(Endpoints.businessRules.root(), { rule_key: rule.rule_key, rule_value: editValues[rule.rule_key], category: rule.category, description: rule.description });
       toast.success(`${rule.rule_key} updated`);
     } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
   };
@@ -68,7 +69,7 @@ export default function BusinessRulesPage() {
   const handleSaveAll = async () => {
     try {
       for (const rule of rules) {
-        await API.post("/business-rules", { rule_key: rule.rule_key, rule_value: editValues[rule.rule_key], category: rule.category, description: rule.description });
+        await API.post(Endpoints.businessRules.root(), { rule_key: rule.rule_key, rule_value: editValues[rule.rule_key], category: rule.category, description: rule.description });
       }
       toast.success("All rules saved"); load();
     } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
@@ -76,7 +77,7 @@ export default function BusinessRulesPage() {
 
   const handleAdd = async () => {
     try {
-      await API.post("/business-rules", addForm);
+      await API.post(Endpoints.businessRules.root(), addForm);
       toast.success("Rule added"); setAddOpen(false);
       setAddForm({ rule_key: "", rule_value: "", category: "general", description: "" }); load();
     } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
@@ -84,7 +85,7 @@ export default function BusinessRulesPage() {
 
   const handleDelete = async (key) => {
     if (!window.confirm(`Delete rule "${key}"?`)) return;
-    try { await API.delete(`/business-rules/${key}`); toast.success("Deleted"); load(); }
+    try { await API.delete(Endpoints.businessRules.remove(key)); toast.success("Deleted"); load(); }
     catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
   };
 

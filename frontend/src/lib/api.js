@@ -1,4 +1,5 @@
 import axios from "axios";
+import { Endpoints } from "./endpoints";
 
 /**
  * Backend origin without trailing slash.
@@ -33,7 +34,7 @@ API.interceptors.response.use(
       
       err.config._retry = true;
       try {
-        await API.post("/auth/refresh");
+        await API.post(Endpoints.auth.refresh());
         return API(err.config);
       } catch {
         window.location.href = "/login";
@@ -52,6 +53,16 @@ export function buildQuery(params) {
     q[k] = v;
   });
   return q;
+}
+
+/** Full GET URL for duty summary export (PDF/Excel); same auth cookies as the app origin when proxied. */
+export function buildDutiesSummaryExportUrl(fmt, filters) {
+  const params = new URLSearchParams();
+  Object.entries(buildQuery(filters)).forEach(([k, v]) => params.set(k, String(v)));
+  params.set("fmt", fmt);
+  const origin = getBackendOrigin();
+  const base = origin ? `${origin}/api` : "/api";
+  return `${base}/duties/summary-export?${params.toString()}`;
 }
 
 /** Normalize `{ items, total, page, limit, pages }` from paginated list APIs. */

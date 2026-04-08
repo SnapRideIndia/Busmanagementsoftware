@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import API, { formatApiError, getBackendOrigin } from "../lib/api";
+import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import RingLoader from "../components/RingLoader";
 import { formatDateIN, formatDateTimeIN } from "../lib/dates";
@@ -143,7 +144,7 @@ export default function ReportsViewPage() {
     setLoading(true);
     setError(null);
     try {
-      const { data } = await API.get("/reports", { params: { ...baseParams, page, limit: 20 } });
+      const { data } = await API.get(Endpoints.reports.run(), { params: { ...baseParams, page, limit: 20 } });
       setReport(data);
     } catch (err) {
       const msg = formatApiError(err.response?.data?.detail) || err.message || "Failed to load report";

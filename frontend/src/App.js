@@ -25,6 +25,7 @@ import SettingsPage from "./pages/SettingsPage";
 import RevenueDetailPage from "./pages/RevenueDetailPage";
 import KmDetailPage from "./pages/KmDetailPage";
 import DutyPage from "./pages/DutyPage";
+import DutySummaryPage from "./pages/DutySummaryPage";
 import PassengerDetailPage from "./pages/PassengerDetailPage";
 import InfractionsPage from "./pages/InfractionsPage";
 import BusinessRulesPage from "./pages/BusinessRulesPage";
@@ -34,22 +35,24 @@ import AlertsCenterPage from "./pages/AlertsCenterPage";
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
-  if (loading) return (
-    <div className="min-h-screen flex items-center justify-center bg-[#F8F9FA]">
-      <RingLoader size="lg" label="Signing in…" />
-    </div>
-  );
+  if (loading)
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#F8F9FA]">
+        <RingLoader size="lg" label="Signing in…" />
+      </div>
+    );
   if (!user) return <Navigate to="/login" replace />;
   return <Layout>{children}</Layout>;
 }
 
 function PublicRoute({ children }) {
   const { user, loading } = useAuth();
-  if (loading) return (
-    <div className="min-h-screen flex items-center justify-center bg-[#F8F9FA]">
-      <RingLoader label="Loading…" />
-    </div>
-  );
+  if (loading)
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#F8F9FA]">
+        <RingLoader label="Loading…" />
+      </div>
+    );
   if (user) return <Navigate to="/dashboard" replace />;
   return children;
 }
@@ -60,36 +63,233 @@ function App() {
       <Toaster position="top-right" richColors />
       <BrowserRouter>
         <Routes>
-          <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
-          <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-          <Route path="/tenders" element={<ProtectedRoute><TenderPage /></ProtectedRoute>} />
-          <Route path="/depots" element={<ProtectedRoute><DepotsPage /></ProtectedRoute>} />
-          <Route path="/bus-routes" element={<ProtectedRoute><RoutesPage /></ProtectedRoute>} />
-          <Route path="/bus-stops" element={<ProtectedRoute><StopsPage /></ProtectedRoute>} />
+          <Route
+            path="/login"
+            element={
+              <PublicRoute>
+                <LoginPage />
+              </PublicRoute>
+            }
+          />
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
+                <DashboardPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/tenders"
+            element={
+              <ProtectedRoute>
+                <TenderPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/depots"
+            element={
+              <ProtectedRoute>
+                <DepotsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/bus-routes"
+            element={
+              <ProtectedRoute>
+                <RoutesPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/bus-stops"
+            element={
+              <ProtectedRoute>
+                <StopsPage />
+              </ProtectedRoute>
+            }
+          />
           <Route path="/routes" element={<Navigate to="/bus-routes" replace />} />
-          <Route path="/buses" element={<ProtectedRoute><BusPage /></ProtectedRoute>} />
-          <Route path="/drivers" element={<ProtectedRoute><DriverPage /></ProtectedRoute>} />
-          <Route path="/conductors" element={<ProtectedRoute><ConductorsPage /></ProtectedRoute>} />
-          <Route path="/live-tracking" element={<ProtectedRoute><LiveTrackingPage /></ProtectedRoute>} />
+          <Route
+            path="/buses"
+            element={
+              <ProtectedRoute>
+                <BusPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/drivers"
+            element={
+              <ProtectedRoute>
+                <DriverPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/conductors"
+            element={
+              <ProtectedRoute>
+                <ConductorsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/live-tracking"
+            element={
+              <ProtectedRoute>
+                <LiveTrackingPage />
+              </ProtectedRoute>
+            }
+          />
           <Route path="/live-operations" element={<Navigate to="/live-tracking" replace />} />
-          <Route path="/energy" element={<ProtectedRoute><EnergyPage /></ProtectedRoute>} />
-          <Route path="/kpi" element={<ProtectedRoute><KpiPage /></ProtectedRoute>} />
-          <Route path="/deductions" element={<ProtectedRoute><DeductionPage /></ProtectedRoute>} />
-          <Route path="/billing" element={<ProtectedRoute><BillingPage /></ProtectedRoute>} />
-          <Route path="/reports" element={<ProtectedRoute><ReportsPage /></ProtectedRoute>} />
-          <Route path="/reports/view" element={<ProtectedRoute><ReportsViewPage /></ProtectedRoute>} />
-          <Route path="/incidents" element={<ProtectedRoute><IncidentPage /></ProtectedRoute>} />
-          <Route path="/alerts-center" element={<ProtectedRoute><AlertsCenterPage /></ProtectedRoute>} />
-          <Route path="/admin" element={<ProtectedRoute><AdminConsolePage /></ProtectedRoute>} />
-          <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
-          <Route path="/revenue-details" element={<ProtectedRoute><RevenueDetailPage /></ProtectedRoute>} />
-          <Route path="/km-details" element={<ProtectedRoute><KmDetailPage /></ProtectedRoute>} />
-          <Route path="/duties" element={<ProtectedRoute><DutyPage /></ProtectedRoute>} />
+          <Route
+            path="/energy"
+            element={
+              <ProtectedRoute>
+                <EnergyPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/kpi"
+            element={
+              <ProtectedRoute>
+                <KpiPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/deductions"
+            element={
+              <ProtectedRoute>
+                <DeductionPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/billing"
+            element={
+              <ProtectedRoute>
+                <BillingPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/reports"
+            element={
+              <ProtectedRoute>
+                <ReportsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/reports/view"
+            element={
+              <ProtectedRoute>
+                <ReportsViewPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/incidents"
+            element={
+              <ProtectedRoute>
+                <IncidentPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/alerts-center"
+            element={
+              <ProtectedRoute>
+                <AlertsCenterPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute>
+                <AdminConsolePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <ProtectedRoute>
+                <SettingsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/revenue-details"
+            element={
+              <ProtectedRoute>
+                <RevenueDetailPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/km-details"
+            element={
+              <ProtectedRoute>
+                <KmDetailPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/duties/summary"
+            element={
+              <ProtectedRoute>
+                <DutySummaryPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/duties"
+            element={
+              <ProtectedRoute>
+                <DutyPage />
+              </ProtectedRoute>
+            }
+          />
           <Route path="/trip-km-approvals" element={<Navigate to="/km-details?tab=approval" replace />} />
-          <Route path="/passenger-details" element={<ProtectedRoute><PassengerDetailPage /></ProtectedRoute>} />
-          <Route path="/infractions" element={<ProtectedRoute><InfractionsPage /></ProtectedRoute>} />
-          <Route path="/business-rules" element={<ProtectedRoute><BusinessRulesPage /></ProtectedRoute>} />
-          <Route path="/gcc-kpi" element={<ProtectedRoute><GccKpiPage /></ProtectedRoute>} />
+          <Route
+            path="/passenger-details"
+            element={
+              <ProtectedRoute>
+                <PassengerDetailPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/infractions"
+            element={
+              <ProtectedRoute>
+                <InfractionsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/business-rules"
+            element={
+              <ProtectedRoute>
+                <BusinessRulesPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/gcc-kpi"
+            element={
+              <ProtectedRoute>
+                <GccKpiPage />
+              </ProtectedRoute>
+            }
+          />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </BrowserRouter>

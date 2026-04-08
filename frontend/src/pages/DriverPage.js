@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import API, { formatApiError, buildQuery, unwrapListResponse, fetchAllPaginated, messageFromAxiosError } from "../lib/api";
+import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import TableLoadRows from "../components/TableLoadRows";
 import { Button } from "../components/ui/button";
@@ -38,7 +39,7 @@ export default function DriverPage() {
   useEffect(() => {
     (async () => {
       try {
-        const depots = await fetchAllPaginated("/depots", {});
+        const depots = await fetchAllPaginated(Endpoints.masters.depots.list(), {});
         setDepotNames(depots.map((x) => x.name).filter(Boolean).sort());
       } catch {
         setDepotNames([]);
@@ -49,7 +50,7 @@ export default function DriverPage() {
   useEffect(() => {
     (async () => {
       try {
-        const drivers = await fetchAllPaginated("/drivers", {});
+        const drivers = await fetchAllPaginated(Endpoints.masters.drivers.list(), {});
         setAllDriversForAssign(drivers);
       } catch {
         setAllDriversForAssign([]);
@@ -62,8 +63,8 @@ export default function DriverPage() {
     setFetchError(null);
     try {
       const [d, busItems] = await Promise.all([
-        API.get("/drivers", { params: buildQuery({ depot: filterDepot, status: filterStatus, page, limit: 20 }) }),
-        fetchAllPaginated("/buses", {}),
+        API.get(Endpoints.masters.drivers.list(), { params: buildQuery({ depot: filterDepot, status: filterStatus, page, limit: 20 }) }),
+        fetchAllPaginated(Endpoints.masters.buses.list(), {}),
       ]);
       const du = unwrapListResponse(d.data);
       setDrivers(du.items);
@@ -82,26 +83,26 @@ export default function DriverPage() {
 
   const handleSave = async () => {
     try {
-      if (editing) { await API.put(`/drivers/${editing}`, form); toast.success("Driver updated"); }
-      else { await API.post("/drivers", form); toast.success("Driver added"); }
+      if (editing) { await API.put(Endpoints.masters.drivers.update(editing), form); toast.success("Driver updated"); }
+      else { await API.post(Endpoints.masters.drivers.create(), form); toast.success("Driver added"); }
       setOpen(false); setEditing(null); setForm(emptyDriver); load();
     } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
   };
 
   const handleDelete = async (lic) => {
     if (!window.confirm("Delete this driver?")) return;
-    try { await API.delete(`/drivers/${lic}`); toast.success("Deleted"); load(); }
+    try { await API.delete(Endpoints.masters.drivers.remove(lic)); toast.success("Deleted"); load(); }
     catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
   };
 
   const viewPerf = async (lic) => {
-    try { const { data } = await API.get(`/drivers/${lic}/performance`); setPerf(data); setPerfOpen(true); }
+    try { const { data } = await API.get(Endpoints.masters.drivers.performance(lic)); setPerf(data); setPerfOpen(true); }
     catch {}
   };
 
   const handleAssign = async () => {
     try {
-      await API.put(`/drivers/${assignDriver}/assign-bus?bus_id=${assignBus}`);
+      await API.put(Endpoints.masters.drivers.assignBus(assignDriver, assignBus));
       toast.success("Bus assigned"); setAssignOpen(false); load();
     } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
   };

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import API, { formatApiError, buildQuery, unwrapListResponse, fetchAllPaginated, getBackendOrigin } from "../lib/api";
+import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import TableLoadRows from "../components/TableLoadRows";
 import { formatDateIN } from "../lib/dates";
@@ -71,7 +72,7 @@ export default function BillingPage() {
     setLoading(true);
     setFetchError(null);
     try {
-      const { data } = await API.get("/billing", {
+      const { data } = await API.get(Endpoints.billing.root(), {
         params: buildQuery({
           date_from: filterFrom,
           date_to: filterTo,
@@ -102,7 +103,10 @@ export default function BillingPage() {
   useEffect(() => {
     (async () => {
       try {
-        const [depots, buses] = await Promise.all([fetchAllPaginated("/depots", {}), fetchAllPaginated("/buses", {})]);
+        const [depots, buses] = await Promise.all([
+          fetchAllPaginated(Endpoints.masters.depots.list(), {}),
+          fetchAllPaginated(Endpoints.masters.buses.list(), {}),
+        ]);
         setDepotNames(depots.map((d) => d.name).filter(Boolean).sort());
         setAllBuses(buses);
       } catch {
@@ -119,7 +123,7 @@ export default function BillingPage() {
         return;
       }
       try {
-        const { data } = await API.get("/billing/trip-ids", {
+        const { data } = await API.get(Endpoints.billing.tripIds(), {
           params: buildQuery({
             period_start: form.period_start,
             period_end: form.period_end,
@@ -143,7 +147,7 @@ export default function BillingPage() {
     if (!form.period_start || !form.period_end) { toast.error("Select period"); return; }
     setGenerating(true);
     try {
-      const { data } = await API.post("/billing/generate", form);
+      const { data } = await API.post(Endpoints.billing.generate(), form);
       toast.success(`Invoice ${data.invoice_id} generated`);
       setGenOpen(false); load(); setSelected(data); setViewOpen(true);
     } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
@@ -151,7 +155,7 @@ export default function BillingPage() {
   };
 
   const viewInvoice = async (id) => {
-    try { const { data } = await API.get(`/billing/${id}`); setSelected(data); setViewOpen(true); }
+    try { const { data } = await API.get(Endpoints.billing.get(id)); setSelected(data); setViewOpen(true); }
     catch {}
   };
 

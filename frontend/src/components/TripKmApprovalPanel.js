@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import API, { formatApiError, buildQuery, unwrapListResponse, fetchAllPaginated, messageFromAxiosError } from "../lib/api";
+import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "./TablePaginationBar";
 import AsyncPanel from "./AsyncPanel";
 import { formatDateIN } from "../lib/dates";
@@ -72,8 +73,8 @@ export default function TripKmApprovalPanel() {
         limit: 20,
       });
       const [res, busItems] = await Promise.all([
-        API.get("/trip-km-approvals", { params }),
-        fetchAllPaginated("/buses", {}),
+        API.get(Endpoints.tripKmApprovals.list(), { params }),
+        fetchAllPaginated(Endpoints.masters.buses.list(), {}),
       ]);
       const u = unwrapListResponse(res.data);
       setRows(u.items);
@@ -154,7 +155,7 @@ export default function TripKmApprovalPanel() {
       toast.info("Select at least one row still awaiting first verification.");
       return;
     }
-    postBatch("/trip-km-approvals/traffic", keys);
+    postBatch(Endpoints.tripKmApprovals.approve(), keys);
   };
 
   const finalizeBulk = () => {
@@ -166,7 +167,7 @@ export default function TripKmApprovalPanel() {
       toast.info("Select rows with first verification complete and final verification still open.");
       return;
     }
-    postBatch("/trip-km-approvals/maintenance", keys);
+    postBatch(Endpoints.tripKmApprovals.finalize(), keys);
   };
 
   const recordExceptionAction = async (row, action) => {
@@ -186,7 +187,7 @@ export default function TripKmApprovalPanel() {
     ) || "";
     setActing(true);
     try {
-      await API.post("/trip-km-approvals/exception-action", {
+      await API.post(Endpoints.tripKmApprovals.exceptionAction(), {
         trip_key: row.trip_key,
         action,
         note: note.trim(),
@@ -210,7 +211,7 @@ export default function TripKmApprovalPanel() {
         variant="outline"
         className="h-8 text-xs border-amber-200 text-amber-900 hover:bg-amber-50"
         disabled={acting}
-        onClick={() => postBatch("/trip-km-approvals/traffic", [r.trip_key])}
+        onClick={() => postBatch(Endpoints.tripKmApprovals.approve(), [r.trip_key])}
       >
         Mark first verification complete
       </Button>
@@ -226,7 +227,7 @@ export default function TripKmApprovalPanel() {
         variant="outline"
         className="h-8 text-xs border-slate-300 text-slate-800 hover:bg-slate-50"
         disabled={acting}
-        onClick={() => postBatch("/trip-km-approvals/maintenance", [r.trip_key])}
+        onClick={() => postBatch(Endpoints.tripKmApprovals.finalize(), [r.trip_key])}
       >
         Mark final verification complete
       </Button>
@@ -268,12 +269,12 @@ export default function TripKmApprovalPanel() {
             </DropdownMenuItem>
           ) : null}
           {canFirstVerify ? (
-            <DropdownMenuItem onClick={() => postBatch("/trip-km-approvals/traffic", [r.trip_key])}>
+            <DropdownMenuItem onClick={() => postBatch(Endpoints.tripKmApprovals.approve(), [r.trip_key])}>
               Mark first verification complete
             </DropdownMenuItem>
           ) : null}
           {canFinalize ? (
-            <DropdownMenuItem onClick={() => postBatch("/trip-km-approvals/maintenance", [r.trip_key])}>
+            <DropdownMenuItem onClick={() => postBatch(Endpoints.tripKmApprovals.finalize(), [r.trip_key])}>
               Mark final verification complete
             </DropdownMenuItem>
           ) : null}

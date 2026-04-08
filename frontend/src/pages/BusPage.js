@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import API, { formatApiError, buildQuery, unwrapListResponse, fetchAllPaginated } from "../lib/api";
+import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import TableLoadRows from "../components/TableLoadRows";
 import { Button } from "../components/ui/button";
@@ -38,7 +39,7 @@ export default function BusPage() {
   useEffect(() => {
     (async () => {
       try {
-        const depots = await fetchAllPaginated("/depots", {});
+        const depots = await fetchAllPaginated(Endpoints.masters.depots.list(), {});
         setFleetDepots(depots.map((d) => d.name).filter(Boolean).sort());
       } catch {
         setFleetDepots([]);
@@ -51,9 +52,9 @@ export default function BusPage() {
     setFetchError(null);
     try {
       const [b, allBuses, tenderRows] = await Promise.all([
-        API.get("/buses", { params: buildQuery({ depot: filterDepot, status: filterStatus, page, limit: 20 }) }),
-        fetchAllPaginated("/buses", {}),
-        fetchAllPaginated("/tenders", {}),
+        API.get(Endpoints.masters.buses.list(), { params: buildQuery({ depot: filterDepot, status: filterStatus, page, limit: 20 }) }),
+        fetchAllPaginated(Endpoints.masters.buses.list(), {}),
+        fetchAllPaginated(Endpoints.masters.tenders.list(), {}),
       ]);
       const bu = unwrapListResponse(b.data);
       setBuses(bu.items);
@@ -74,26 +75,26 @@ export default function BusPage() {
   const handleSave = async () => {
     try {
       const payload = { ...form, capacity: Number(form.capacity) };
-      if (editing) { await API.put(`/buses/${editing}`, payload); toast.success("Bus updated"); }
-      else { await API.post("/buses", payload); toast.success("Bus added"); }
+      if (editing) { await API.put(Endpoints.masters.buses.update(editing), payload); toast.success("Bus updated"); }
+      else { await API.post(Endpoints.masters.buses.create(), payload); toast.success("Bus added"); }
       setOpen(false); setEditing(null); setForm(emptyBus); load();
     } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
   };
 
   const handleDelete = async (id) => {
     if (!window.confirm("Delete this bus?")) return;
-    try { await API.delete(`/buses/${id}`); toast.success("Deleted"); load(); }
+    try { await API.delete(Endpoints.masters.buses.remove(id)); toast.success("Deleted"); load(); }
     catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
   };
 
   const viewDetail = async (id) => {
-    try { const { data } = await API.get(`/buses/${id}`); setDetail(data); setDetailOpen(true); }
+    try { const { data } = await API.get(Endpoints.masters.buses.get(id)); setDetail(data); setDetailOpen(true); }
     catch {}
   };
 
   const handleAssign = async () => {
     try {
-      await API.put(`/buses/${assignBus}/assign-tender?tender_id=${assignTender}`);
+      await API.put(Endpoints.masters.buses.assignTender(assignBus, assignTender));
       toast.success("Tender assigned"); setAssignOpen(false); load();
     } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
   };

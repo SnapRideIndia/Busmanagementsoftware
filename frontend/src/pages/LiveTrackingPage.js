@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import API, { buildQuery, formatApiError, fetchAllPaginated } from "../lib/api";
+import { Endpoints } from "../lib/endpoints";
 import AsyncPanel from "../components/AsyncPanel";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -306,7 +307,7 @@ export default function LiveTrackingPage() {
   useEffect(() => {
     (async () => {
       try {
-        const items = await fetchAllPaginated("/buses", {});
+        const items = await fetchAllPaginated(Endpoints.masters.buses.list(), {});
         setAllBuses(items);
       } catch {
         setAllBuses([]);
@@ -328,8 +329,8 @@ export default function LiveTrackingPage() {
         resolved: alertResolved,
       });
       const [tp, al] = await Promise.all([
-        API.get("/telemetry/live-positions", { params: telemParams }),
-        API.get("/live-operations/alerts", { params: alertParams }),
+        API.get(Endpoints.operations.live.telemetryPositions(), { params: telemParams }),
+        API.get(Endpoints.operations.live.alerts(), { params: alertParams }),
       ]);
       setPositions(Array.isArray(tp.data) ? tp.data : []);
       setAlerts(Array.isArray(al.data) ? al.data : []);

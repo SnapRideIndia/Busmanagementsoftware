@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import API, { buildQuery, formatApiError } from "../lib/api";
+import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import AsyncPanel from "../components/AsyncPanel";
 import { formatChartAxisDate, formatDateIN, rechartsDateLabelFormatter } from "../lib/dates";
@@ -42,7 +43,7 @@ export default function PassengerDetailPage() {
         page,
         limit: 20,
       });
-      const { data: d } = await API.get("/passengers/details", { params });
+      const { data: d } = await API.get(Endpoints.passengers.details(), { params });
       setData(d);
     } catch (err) { console.error(err); }
     finally { setLoading(false); }

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import API, { buildQuery, unwrapListResponse, messageFromAxiosError } from "../lib/api";
+import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import TableLoadRows from "../components/TableLoadRows";
 import { Button } from "../components/ui/button";
@@ -42,7 +43,7 @@ export default function StopsPage() {
     setLoading(true);
     setFetchError(null);
     try {
-      const { data } = await API.get("/stop-master", {
+      const { data } = await API.get(Endpoints.masters.stops.list(), {
         params: buildQuery({ region: filterRegion, active: filterActive, search, page, limit: 20 }),
       });
       const u = unwrapListResponse(data);
@@ -82,10 +83,10 @@ export default function StopsPage() {
     };
     try {
       if (editingId) {
-        await API.put(`/stop-master/${encodeURIComponent(editingId)}`, payload);
+        await API.put(Endpoints.masters.stops.update(editingId), payload);
         toast.success("Stop updated");
       } else {
-        await API.post("/stop-master", { ...payload, stop_id: sid });
+        await API.post(Endpoints.masters.stops.create(), { ...payload, stop_id: sid });
         toast.success("Stop created");
       }
       setOpen(false);
@@ -101,7 +102,7 @@ export default function StopsPage() {
     if (!window.confirm(`Delete stop "${stopId}"? It must not be used on any route.`)) return;
     (async () => {
       try {
-        await API.delete(`/stop-master/${encodeURIComponent(stopId)}`);
+        await API.delete(Endpoints.masters.stops.remove(stopId));
         toast.success("Deleted");
         load();
       } catch (err) {

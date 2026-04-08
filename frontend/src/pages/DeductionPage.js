@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import API, { formatApiError, buildQuery, unwrapListResponse, fetchAllPaginated } from "../lib/api";
+import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import TableLoadRows from "../components/TableLoadRows";
 import { Button } from "../components/ui/button";
@@ -30,8 +31,8 @@ export default function DeductionPage() {
     setFetchError(null);
     try {
       const [rulesRes, busesRes] = await Promise.all([
-        API.get("/deductions/rules", { params: buildQuery({ page, limit: 20 }) }),
-        fetchAllPaginated("/buses", {}),
+        API.get(Endpoints.deductions.rules(), { params: buildQuery({ page, limit: 20 }) }),
+        fetchAllPaginated(Endpoints.masters.buses.list(), {}),
       ]);
       const u = unwrapListResponse(rulesRes.data);
       setRules(u.items);
@@ -56,7 +57,7 @@ export default function DeductionPage() {
     }
     try {
       const { data } = await API.post(
-        "/deductions/apply",
+        Endpoints.deductions.apply(),
         null,
         {
           params: buildQuery({

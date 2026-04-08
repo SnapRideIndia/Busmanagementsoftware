@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import API, { buildQuery, unwrapListResponse, formatApiError, fetchAllPaginated } from "../lib/api";
+import { Endpoints } from "../lib/endpoints";
 import AsyncPanel from "../components/AsyncPanel";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -22,7 +23,7 @@ export default function KpiPage() {
   useEffect(() => {
     (async () => {
       try {
-        const items = await fetchAllPaginated("/buses", {});
+        const items = await fetchAllPaginated(Endpoints.masters.buses.list(), {});
         setAllBuses(items);
       } catch { setAllBuses([]); }
     })();
@@ -41,7 +42,7 @@ export default function KpiPage() {
         depot,
         bus_id: busId,
       });
-      const { data } = await API.get("/kpi", { params });
+      const { data } = await API.get(Endpoints.kpi.root(), { params });
       setKpi(data);
     } catch (err) {
       setFetchError(formatApiError(err.response?.data?.detail) || err.message || "Failed to load KPI");

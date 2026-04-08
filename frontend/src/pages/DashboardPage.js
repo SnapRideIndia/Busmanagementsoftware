@@ -1,27 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import API, { buildQuery, formatApiError } from "../lib/api";
+import { Endpoints } from "../lib/endpoints";
 import { formatChartAxisDate, rechartsDateLabelFormatter } from "../lib/dates";
 import AsyncPanel from "../components/AsyncPanel";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import {
-  Bus,
-  Users,
-  Zap,
-  AlertTriangle,
-  FileText,
-  TrendingUp,
-  TrendingDown,
-  RefreshCw,
-  MapPin,
-  IndianRupee,
-  UsersRound,
-  Gauge,
-  Clock,
-} from "lucide-react";
+import { Bus, Users, Zap, AlertTriangle, FileText, TrendingUp, TrendingDown, RefreshCw, MapPin, IndianRupee, UsersRound, Gauge, Clock } from "lucide-react";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
 /** Compact KPI sizing aligned with NewVersion dashboard (tighter than earlier EBMS parity cards). */
@@ -37,15 +24,10 @@ function StatCard({ icon: Icon, label, value, sub, trend, color = "#C8102E", onC
         <div className="flex items-start justify-between gap-2 flex-1 min-h-0">
           <div className="min-w-0 flex-1">
             <p className="text-[9px] uppercase tracking-[0.06em] font-bold text-gray-400 mb-0.5">{label}</p>
-            <p
-              className="text-xl md:text-2xl font-bold text-[#1A1A1A] leading-tight"
-              style={{ fontFamily: "Inter, sans-serif" }}
-            >
+            <p className="text-xl md:text-2xl font-bold text-[#1A1A1A] leading-tight" style={{ fontFamily: "Inter, sans-serif" }}>
               {loading ? "…" : value}
             </p>
-            <div className="mt-0.5 min-h-[2.125rem]">
-              {sub ? <p className="text-[11px] leading-snug text-gray-500 line-clamp-2">{sub}</p> : null}
-            </div>
+            <div className="mt-0.5 min-h-[2.125rem]">{sub ? <p className="text-[11px] leading-snug text-gray-500 line-clamp-2">{sub}</p> : null}</div>
           </div>
           <div className="w-8 h-8 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: `${color}10` }}>
             <Icon className="w-4 h-4" style={{ color }} strokeWidth={1.75} />
@@ -88,7 +70,7 @@ export default function DashboardPage() {
         depot,
         bus_id: busId,
       });
-      const { data: d } = await API.get("/dashboard", { params });
+      const { data: d } = await API.get(Endpoints.dashboard.root(), { params });
       setData(d);
     } catch (err) {
       setError(formatApiError(err.response?.data?.detail) || err.message || "Could not load dashboard");
@@ -244,7 +226,13 @@ export default function DashboardPage() {
       <div className="flex flex-wrap gap-2 sm:gap-3 mb-2" data-testid="dashboard-filters">
         <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-36 sm:w-40 rounded-lg h-8 text-xs" data-testid="filter-date-from" />
         <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-36 sm:w-40 rounded-lg h-8 text-xs" data-testid="filter-date-to" />
-        <Select value={depot || "all"} onValueChange={(v) => { setDepot(v === "all" ? "" : v); setBusId(""); }}>
+        <Select
+          value={depot || "all"}
+          onValueChange={(v) => {
+            setDepot(v === "all" ? "" : v);
+            setBusId("");
+          }}
+        >
           <SelectTrigger className="w-44 sm:w-48 rounded-lg h-8 text-xs" data-testid="filter-depot">
             <SelectValue placeholder="All Depots" />
           </SelectTrigger>
@@ -274,8 +262,6 @@ export default function DashboardPage() {
           <TrendingUp size={13} className="mr-1.5" /> Filter
         </Button>
       </div>
-      <p className="text-[11px] text-gray-500 mb-3">Chart axis and tooltips use dates in DD/MM/YYYY (Indian format).</p>
-
       {error ? (
         <div className="mb-6">
           <AsyncPanel error={error} onRetry={fetchDashboard} minHeight="min-h-[120px]" />
@@ -291,7 +277,11 @@ export default function DashboardPage() {
               <div
                 key={kpi.label}
                 className="h-full min-w-0"
-                data-testid={`kpi-${kpi.label.toLowerCase().replace(/[\s()\/]/g, "-").replace(/-+/g, "-").replace(/-$/, "")}`}
+                data-testid={`kpi-${kpi.label
+                  .toLowerCase()
+                  .replace(/[\s()\/]/g, "-")
+                  .replace(/-+/g, "-")
+                  .replace(/-$/, "")}`}
               >
                 <StatCard
                   icon={kpi.icon}
@@ -312,7 +302,11 @@ export default function DashboardPage() {
               <div
                 key={kpi.label}
                 className="h-full min-w-0"
-                data-testid={`kpi-${kpi.label.toLowerCase().replace(/[\s()\/]/g, "-").replace(/-+/g, "-").replace(/-$/, "")}`}
+                data-testid={`kpi-${kpi.label
+                  .toLowerCase()
+                  .replace(/[\s()\/]/g, "-")
+                  .replace(/-+/g, "-")
+                  .replace(/-$/, "")}`}
               >
                 <StatCard
                   icon={kpi.icon}

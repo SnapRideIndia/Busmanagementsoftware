@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import API, { formatApiError, buildQuery, unwrapListResponse, fetchAllPaginated } from "../lib/api";
+import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import TableLoadRows from "../components/TableLoadRows";
 import { formatDateIN, formatDateTimeIN } from "../lib/dates";
@@ -14,8 +15,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Label } from "../components/ui/label";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip";
-import { ChevronDown, FileText, CheckCircle2, HelpCircle } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
+import { FileText, CheckCircle2, HelpCircle, Search, ChevronDown, MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
+import InfractionReportsPanel from "../components/InfractionReportsPanel";
 const catColors = {
   A: "bg-gray-100 text-gray-700", B: "bg-blue-100 text-blue-700",
   C: "bg-yellow-100 text-yellow-700", D: "bg-orange-100 text-orange-700",
@@ -33,8 +36,6 @@ function escalationLabel(row) {
   if (["A", "B", "C", "D", "E"].includes(cat)) return "Next slab if not rectified (max Rs.3,000)";
   return "Next slab if not rectified";
 }
-
-const fl = "text-xs font-medium text-gray-500";
 
 /** Select dropdown inside log dialog: viewport height, trigger width, no wider than screen */
 const logModalSelectContentClass =
@@ -69,12 +70,10 @@ export default function InfractionsPage() {
   const [logDepot, setLogDepot] = useState("");
   const [logBusId, setLogBusId] = useState("");
   const [logCategory, setLogCategory] = useState("");
-  const [logDriverId, setLogDriverId] = useState("");
   const [logInfractionCode, setLogInfractionCode] = useState("");
-  const [logRouteId, setLogRouteId] = useState("");
-  const [logRouteName, setLogRouteName] = useState("");
-  const [logRelatedIncident, setLogRelatedIncident] = useState("");
   const [logStatus, setLogStatus] = useState("");
+  const [catalogueSearch, setCatalogueSearch] = useState("");
+  const [logSearch, setLogSearch] = useState("");
   const [catPage, setCatPage] = useState(1);
   const [catMeta, setCatMeta] = useState({ total: 0, pages: 1, limit: 20 });
   const [logPage, setLogPage] = useState(1);
@@ -84,7 +83,6 @@ export default function InfractionsPage() {
   const [logLoading, setLogLoading] = useState(false);
   const [logError, setLogError] = useState(null);
   const [logAdvancedOpen, setLogAdvancedOpen] = useState(false);
-  const [logFiltersExpanded, setLogFiltersExpanded] = useState(false);
   const [closeInfractionOpen, setCloseInfractionOpen] = useState(false);
   const [closeInfractionId, setCloseInfractionId] = useState("");
   const [closeInfractionRemarks, setCloseInfractionRemarks] = useState("");
@@ -94,8 +92,10 @@ export default function InfractionsPage() {
     setCatError(null);
     try {
       const [c, busItems] = await Promise.all([
-        API.get("/infractions/catalogue", { params: buildQuery({ page: catPage, limit: 20 }) }),
-        fetchAllPaginated("/buses", {}),
+        API.get(Endpoints.infractions.catalogue(), {
+          params: buildQuery({ page: catPage, limit: 20, search: catalogueSearch }),
+        }),
+        fetchAllPaginated(Endpoints.masters.buses.list(), {}),
       ]);
       const cu = unwrapListResponse(c.data);
       setCatalogue(cu.items);
@@ -107,12 +107,12 @@ export default function InfractionsPage() {
     } finally {
       setCatLoading(false);
     }
-  }, [catPage]);
+  }, [catPage, catalogueSearch]);
 
   useEffect(() => {
     (async () => {
       try {
-        setCatalogueAll(await fetchAllPaginated("/infractions/catalogue", {}));
+        setCatalogueAll(await fetchAllPaginated(Endpoints.infractions.catalogue(), {}));
       } catch {
         setCatalogueAll([]);
       }
@@ -129,16 +129,13 @@ export default function InfractionsPage() {
         depot: logDepot,
         bus_id: logBusId,
         category: logCategory,
-        driver_id: logDriverId,
         infraction_code: logInfractionCode,
-        route_id: logRouteId,
-        route_name: logRouteName,
-        related_incident_id: logRelatedIncident,
         status: logStatus,
+        search: logSearch,
         page: logPage,
         limit: 20,
       });
-      const { data } = await API.get("/infractions/logged", { params });
+      const { data } = await API.get(Endpoints.infractions.logged(), { params });
       const u = unwrapListResponse(data);
       setLogged(u.items);
       setLogMeta({ total: u.total, pages: u.pages, limit: u.limit });
@@ -148,12 +145,15 @@ export default function InfractionsPage() {
     } finally {
       setLogLoading(false);
     }
-  }, [dateFrom, dateTo, logDepot, logBusId, logCategory, logDriverId, logInfractionCode, logRouteId, logRouteName, logRelatedIncident, logStatus, logPage]);
+  }, [dateFrom, dateTo, logDepot, logBusId, logCategory, logInfractionCode, logStatus, logSearch, logPage]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     setLogPage(1);
-  }, [dateFrom, dateTo, logDepot, logBusId, logCategory, logDriverId, logInfractionCode, logRouteId, logRouteName, logRelatedIncident, logStatus]);
+  }, [dateFrom, dateTo, logDepot, logBusId, logCategory, logInfractionCode, logStatus, logSearch]);
+  useEffect(() => {
+    setCatPage(1);
+  }, [catalogueSearch]);
   useEffect(() => {
     if (tab === "logged") loadLogged();
   }, [tab, loadLogged]);
@@ -196,7 +196,7 @@ export default function InfractionsPage() {
       };
       if (logForm.deductible === "true") payload.deductible = true;
       else if (logForm.deductible === "false") payload.deductible = false;
-      await API.post("/infractions/log", payload);
+      await API.post(Endpoints.infractions.log(), payload);
       toast.success("Infraction logged");
       setLogOpen(false);
       setLogForm(emptyLogForm());
@@ -215,7 +215,7 @@ export default function InfractionsPage() {
   const submitCloseInfraction = async () => {
     if (!closeInfractionId) return;
     try {
-      await API.post(`/infractions/${closeInfractionId}/close`, {
+      await API.post(Endpoints.infractions.close(closeInfractionId), {
         status: "closed",
         close_remarks: closeInfractionRemarks.trim(),
       });
@@ -230,7 +230,7 @@ export default function InfractionsPage() {
 
   const handleUnderReview = async (id) => {
     try {
-      await API.post(`/infractions/${id}/close`, { status: "under_review" });
+      await API.post(Endpoints.infractions.close(id), { status: "under_review" });
       toast.success("Set to under review");
       loadLogged();
     } catch (err) {
@@ -240,7 +240,6 @@ export default function InfractionsPage() {
 
   const selectedBusForLog = buses.find((b) => b.bus_id === logForm.bus_id);
   const depotFromBusLocked = Boolean(logForm.bus_id && String(selectedBusForLog?.depot || "").trim());
-
   return (
     <div data-testid="infractions-page">
       <div className="page-header">
@@ -253,7 +252,7 @@ export default function InfractionsPage() {
       </div>
 
       <p className="page-lead">
-        Schedule-S <strong>fine catalogue</strong> and <strong>logged penalties</strong>. Non-safety A–D capped at 5% of monthly due; safety and E/F/G are not.{" "}
+        Manage Schedule-S infractions and review logged penalties.{" "}
         <Link to="/incidents" className="text-[#C8102E] font-medium hover:underline">Incidents</Link>
         {" · "}
         <Link to="/gcc-kpi" className="text-[#C8102E] font-medium hover:underline">GCC KPI</Link>
@@ -266,11 +265,28 @@ export default function InfractionsPage() {
         <Button variant={tab === "catalogue" ? "default" : "outline"} onClick={() => setTab("catalogue")} className={tab === "catalogue" ? "bg-[#C8102E] hover:bg-[#A50E25]" : ""}>Catalogue ({catMeta.total})</Button>
         <Button variant={tab === "logged" ? "default" : "outline"} onClick={() => setTab("logged")} className={tab === "logged" ? "bg-[#C8102E] hover:bg-[#A50E25]" : ""}>Logged ({logMeta.total})</Button>
       </div>
+      <Card className="mb-4 border-gray-200 shadow-sm">
+        <CardContent className="py-2.5 text-[12px] text-gray-600">
+          Category guide: A-B minor, C-D major, E critical safety, F severe breakdown, G fatal accident.
+        </CardContent>
+      </Card>
 
       {tab === "catalogue" && (
         <Card className="border-gray-200 shadow-sm">
-          <CardContent className="p-0">
-            <Table>
+          <CardContent className="p-0 space-y-0">
+            <div className="p-3 border-b bg-gray-50/50">
+              <div className="relative max-w-md">
+                <Search className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <Input
+                  value={catalogueSearch}
+                  onChange={(e) => setCatalogueSearch(e.target.value)}
+                  placeholder="Search all catalogue rows..."
+                  className="pl-8 h-9 bg-white"
+                  data-testid="infractions-catalogue-search"
+                />
+              </div>
+            </div>
+            <Table className="text-[12px]">
               <TableHeader><TableRow className="table-header">
                 <TableHead>Code</TableHead><TableHead>Category</TableHead><TableHead>Description</TableHead>
                 <TableHead className="text-right">Amount (Rs)</TableHead><TableHead>Safety</TableHead><TableHead className="text-right">Resolve days</TableHead><TableHead>Cap rule</TableHead><TableHead>Escalation</TableHead>
@@ -313,45 +329,31 @@ export default function InfractionsPage() {
       {tab === "logged" && (
         <>
           <TooltipProvider delayDuration={300}>
-          <div className="mb-4 space-y-2">
-            <Collapsible open={logFiltersExpanded} onOpenChange={setLogFiltersExpanded}>
-              <div className="flex flex-wrap gap-3 items-end">
-                <div className="space-y-1">
-                  <span className={fl}>From</span>
-                  <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-40" aria-label="Date from" />
-                </div>
-                <div className="space-y-1">
-                  <span className={fl}>To</span>
-                  <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-40" aria-label="Date to" />
-                </div>
-                <div className="space-y-1">
-                  <span className={fl}>Depot</span>
+            <div className="mb-4 space-y-3">
+              <Card className="border-gray-200 shadow-sm">
+                <CardContent className="p-3 flex flex-wrap gap-2 sm:gap-3 items-end">
+                  <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-40 h-9" aria-label="Date from" />
+                  <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-40 h-9" aria-label="Date to" />
                   <Select value={logDepot || "all"} onValueChange={(v) => { setLogDepot(v === "all" ? "" : v); setLogBusId(""); }}>
-                    <SelectTrigger className="w-44"><SelectValue placeholder="All" /></SelectTrigger>
+                    <SelectTrigger className="w-44 h-9"><SelectValue placeholder="All depots" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Depots</SelectItem>
+                      <SelectItem value="all">All depots</SelectItem>
                       {[...new Set(buses.map((b) => b.depot).filter(Boolean))].sort().map((d) => (
                         <SelectItem key={d} value={d}>{d}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
-                <div className="space-y-1">
-                  <span className={fl}>Bus</span>
                   <Select value={logBusId || "all"} onValueChange={(v) => setLogBusId(v === "all" ? "" : v)}>
-                    <SelectTrigger className="w-36"><SelectValue placeholder="All" /></SelectTrigger>
+                    <SelectTrigger className="w-40 h-9"><SelectValue placeholder="All buses" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Buses</SelectItem>
+                      <SelectItem value="all">All buses</SelectItem>
                       {(logDepot ? buses.filter((b) => b.depot === logDepot) : buses).map((b) => (
                         <SelectItem key={b.bus_id} value={b.bus_id}>{b.bus_id}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
-                <div className="space-y-1">
-                  <span className={fl}>Infraction code</span>
                   <Select value={logInfractionCode || "all"} onValueChange={(v) => setLogInfractionCode(v === "all" ? "" : v)}>
-                    <SelectTrigger className="w-36"><SelectValue placeholder="All" /></SelectTrigger>
+                    <SelectTrigger className="w-40 h-9"><SelectValue placeholder="All codes" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All codes</SelectItem>
                       {[...catalogueAll].sort((a, b) => a.code.localeCompare(b.code)).map((c) => (
@@ -359,11 +361,15 @@ export default function InfractionsPage() {
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
-                <div className="space-y-1">
-                  <span className={fl}>Status</span>
+                  <Select value={logCategory || "all"} onValueChange={(v) => setLogCategory(v === "all" ? "" : v)}>
+                    <SelectTrigger className="w-28 h-9"><SelectValue placeholder="All cat" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All</SelectItem>
+                      {Object.keys(catColors).map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
                   <Select value={logStatus || "all"} onValueChange={(v) => setLogStatus(v === "all" ? "" : v)}>
-                    <SelectTrigger className="w-36"><SelectValue placeholder="All" /></SelectTrigger>
+                    <SelectTrigger className="w-36 h-9"><SelectValue placeholder="All status" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All</SelectItem>
                       <SelectItem value="open">Open</SelectItem>
@@ -371,64 +377,56 @@ export default function InfractionsPage() {
                       <SelectItem value="closed">Closed</SelectItem>
                     </SelectContent>
                   </Select>
-                </div>
-                <Button onClick={loadLogged} variant="outline">
-                  Refresh
-                </Button>
-                <CollapsibleTrigger asChild>
-                  <Button variant="ghost" type="button" className="flex h-9 items-center gap-1 px-2 text-gray-600 hover:text-gray-900">
-                    <span className="text-sm font-medium text-gray-700">More filters</span>
-                    <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${logFiltersExpanded ? "rotate-180" : ""}`} />
+                  <div className="relative min-w-[220px] flex-1">
+                    <Search className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                    <Input
+                      value={logSearch}
+                      onChange={(e) => setLogSearch(e.target.value)}
+                      placeholder="Search all logged infractions..."
+                      className="pl-8 h-9"
+                      data-testid="infractions-logged-search"
+                    />
+                  </div>
+                  <Button onClick={loadLogged} variant="outline" className="h-9">Refresh</Button>
+                  <Button
+                    onClick={() => {
+                      setDateFrom("");
+                      setDateTo("");
+                      setLogDepot("");
+                      setLogBusId("");
+                      setLogInfractionCode("");
+                      setLogCategory("");
+                      setLogStatus("");
+                      setLogSearch("");
+                    }}
+                    variant="ghost"
+                    className="h-9"
+                  >
+                    Clear
                   </Button>
-                </CollapsibleTrigger>
-              </div>
-              <CollapsibleContent>
-                <div className="flex flex-wrap gap-3 pt-3 mt-2 border-t border-gray-100">
-                  <div className="space-y-1">
-                    <span className={fl}>Category</span>
-                    <Select value={logCategory || "all"} onValueChange={(v) => setLogCategory(v === "all" ? "" : v)}>
-                      <SelectTrigger className="w-24"><SelectValue placeholder="All" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All</SelectItem>
-                        {Object.keys(catColors).map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1">
-                    <span className={fl}>Driver</span>
-                    <Input value={logDriverId} onChange={(e) => setLogDriverId(e.target.value)} className="w-32 font-mono text-xs" placeholder="License no." />
-                  </div>
-                  <div className="space-y-1">
-                    <span className={fl}>Route ID</span>
-                    <Input value={logRouteId} onChange={(e) => setLogRouteId(e.target.value)} className="w-28 font-mono text-xs" placeholder="Route ID" />
-                  </div>
-                  <div className="space-y-1">
-                    <span className={fl}>Route name</span>
-                    <Input value={logRouteName} onChange={(e) => setLogRouteName(e.target.value)} className="w-32 text-xs" placeholder="Contains…" />
-                  </div>
-                  <div className="space-y-1">
-                    <span className={fl}>Incident ID</span>
-                    <Input value={logRelatedIncident} onChange={(e) => setLogRelatedIncident(e.target.value)} className="w-36 font-mono text-xs" placeholder="INC-…" />
-                  </div>
-                </div>
-              </CollapsibleContent>
-            </Collapsible>
-          </div>
+                </CardContent>
+              </Card>
+              <InfractionReportsPanel
+                dateFrom={dateFrom}
+                dateTo={dateTo}
+                depot={logDepot}
+                busId={logBusId}
+                category={logCategory}
+                infractionCode={logInfractionCode}
+              />
+            </div>
           <Card className="border-gray-200 shadow-sm overflow-x-auto">
-            <CardContent className="p-0 min-w-[1040px]">
-              <Table>
+            <CardContent className="p-0 min-w-[960px]">
+              <Table className="text-[12px]">
                 <TableHeader><TableRow className="table-header">
                   <TableHead>Detected</TableHead>
-                  <TableHead>Logged at</TableHead>
                   <TableHead>Code</TableHead>
-                  <TableHead>Category</TableHead>
                   <TableHead>Bus</TableHead>
                   <TableHead>Depot</TableHead>
                   <TableHead>Description</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Resolve by</TableHead>
-                  <TableHead>Logged by</TableHead>
+                  <TableHead>Logged</TableHead>
                   <TableHead className="text-right">
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -448,7 +446,7 @@ export default function InfractionsPage() {
                 </TableRow></TableHeader>
                 <TableBody>
                   <TableLoadRows
-                    colSpan={12}
+                    colSpan={9}
                     loading={logLoading}
                     error={logError}
                     onRetry={loadLogged}
@@ -458,30 +456,46 @@ export default function InfractionsPage() {
                     {logged.map((l) => (
                       <TableRow key={l.id} className="hover:bg-[#FAFAFA]" title={l.id}>
                         <TableCell className="text-sm whitespace-nowrap">{formatDateIN(l.date)}</TableCell>
-                        <TableCell className="text-sm whitespace-nowrap tabular-nums">{formatDateTimeIN(l.created_at)}</TableCell>
                         <TableCell className="font-mono" title={l.id}>{l.infraction_code}</TableCell>
-                        <TableCell><Badge className={`${catColors[l.category]} hover:${catColors[l.category]}`}>{l.category}</Badge></TableCell>
                         <TableCell className="font-mono">{l.bus_id || "—"}</TableCell>
                         <TableCell className="text-sm max-w-[100px] truncate">{l.depot || "—"}</TableCell>
-                        <TableCell className="text-sm max-w-[200px]">{l.description}</TableCell>
+                        <TableCell className="text-sm max-w-[260px]">
+                          <div className="font-medium text-gray-900">{l.description}</div>
+                          <div className="mt-0.5"><Badge className={`${catColors[l.category]} hover:${catColors[l.category]}`}>{l.category}</Badge></div>
+                        </TableCell>
                         <TableCell className="text-right font-mono text-[#DC2626] whitespace-nowrap">Rs.{l.amount?.toLocaleString()}</TableCell>
                         <TableCell>
                           <Badge variant={l.status === "closed" ? "secondary" : "outline"}>{l.status || "open"}</Badge>
                         </TableCell>
-                        <TableCell className="text-sm whitespace-nowrap">{l.resolve_by ? formatDateIN(l.resolve_by) : "—"}</TableCell>
-                        <TableCell className="text-sm max-w-[100px] truncate">{l.logged_by}</TableCell>
+                        <TableCell className="text-xs text-gray-600 whitespace-nowrap">
+                          <div>{formatDateTimeIN(l.created_at)}</div>
+                          <div className="truncate max-w-[120px]">{l.logged_by || "—"}</div>
+                        </TableCell>
                         <TableCell className="text-right">
                           {l.status !== "closed" ? (
-                            <div className="flex flex-wrap justify-end gap-1">
-                              {(l.status || "open") === "open" ? (
-                                <Button variant="secondary" size="sm" type="button" onClick={() => handleUnderReview(l.id)} aria-label="Mark under review">
-                                  Under review
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  type="button"
+                                  className="ml-auto h-8 w-8"
+                                  aria-label="Open actions"
+                                >
+                                  <MoreHorizontal className="h-4 w-4" />
                                 </Button>
-                              ) : null}
-                              <Button variant="outline" size="sm" type="button" onClick={() => openCloseInfractionDialog(l.id)}>
-                                <CheckCircle2 size={13} className="mr-1" /> Close
-                              </Button>
-                            </div>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-44">
+                                {(l.status || "open") === "open" ? (
+                                  <DropdownMenuItem onClick={() => handleUnderReview(l.id)}>
+                                    Under review
+                                  </DropdownMenuItem>
+                                ) : null}
+                                <DropdownMenuItem onClick={() => openCloseInfractionDialog(l.id)}>
+                                  <CheckCircle2 size={13} className="mr-1.5" /> Close
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           ) : (
                             <span className="text-xs text-gray-500">Closed</span>
                           )}

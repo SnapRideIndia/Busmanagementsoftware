@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import API, { formatApiError } from "../lib/api";
+import { Endpoints } from "../lib/endpoints";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
@@ -39,7 +40,7 @@ export default function LoginPage() {
   const handleForgot = async (e) => {
     e.preventDefault();
     try {
-      const { data } = await API.post("/auth/forgot-password", { email: forgotEmail });
+      const { data } = await API.post(Endpoints.auth.forgotPassword(), { email: forgotEmail });
       setForgotMsg(data.message || "Reset link sent");
     } catch (err) {
       setForgotMsg(formatApiError(err.response?.data?.detail));

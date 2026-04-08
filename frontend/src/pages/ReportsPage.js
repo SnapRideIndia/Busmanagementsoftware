@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import API, { buildQuery, formatApiError, fetchAllPaginated, getBackendOrigin } from "../lib/api";
+import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import AsyncPanel from "../components/AsyncPanel";
 import RingLoader from "../components/RingLoader";
@@ -284,7 +285,7 @@ export default function ReportsPage() {
   useEffect(() => {
     (async () => {
       try {
-        const { data } = await API.get("/reports/catalog");
+        const { data } = await API.get(Endpoints.reports.catalog());
         setCatalog(Array.isArray(data) ? data : []);
         setCatalogError(null);
       } catch (e) {
@@ -297,7 +298,10 @@ export default function ReportsPage() {
   useEffect(() => {
     (async () => {
       try {
-        const [buses, m] = await Promise.all([fetchAllPaginated("/buses", {}), API.get("/incidents/meta")]);
+        const [buses, m] = await Promise.all([
+          fetchAllPaginated(Endpoints.masters.buses.list(), {}),
+          API.get(Endpoints.incidents.meta()),
+        ]);
         setAllBuses(buses);
         setMeta(m.data);
       } catch {
@@ -318,7 +322,7 @@ export default function ReportsPage() {
     if (!filters.includes("route")) return;
     (async () => {
       try {
-        const { data } = await API.get("/revenue/details", { params: { limit: 1, page: 1 } });
+        const { data } = await API.get(Endpoints.revenue.details(), { params: { limit: 1, page: 1 } });
         setRoutesList(data.routes || []);
       } catch {
         setRoutesList([]);
@@ -475,7 +479,7 @@ export default function ReportsPage() {
     setLoading(true);
     setPageError(null);
     try {
-      const { data } = await API.get("/reports", { params: buildParamsForEntry(selected, p) });
+      const { data } = await API.get(Endpoints.reports.run(), { params: buildParamsForEntry(selected, p) });
       setReport(data);
       setPage(p);
     } catch (err) {

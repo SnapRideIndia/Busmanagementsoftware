@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import API from "../lib/api";
+import { Endpoints } from "../lib/endpoints";
 
 const AuthContext = createContext(null);
 
@@ -9,7 +10,7 @@ export function AuthProvider({ children }) {
 
   const checkAuth = useCallback(async () => {
     try {
-      const { data } = await API.get("/auth/me");
+      const { data } = await API.get(Endpoints.auth.me());
       setUser(data);
     } catch {
       setUser(false);
@@ -23,14 +24,14 @@ export function AuthProvider({ children }) {
   }, [checkAuth]);
 
   const login = async (email, password) => {
-    await API.post("/auth/login", { email, password });
-    const { data } = await API.get("/auth/me");
+    await API.post(Endpoints.auth.login(), { email, password });
+    const { data } = await API.get(Endpoints.auth.me());
     setUser(data);
     return data;
   };
 
   const logout = async () => {
-    await API.post("/auth/logout");
+    await API.post(Endpoints.auth.logout());
     setUser(false);
   };
 
