@@ -541,8 +541,19 @@ async def run_seed_data():
             continue
         tkm = sum(float(t.get("actual_km", 0) or 0) for t in dep_trips)
         skm = sum(float(t.get("scheduled_km", 0) or 0) for t in dep_trips)
-        avg_pk = 85.0
-        base_payment = tkm * avg_pk
+        bus_km = {}
+        for t in dep_trips:
+            bid = str(t.get("bus_id", "") or "")
+            bus_km[bid] = bus_km.get(bid, 0.0) + float(t.get("actual_km", 0) or 0)
+        weighted_pk = 0.0
+        for brow in dep_bus_rows:
+            bid = str(brow.get("bus_id", "") or "")
+            km = float(bus_km.get(bid, 0.0) or 0.0)
+            tid = str(brow.get("tender_id", "") or "")
+            pk_rate = float(tender_by_id.get(tid, {}).get("pk_rate", 0) or 0)
+            weighted_pk += km * pk_rate
+        base_payment = weighted_pk
+        avg_pk = (weighted_pk / tkm) if tkm > 0 else 0.0
         dep_energy = [e for e in energy_docs if e.get("bus_id") in dep_buses]
         actual_kwh = sum(float(e.get("units_charged", 0) or 0) for e in dep_energy)
         kwh_by_bus = {b["bus_id"]: float(b.get("kwh_per_km", 1.0) or 1.0) for b in active_buses}
@@ -603,6 +614,7 @@ async def run_seed_data():
             bid = e.get("bus_id", "")
             if bid in bw_map:
                 bw_map[bid]["energy_kwh"] += float(e.get("units_charged", 0) or 0)
+        final_payable = round(base_payment + energy_adj + km_inc - total_ded, 2)
         billing_seed_docs.append(
             {
                 "invoice_id": f"INV-SEED-{dep.replace(' ', '')[:8].upper()}",
@@ -637,7 +649,8 @@ async def run_seed_data():
                 "infractions_deduction": round(infra_ded, 2),
                 "infractions_breakdown": {"total_applied": round(infra_ded, 2), "rows": []},
                 "total_deduction": round(total_ded, 2),
-                "final_payable": round(base_payment + energy_adj + km_inc - total_ded, 2),
+                "final_payable": final_payable,
+                "total_due": final_payable,
                 "bus_wise_summary": [
                     {
                         **v,

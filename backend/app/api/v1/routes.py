@@ -152,6 +152,41 @@ def _add_days_ymd(ymd: str, days: int) -> str:
     return (dt + timedelta(days=max(0, int(days)))).strftime("%Y-%m-%d")
 
 
+def _quarter_bounds_for_date(dt: datetime) -> tuple[str, str]:
+    q_start_month = ((dt.month - 1) // 3) * 3 + 1
+    start = datetime(dt.year, q_start_month, 1)
+    if q_start_month == 10:
+        nxt = datetime(dt.year + 1, 1, 1)
+    else:
+        nxt = datetime(dt.year, q_start_month + 3, 1)
+    end = nxt - timedelta(days=1)
+    return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+
+
+def _is_full_quarter_range(period_start: str, period_end: str) -> bool:
+    ds = _parse_ymd(period_start)
+    de = _parse_ymd(period_end)
+    if not ds or not de:
+        return False
+    q_start, q_end = _quarter_bounds_for_date(ds)
+    return period_start[:10] == q_start and period_end[:10] == q_end
+
+
+def _weighted_pk_metrics(trips: list[dict], bus_map: dict[str, dict], tender_map: dict[str, dict]) -> tuple[float, float, float]:
+    total_km = 0.0
+    weighted_pk = 0.0
+    for t in trips or []:
+        bid = str(t.get("bus_id", "") or "")
+        km = float(t.get("actual_km", 0) or 0)
+        total_km += km
+        bus = bus_map.get(bid, {})
+        tender = tender_map.get(str(bus.get("tender_id", "") or ""), {})
+        pk_rate = float(tender.get("pk_rate", 0) or 0)
+        weighted_pk += km * pk_rate
+    avg_pk_rate = (weighted_pk / total_km) if total_km > 0 else 0.0
+    return total_km, weighted_pk, avg_pk_rate
+
+
 def _incident_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -2015,15 +2050,16 @@ async def apply_deductions(
     trips = await db.trip_data.find(trip_q, {"_id": 0}).to_list(3000)
     tenders = await db.tenders.find({}, {"_id": 0}).to_list(100)
     tender_map = {t["tender_id"]: t for t in tenders}
-    buses = await db.buses.find({}, {"_id": 0}).to_list(1000)
+    trip_bus_ids = sorted({str(t.get("bus_id", "") or "") for t in trips if str(t.get("bus_id", "") or "")})
+    bus_query: dict = {}
+    if trip_bus_ids:
+        bus_query["bus_id"] = {"$in": trip_bus_ids}
+    buses = await db.buses.find(bus_query, {"_id": 0}).to_list(1000)
     bus_map = {b["bus_id"]: b for b in buses}
     total_scheduled = sum(t.get("scheduled_km", 0) for t in trips)
-    total_actual = sum(t.get("actual_km", 0) for t in trips)
+    total_actual, weighted_pk, avg_pk_rate = _weighted_pk_metrics(trips, bus_map, tender_map)
     missed_km = max(0, total_scheduled - total_actual)
-    avg_pk_rate = 0
-    if tenders:
-        avg_pk_rate = sum(t.get("pk_rate", 0) for t in tenders) / len(tenders)
-    base_payment = total_actual * avg_pk_rate
+    base_payment = weighted_pk
     availability_deduction = missed_km * avg_pk_rate
     performance_deduction = 0
     system_deduction = 0
@@ -2075,6 +2111,11 @@ async def apply_deductions(
 async def generate_invoice(req: BillingGenerateReq, _: dict = Depends(require_permission("finance.billing.create"))):
     period_start = req.period_start
     period_end = req.period_end
+    if not _is_full_quarter_range(period_start, period_end):
+        raise HTTPException(
+            status_code=400,
+            detail="Billing period must be a full calendar quarter (e.g. 2026-01-01 to 2026-03-31).",
+        )
     depot = req.depot
     bus_id = _norm_q(req.bus_id)
     trip_id = _norm_q(req.trip_id)
@@ -2126,21 +2167,14 @@ async def generate_invoice(req: BillingGenerateReq, _: dict = Depends(require_pe
         revenue_query["trip_id"] = trip_id
     revenue_rows = await db.revenue_data.find(revenue_query, {"_id": 0}).to_list(5000)
     # Step 1: Total KM
-    total_km = sum(t.get("actual_km", 0) for t in trips)
     scheduled_km = sum(t.get("scheduled_km", 0) for t in trips)
     # Step 2: PK Rate (weighted average by bus tender)
-    bus_km = {}
+    bus_km: dict[str, float] = {}
     for t in trips:
-        bid = t.get("bus_id", "")
-        bus_km[bid] = bus_km.get(bid, 0) + t.get("actual_km", 0)
-    weighted_pk = 0
-    for bid, km in bus_km.items():
-        bus = bus_map.get(bid, {})
-        tender = tender_map.get(bus.get("tender_id", ""), {})
-        pk_rate = tender.get("pk_rate", 0)
-        weighted_pk += km * pk_rate
+        bid = str(t.get("bus_id", "") or "")
+        bus_km[bid] = bus_km.get(bid, 0.0) + float(t.get("actual_km", 0) or 0)
+    total_km, weighted_pk, avg_pk_rate = _weighted_pk_metrics(trips, bus_map, tender_map)
     base_payment = weighted_pk
-    avg_pk_rate = weighted_pk / total_km if total_km > 0 else 0
     billing_rules_docs = await db.business_rules.find({"category": "billing"}, {"_id": 0}).to_list(100)
     billing_rules = {r.get("rule_key", ""): r.get("rule_value", "") for r in billing_rules_docs}
     try:
@@ -2149,25 +2183,37 @@ async def generate_invoice(req: BillingGenerateReq, _: dict = Depends(require_pe
         excess_km_factor = 0.0
     # Step 3: Energy
     bus_energy = {}
+    actual_cost = 0.0
+    tariff_weighted = 0.0
+    tariff_units = 0.0
     for e in energy:
-        bid = e.get("bus_id", "")
+        bid = str(e.get("bus_id", "") or "")
+        units = float(e.get("units_charged", 0) or 0)
+        tariff = float(e.get("tariff_rate", 10) or 10)
         if bid not in bus_energy:
-            bus_energy[bid] = {"actual": 0, "tariff": e.get("tariff_rate", 10)}
-        bus_energy[bid]["actual"] += e.get("units_charged", 0)
+            bus_energy[bid] = {"actual": 0.0, "tariff_weighted": 0.0, "tariff_units": 0.0}
+        bus_energy[bid]["actual"] += units
+        bus_energy[bid]["tariff_weighted"] += units * tariff
+        bus_energy[bid]["tariff_units"] += units
+        actual_cost += units * tariff
+        tariff_weighted += units * tariff
+        tariff_units += units
     total_allowed_energy = 0
     total_actual_energy = 0
-    tariff_rate = 10
+    tariff_rate = (tariff_weighted / tariff_units) if tariff_units > 0 else 10.0
+    allowed_cost = 0.0
     for bid in set(list(bus_km.keys()) + list(bus_energy.keys())):
         bus = bus_map.get(bid, {})
         kwh_per_km = bus.get("kwh_per_km", 1.0)
         km = bus_km.get(bid, 0)
         allowed = km * kwh_per_km
-        actual = bus_energy.get(bid, {}).get("actual", 0)
-        tariff_rate = bus_energy.get(bid, {}).get("tariff", 10)
+        actual = float(bus_energy.get(bid, {}).get("actual", 0) or 0)
+        bus_tariff_units = float(bus_energy.get(bid, {}).get("tariff_units", 0) or 0)
+        bus_tariff_weighted = float(bus_energy.get(bid, {}).get("tariff_weighted", 0) or 0)
+        bus_tariff = (bus_tariff_weighted / bus_tariff_units) if bus_tariff_units > 0 else tariff_rate
         total_allowed_energy += allowed
         total_actual_energy += actual
-    allowed_cost = total_allowed_energy * tariff_rate
-    actual_cost = total_actual_energy * tariff_rate
+        allowed_cost += allowed * bus_tariff
     energy_adjustment = min(actual_cost, allowed_cost)
     # Step 4: Subsidy excluded by default unless contractually enabled.
     subsidy = 0
@@ -6694,6 +6740,24 @@ async def advance_billing_workflow(req: BillingWorkflowReq, user: dict = Depends
     expected_from, new_state = transition
     if current != expected_from:
         raise HTTPException(status_code=400, detail=f"Cannot {req.action}: invoice is in '{current}', expected '{expected_from}'")
+    if req.action == "submit":
+        rules = await db.business_rules.find({"category": "billing"}, {"_id": 0, "rule_key": 1, "rule_value": 1}).to_list(100)
+        rmap = {str(r.get("rule_key", "") or ""): r.get("rule_value", "") for r in rules}
+        try:
+            submit_within_days = int(float(rmap.get("invoice_submit_within_days", 10) or 10))
+        except (TypeError, ValueError):
+            submit_within_days = 10
+        period_end_dt = _parse_ymd(str(inv.get("period_end", "") or ""))
+        if period_end_dt:
+            last_submit_date = period_end_dt + timedelta(days=max(0, submit_within_days))
+            if datetime.now(timezone.utc).date() > last_submit_date.date():
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Submission window exceeded: submit within {submit_within_days} days after "
+                        f"period end ({inv.get('period_end', '')})."
+                    ),
+                )
     log_entry = {"action": req.action, "from": current, "to": new_state,
                  "by": user.get("name", ""), "role": user.get("role", ""),
                  "remarks": req.remarks, "at": datetime.now(timezone.utc).isoformat()}
