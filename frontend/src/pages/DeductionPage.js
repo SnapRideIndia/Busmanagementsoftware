@@ -13,6 +13,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Play, Calculator } from "lucide-react";
 import { toast } from "sonner";
 
+/** Set true to show configured heads + apply tool (code retained). */
+const SHOW_DEDUCTION_UI = false;
+
 export default function DeductionPage() {
   const [rules, setRules] = useState([]);
   const [buses, setBuses] = useState([]);
@@ -92,6 +95,18 @@ export default function DeductionPage() {
         <Link to="/gcc-kpi" className="text-[#C8102E] font-medium hover:underline">GCC KPI</Link>.
       </p>
 
+      {!SHOW_DEDUCTION_UI ? (
+        <Card className="border-gray-200 shadow-sm mb-6">
+          <CardContent className="p-6 text-sm text-gray-600">
+            Deduction computation and rule tables are hidden in this build. Schedule-S penalties are logged under{" "}
+            <Link to="/incidents" className="text-[#C8102E] font-medium hover:underline">Incidents &amp; Penalties</Link>.
+            Enable <code className="text-xs bg-gray-100 px-1 rounded">SHOW_DEDUCTION_UI</code> in DeductionPage.js to restore the UI.
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {SHOW_DEDUCTION_UI ? (
+      <>
       <Card className="border-gray-200 shadow-sm mb-6">
         <CardHeader>
           <CardTitle className="text-base">Configured deduction heads (read-only)</CardTitle>
@@ -247,6 +262,8 @@ export default function DeductionPage() {
           )}
         </CardContent>
       </Card>
+      </>
+      ) : null}
     </div>
   );
 }

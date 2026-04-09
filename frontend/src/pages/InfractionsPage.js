@@ -32,11 +32,34 @@ function capRuleLabel(row) {
   return row?.is_capped_non_safety ? "Capped (5%)" : "Non-capped";
 }
 
+const scheduleGroupStyles = {
+  safety: "bg-red-50 text-red-800 border-red-100",
+  operations: "bg-blue-50 text-blue-800 border-blue-100",
+  quality: "bg-violet-50 text-violet-800 border-violet-100",
+};
+
+/** Schedule-S grouping (safety / operations / quality). API: schedule_group; legacy: pillar. */
+function scheduleGroupKey(row) {
+  return String(row?.schedule_group || row?.pillar || "").toLowerCase();
+}
+
+function scheduleGroupLabel(row) {
+  const p = scheduleGroupKey(row);
+  if (p === "safety") return "Safety";
+  if (p === "quality") return "Quality";
+  if (p === "operations") return "Operations";
+  return "—";
+}
+
 function escalationLabel(row) {
   const cat = String(row?.category || "").toUpperCase();
   if (!row?.repeat_escalation) return "None";
   if (["A", "B", "C", "D", "E"].includes(cat)) return "Next slab if not rectified (max Rs.3,000)";
   return "Next slab if not rectified";
+}
+
+function has20KmRule(row) {
+  return row?.km_deduction_rule === "20_km_x_pk_rate" || ["O01", "O03"].includes(String(row?.code || "").toUpperCase());
 }
 
 export default function InfractionsPage() {
@@ -142,7 +165,9 @@ export default function InfractionsPage() {
                 <TableHead className="w-[60px] font-black uppercase text-[10px] tracking-widest">Category</TableHead>
                 <TableHead className="min-w-[400px] font-black uppercase text-[10px] tracking-widest">Description</TableHead>
                 <TableHead className="text-right font-black uppercase text-[10px] tracking-widest">Amount</TableHead>
-                <TableHead className="font-black uppercase text-[10px] tracking-widest pl-8">Safety</TableHead>
+                <TableHead className="font-black uppercase text-[10px] tracking-widest pl-6 min-w-[120px]">
+                  Group
+                </TableHead>
                 <TableHead className="text-right font-black uppercase text-[10px] tracking-widest">Resolution Days</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest pl-4">Capping Rule</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Escalation</TableHead>
@@ -168,10 +193,24 @@ export default function InfractionsPage() {
                     <TableCell className="text-[12px] font-medium text-gray-700 py-4 leading-relaxed pr-8 whitespace-normal break-words">
                       {c.description}
                     </TableCell>
-                    <TableCell className="text-right font-mono font-black text-gray-900 pr-4 text-[12px]">₹{c.amount?.toLocaleString()}</TableCell>
-                    <TableCell className="pl-8">
-                      {c.safety_flag ? (
-                        <Badge className="bg-red-50 text-red-600 border-red-100 text-[9px] font-black h-5 uppercase">Safety</Badge>
+                    <TableCell className="text-right pr-4 text-[12px]">
+                      {has20KmRule(c) ? (
+                        <div className="inline-flex flex-col items-end leading-tight">
+                          <span className="font-mono font-black text-gray-900">20 km x PK rate</span>
+                          <span className="text-[10px] text-amber-700 font-semibold">16.6 deduction rule</span>
+                        </div>
+                      ) : (
+                        <span className="font-mono font-black text-gray-900">₹{c.amount?.toLocaleString()}</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="pl-6">
+                      {scheduleGroupKey(c) ? (
+                        <Badge
+                          variant="outline"
+                          className={`text-[9px] font-black h-5 uppercase border ${scheduleGroupStyles[scheduleGroupKey(c)] || "bg-gray-50 text-gray-600 border-gray-100"}`}
+                        >
+                          {scheduleGroupLabel(c)}
+                        </Badge>
                       ) : (
                         <span className="text-gray-300">—</span>
                       )}

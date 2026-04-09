@@ -11,7 +11,7 @@ from app.core.config import settings as app_settings
 from app.core.database import db
 from app.core.security import hash_password, verify_password
 from app.domain.permissions import ALL_PERMISSION_IDS, default_permission_ids_for_role
-from app.domain.infractions_master import build_master_rows
+from app.domain.infractions_master import build_master_rows, normalize_catalog_infraction_code
 from app.domain.user_roles import ALLOWED_ROLE_IDS, LEGACY_ROLE_TO_CANONICAL
 
 logger = logging.getLogger(__name__)
@@ -24,6 +24,62 @@ def _add_days_ymd(ymd: str, days: int) -> str:
         return (dt + timedelta(days=max(0, int(days)))).strftime("%Y-%m-%d")
     except (ValueError, TypeError):
         return ymd
+
+
+async def _migrate_incident_infraction_codes_to_others() -> None:
+    """Persist legacy codes to canonical N6x / O02 / O03 on embedded infraction rows (idempotent)."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    q = {
+        "$or": [
+            {
+                "infractions": {
+                    "$elemMatch": {
+                        "infraction_code": {
+                            "$in": [
+                                "A21",
+                                "A22",
+                                "OTHER",
+                                "OTHERS",
+                                "OD01",
+                                "OD12",
+                                "O01",
+                                "O04",
+                                "O05",
+                                "O06",
+                                "O07",
+                                "O08",
+                                "O09",
+                                "O10",
+                                "C18",
+                                "C19",
+                            ]
+                        }
+                    }
+                }
+            },
+            {"infractions": {"$elemMatch": {"infraction_code": ""}}},
+        ]
+    }
+    async for doc in db.incidents.find(q, {"_id": 1, "infractions": 1}):
+        infs = doc.get("infractions")
+        if not isinstance(infs, list):
+            continue
+        new_infs = []
+        changed = False
+        for inf in infs:
+            if not isinstance(inf, dict):
+                new_infs.append(inf)
+                continue
+            prev = str(inf.get("infraction_code") or "").strip().upper()
+            new_c = normalize_catalog_infraction_code(inf.get("infraction_code"))
+            if prev != new_c:
+                changed = True
+            new_infs.append({**inf, "infraction_code": new_c})
+        if changed:
+            await db.incidents.update_one(
+                {"_id": doc["_id"]},
+                {"$set": {"infractions": new_infs, "updated_at": now_iso}},
+            )
 
 
 async def run_seed_data():
@@ -347,73 +403,102 @@ async def run_seed_data():
                 }
             )
 
-            if (bi + day_offset) % 17 == 0:
-                inc_id = f"INC-SEED-{day.replace('-', '')}-{bus_id}"
-                first_trip_id = duty_trips[0]["trip_id"] if duty_trips else ""
-                incidents_docs.append(
-                    {
-                        "id": inc_id,
-                        "incident_type": random.choice(["BREAKDOWN", "ROUTE_DEVIATION", "PASSENGER_COMPLAINT", "ITS_GPS_FAILURE"]),
-                        "description": "Seed synced incident",
-                        "occurred_at": f"{day}T10:00:00+00:00",
-                        "vehicles_affected": [bus_id],
-                        "vehicles_affected_count": 1,
-                        "damage_summary": "",
-                        "engineer_action": "",
-                        "bus_id": bus_id,
-                        "driver_id": drv.get("id", ""),
-                        "depot": bus.get("depot", ""),
-                        "route_name": route.get("name", ""),
-                        "route_id": route.get("route_id", ""),
-                        "trip_id": first_trip_id,
-                        "duty_id": duty_id,
-                        "related_infraction_id": "",
-                        "location_text": route.get("origin", ""),
-                        "severity": random.choice(["low", "medium", "high"]),
-                        "channel": random.choice(["web", "telephonic"]),
-                        "telephonic_reference": "",
-                        "status": random.choice(["open", "assigned", "in_progress"]),
-                        "assigned_team": "Depot Maintenance",
-                        "assigned_to": "",
-                        "reported_by": "System",
-                        "attachments": [],
-                        "created_at": day_dt.isoformat(),
-                        "updated_at": day_dt.isoformat(),
-                        "activity_log": [{"at": day_dt.isoformat(), "action": "created", "by": "System", "detail": "Seed incident"}],
-                    }
-                )
-
     master_rows = build_master_rows()
     by_code = {m["code"]: m for m in master_rows}
-    codes = sorted(by_code.keys())
-    for i, inc in enumerate(incidents_docs):
-        # Attach 1-2 infractions to some seed incidents
-        code = codes[i % len(codes)] if codes and i % 2 == 0 else ""
-        if code:
+
+    def _embed_infractions_for_seed(codes: list[str], occurred_iso: str, inf_status: str = "open") -> list[dict]:
+        out = []
+        now_iso = datetime.now(timezone.utc).isoformat()
+        occ_d = (occurred_iso or "")[:10]
+        for code in codes:
             cat = by_code.get(code, {})
-            now_iso = datetime.now(timezone.utc).isoformat()
             res_days = int(cat.get("resolve_days", 1))
-            res_by = _add_days_ymd(inc.get("occurred_at", "")[:10], res_days)
-            
-            inc["infractions"] = [
+            res_by = _add_days_ymd(occ_d, res_days)
+            amt = float(cat.get("amount", 0))
+            out.append(
                 {
                     "infraction_code": code,
-                    "category": cat.get("category", "A"),
-                    "description": cat.get("description", "Seed infraction"),
-                    "amount": float(cat.get("amount", 500)),
-                    "amount_snapshot": float(cat.get("amount", 500)),
+                    "category": str(cat.get("category", "A")),
+                    "description": cat.get("description", ""),
+                    "amount": amt,
+                    "amount_current": amt,
+                    "amount_snapshot": amt,
                     "safety_flag": bool(cat.get("safety_flag", False)),
+                    "schedule_group": str(cat.get("schedule_group") or cat.get("pillar", "operations")),
+                    "pillar": str(cat.get("schedule_group") or cat.get("pillar", "operations")),
                     "resolve_days": res_days,
                     "resolve_by": res_by,
                     "deductible": True,
-                    "status": random.choice(["open", "closed"]),
-                    "created_at": inc.get("created_at") or now_iso,
-                    "closed_at": None,
-                    "close_remarks": ""
+                    "status": inf_status,
+                    "opened_at": now_iso,
+                    "created_at": now_iso,
+                    "closed_at": "" if inf_status == "open" else now_iso,
+                    "close_remarks": "" if inf_status == "open" else "Seed closure",
                 }
-            ]
-        else:
-            inc["infractions"] = []
+            )
+        return out
+
+    # Demo incidents — Schedule-S + 16.6 (0xx) + O-series rows. Re-seed to refresh.
+    incidents_docs = []
+    if active_buses and all_routes:
+        demo_specs = [
+            ("INC-DEMO-001", "OVERSPEED", ["E01"], "system", "medium", "open", "Overspeed threshold breach — linked E01."),
+            ("INC-DEMO-002", "ITS_GPS_FAILURE", ["B08"], "system", "high", "investigating", "AIS-140 / VTS defect — B08."),
+            ("INC-DEMO-003", "ROUTE_DEVIATION", ["B06"], "system", "medium", "assigned", "Unauthorized deviation — B06."),
+            ("INC-DEMO-004", "IDLE_EXCESS", ["A12"], "system", "low", "in_progress", "Excessive idle — A12."),
+            ("INC-DEMO-005", "PANIC_OR_SECURITY", ["O03"], "system", "high", "open", "Security or vandalism case (O03) with narrative."),
+            ("INC-DEMO-006", "BUNCHING_ALERT", ["B05"], "system", "medium", "open", "Bunching / parking — B05."),
+            ("INC-DEMO-007", "HARNESS_REMOVAL", ["C09"], "system", "high", "assigned", "On-board equipment tamper — C09."),
+            ("INC-DEMO-008", "ACCIDENT", ["C04"], "system", "high", "open", "Minor road accident — C04."),
+            ("INC-DEMO-009", "BREAKDOWN", ["C12"], "manual", "medium", "in_progress", "Breakdown KM loss — C12 (manual report)."),
+            ("INC-DEMO-010", "PASSENGER_COMPLAINT", ["C13"], "manual", "low", "open", "AC service complaint — C13 (manual)."),
+            # Official C12 breakdown + O01 response row
+            ("INC-DEMO-011", "BREAKDOWN", ["C12"], "manual", "low", "open", "Mock: official Table C12 breakdown KM loss."),
+            ("INC-DEMO-012", "BREAKDOWN", ["C12", "O01"], "manual", "medium", "open", "Mock: C12 + breakdown response (O01)."),
+            ("INC-DEMO-013", "PASSENGER_COMPLAINT", ["O08", "O11"], "manual", "medium", "assigned", "Mock: staff curtailment and PIS/GPS withdrawal (O08 + O11)."),
+        ]
+        for i, (iid, itype, icodes, ch, sev, st, desc) in enumerate(demo_specs):
+            bus = active_buses[i % len(active_buses)]
+            route = all_routes[i % len(all_routes)]
+            bus_id = bus["bus_id"]
+            drv = driver_by_bus.get(bus_id) or (fallback_drivers[i % len(fallback_drivers)] if fallback_drivers else {})
+            lic = str(drv.get("license_number", "") or "")
+            day_dt = base_now - timedelta(days=i + 1)
+            occurred_at = day_dt.replace(hour=10, minute=15, second=0, microsecond=0).isoformat()
+            inf_st = "closed" if i in (1, 3, 8) else "open"
+            incidents_docs.append(
+                {
+                    "id": iid,
+                    "incident_type": itype,
+                    "description": desc,
+                    "occurred_at": occurred_at,
+                    "vehicles_affected": [bus_id],
+                    "vehicles_affected_count": 1,
+                    "damage_summary": "",
+                    "engineer_action": "",
+                    "bus_id": bus_id,
+                    "driver_id": lic,
+                    "depot": bus.get("depot", ""),
+                    "route_name": route.get("name", ""),
+                    "route_id": route.get("route_id", ""),
+                    "trip_id": f"TRP-SEED-{i + 1:02d}",
+                    "duty_id": f"DTY-SEED-{i + 1:02d}",
+                    "related_infraction_id": "",
+                    "location_text": route.get("origin", ""),
+                    "severity": sev,
+                    "channel": ch,
+                    "telephonic_reference": "",
+                    "status": st,
+                    "assigned_team": "Depot Maintenance" if st in ("assigned", "in_progress") else "",
+                    "assigned_to": "",
+                    "reported_by": "System",
+                    "attachments": [],
+                    "created_at": occurred_at,
+                    "updated_at": occurred_at,
+                    "activity_log": [{"at": occurred_at, "action": "created", "by": "System", "detail": "Seed incident (demo set)"}],
+                    "infractions": _embed_infractions_for_seed(icodes, occurred_at, inf_st),
+                }
+            )
 
     if duties_docs:
         await db.duty_assignments.insert_many(duties_docs)
@@ -432,8 +517,25 @@ async def run_seed_data():
     p_end = today.isoformat()
     depot_values = sorted({b.get("depot", "") for b in active_buses if b.get("depot")}) + ["All"]
     billing_seed_docs = []
+    tender_by_id = {str(t.get("tender_id", "") or ""): t for t in tenders}
     for dep in depot_values:
         dep_buses = [b["bus_id"] for b in active_buses if dep == "All" or b.get("depot") == dep]
+        dep_bus_rows = [b for b in active_buses if b.get("bus_id") in dep_buses]
+        dep_tender_ids = sorted({str(b.get("tender_id", "") or "").strip() for b in dep_bus_rows if str(b.get("tender_id", "") or "").strip()})
+        dep_concessionaires = sorted(
+            {
+                str(tender_by_id.get(tid, {}).get("concessionaire", "") or "").strip()
+                for tid in dep_tender_ids
+                if str(tender_by_id.get(tid, {}).get("concessionaire", "") or "").strip()
+            }
+        )
+        dep_concessionaire_label = (
+            dep_concessionaires[0]
+            if len(dep_concessionaires) == 1
+            else (" / ".join(dep_concessionaires[:3]) + (f" (+{len(dep_concessionaires) - 3})" if len(dep_concessionaires) > 3 else ""))
+            if dep_concessionaires
+            else "Unassigned"
+        )
         dep_trips = [t for t in trips_docs if t.get("bus_id") in dep_buses]
         if not dep_trips:
             continue
@@ -454,7 +556,15 @@ async def run_seed_data():
         avail_ded = missed_km * avg_pk
         perf_ded = base_payment * 0.02
         sys_ded = base_payment * 0.01
-        infra_ded = sum(float(i.get("amount", 0) or 0) for i in infractions_docs if i.get("bus_id") in dep_buses)
+        infra_ded = 0.0
+        for i in infractions_docs:
+            if i.get("bus_id") not in dep_buses:
+                continue
+            code = str(i.get("infraction_code", "") or "").upper().strip()
+            amount = float(i.get("amount", 0) or 0)
+            if code in {"O01", "O03"} and amount <= 0:
+                amount = 20.0 * avg_pk
+            infra_ded += amount
         total_ded = avail_ded + perf_ded + sys_ded + infra_ded
         excess = max(0.0, tkm - skm)
         km_inc = excess * avg_pk * 0.5
@@ -499,6 +609,9 @@ async def run_seed_data():
                 "period_start": p_start,
                 "period_end": p_end,
                 "depot": dep,
+                "concessionaire": dep_concessionaire_label,
+                "concessionaires": dep_concessionaires,
+                "tender_ids": dep_tender_ids,
                 "selected_bus_id": "",
                 "selected_trip_id": "",
                 "bus_ids": sorted(dep_buses),
@@ -788,6 +901,9 @@ async def run_seed_data():
                 "period_start": p0_start,
                 "period_end": p0_end,
                 "depot": "Miyapur Depot",
+                "concessionaire": "City EV Operations Pvt Ltd",
+                "concessionaires": ["City EV Operations Pvt Ltd"],
+                "tender_ids": ["TND-001"],
                 "total_km": 18500.5,
                 "scheduled_km": 19200.0,
                 "avg_pk_rate": 86.2,
@@ -817,6 +933,9 @@ async def run_seed_data():
                 "period_start": p0_start,
                 "period_end": p0_end,
                 "depot": "LB Nagar Depot",
+                "concessionaire": "Metro Mobility Services LLP",
+                "concessionaires": ["Metro Mobility Services LLP"],
+                "tender_ids": ["TND-002"],
                 "total_km": 16200.0,
                 "scheduled_km": 16800.0,
                 "avg_pk_rate": 84.0,
@@ -844,6 +963,9 @@ async def run_seed_data():
                 "period_start": p1_start,
                 "period_end": p1_end,
                 "depot": "All",
+                "concessionaire": "City EV Operations Pvt Ltd / Metro Mobility Services LLP / Warangal Green Transit Co",
+                "concessionaires": ["City EV Operations Pvt Ltd", "Metro Mobility Services LLP", "Warangal Green Transit Co"],
+                "tender_ids": ["TND-001", "TND-002", "TND-003"],
                 "total_km": 52000.0,
                 "scheduled_km": 53500.0,
                 "avg_pk_rate": 85.0,
@@ -882,11 +1004,11 @@ async def run_seed_data():
     if (not use_synced_operational_seed) and await db.incidents.count_documents({}) == 0:
         now_base = datetime.now(timezone.utc)
         seed_specs = [
-            ("ACCIDENT", "low", "open", "web", "Minor scrape — no injuries"),
-            ("BREAKDOWN", "medium", "investigating", "web", "Inverter fault — bus immobilised"),
-            ("ROUTE_DEVIATION", "medium", "assigned", "telephonic", "Deviation logged via control room call"),
-            ("PASSENGER_COMPLAINT", "low", "in_progress", "web", "AC complaint on city route"),
-            ("ITS_GPS_FAILURE", "high", "open", "web", "AIS-140 gap > 15 min on TS-001"),
+            ("ACCIDENT", "low", "open", "manual", "Minor scrape — no injuries"),
+            ("BREAKDOWN", "medium", "investigating", "manual", "Inverter fault — bus immobilised"),
+            ("ROUTE_DEVIATION", "medium", "assigned", "manual", "Deviation logged via control room call"),
+            ("PASSENGER_COMPLAINT", "low", "in_progress", "manual", "AC complaint on city route"),
+            ("ITS_GPS_FAILURE", "high", "open", "system", "AIS-140 gap > 15 min on TS-001"),
         ]
         incidents = []
         for i, (itype, sev, st, ch, desc) in enumerate(seed_specs):
@@ -913,7 +1035,7 @@ async def run_seed_data():
                     "location_text": "Hyderabad",
                     "severity": sev,
                     "channel": ch,
-                    "telephonic_reference": "TC-1001" if ch == "telephonic" else "",
+                    "telephonic_reference": "TC-1001" if i == 2 else "",
                     "status": st,
                     "assigned_team": "Depot Maintenance" if st in ("assigned", "in_progress") else "",
                     "assigned_to": "",
@@ -1070,5 +1192,6 @@ async def run_seed_data():
         f.write("| depot | depot@tgsrtc.com | depot123 |\n")
         f.write("| vendor | vendor@tgsrtc.com | vendor123 |\n\n")
         f.write("## Auth\n- POST /api/auth/login — GET /api/auth/me — POST /api/auth/logout\n")
+    await _migrate_incident_infraction_codes_to_others()
     logger.info("Seed data complete")
 

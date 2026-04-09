@@ -52,7 +52,6 @@ export default function BillingPage() {
   const [filterTo, setFilterTo] = useState("");
   const [filterDepot, setFilterDepot] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
-  const [filterWorkflowState, setFilterWorkflowState] = useState("");
   const [filterInvoiceId, setFilterInvoiceId] = useState("");
   const [filterBusId, setFilterBusId] = useState("");
   const [filterTripId, setFilterTripId] = useState("");
@@ -78,7 +77,6 @@ export default function BillingPage() {
           date_to: filterTo,
           depot: filterDepot,
           status: filterStatus,
-          workflow_state: filterWorkflowState,
           invoice_id: filterInvoiceId,
           bus_id: filterBusId,
           trip_id: filterTripId,
@@ -99,7 +97,7 @@ export default function BillingPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterFrom, filterTo, filterDepot, filterStatus, filterWorkflowState, filterInvoiceId, filterBusId, filterTripId, filterSubmittedFrom, filterSubmittedTo, filterPaidFrom, filterPaidTo, page]);
+  }, [filterFrom, filterTo, filterDepot, filterStatus, filterInvoiceId, filterBusId, filterTripId, filterSubmittedFrom, filterSubmittedTo, filterPaidFrom, filterPaidTo, page]);
   useEffect(() => {
     (async () => {
       try {
@@ -172,7 +170,7 @@ export default function BillingPage() {
   const busesForGenerate = form.depot ? allBuses.filter((b) => b.depot === form.depot) : allBuses;
 
   return (
-    <div data-testid="billing-page">
+    <div data-testid="billing-page" className="text-[12px] [&_*]:text-[12px]">
       <div className="page-header">
         <h1 className="page-title">Billing</h1>
         <Button onClick={() => setGenOpen(true)} className="bg-[#C8102E] hover:bg-[#A50E25]" data-testid="generate-invoice-btn">
@@ -206,18 +204,6 @@ export default function BillingPage() {
             <label className="text-xs font-medium uppercase text-gray-500">Status</label>
             <Select value={filterStatus || "all"} onValueChange={(v) => { setFilterStatus(v === "all" ? "" : v); setPage(1); }}>
               <SelectTrigger className="w-36" data-testid="billing-filter-status"><SelectValue placeholder="All" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All</SelectItem>
-                {WORKFLOW_STATES.map((state) => (
-                  <SelectItem key={state} value={state}>{state}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium uppercase text-gray-500">Workflow state</label>
-            <Select value={filterWorkflowState || "all"} onValueChange={(v) => { setFilterWorkflowState(v === "all" ? "" : v); setPage(1); }}>
-              <SelectTrigger className="w-44" data-testid="billing-filter-workflow"><SelectValue placeholder="All" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All</SelectItem>
                 {WORKFLOW_STATES.map((state) => (
@@ -262,18 +248,18 @@ export default function BillingPage() {
             <label className="text-xs font-medium uppercase text-gray-500">Paid to</label>
             <Input type="date" value={filterPaidTo} onChange={(e) => { setFilterPaidTo(e.target.value); setPage(1); }} className="w-40" />
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={() => { setFilterFrom(""); setFilterTo(""); setFilterDepot(""); setFilterStatus(""); setFilterWorkflowState(""); setFilterInvoiceId(""); setFilterBusId(""); setFilterTripId(""); setFilterSubmittedFrom(""); setFilterSubmittedTo(""); setFilterPaidFrom(""); setFilterPaidTo(""); setPage(1); }}>Clear filters</Button>
+          <Button type="button" variant="outline" size="sm" onClick={() => { setFilterFrom(""); setFilterTo(""); setFilterDepot(""); setFilterStatus(""); setFilterInvoiceId(""); setFilterBusId(""); setFilterTripId(""); setFilterSubmittedFrom(""); setFilterSubmittedTo(""); setFilterPaidFrom(""); setFilterPaidTo(""); setPage(1); }}>Clear filters</Button>
         </CardContent>
       </Card>
 
       <Card className="border-gray-200 shadow-sm">
         <CardContent className="p-0">
-          <Table>
+          <Table className="text-[12px]">
             <TableHeader><TableRow className="table-header">
-              <TableHead>Invoice ID</TableHead><TableHead>Period</TableHead><TableHead>Depot</TableHead>
+              <TableHead>Invoice ID</TableHead><TableHead>Period</TableHead><TableHead>Depot</TableHead><TableHead>Concessionaire</TableHead>
               <TableHead className="text-right">Base (Rs)</TableHead><TableHead className="text-right">Energy Adj.</TableHead>
               <TableHead className="text-right">Deductions</TableHead><TableHead className="text-right">Final (Rs)</TableHead>
-              <TableHead>Status</TableHead><TableHead>Workflow</TableHead><TableHead>Submitted</TableHead><TableHead>Paid</TableHead><TableHead className="text-right">Actions</TableHead>
+              <TableHead>Status</TableHead><TableHead>Submitted</TableHead><TableHead>Paid</TableHead><TableHead className="text-right">Actions</TableHead>
             </TableRow></TableHeader>
             <TableBody>
               <TableLoadRows
@@ -289,12 +275,12 @@ export default function BillingPage() {
                   <TableCell className="font-mono font-medium text-[#C8102E]">{inv.invoice_id}</TableCell>
                   <TableCell className="text-sm">{formatDateIN(inv.period_start)} – {formatDateIN(inv.period_end)}</TableCell>
                   <TableCell>{inv.depot}</TableCell>
+                  <TableCell>{inv.concessionaire || "—"}</TableCell>
                   <TableCell className="text-right font-mono">{inv.base_payment?.toLocaleString()}</TableCell>
                   <TableCell className="text-right font-mono text-blue-600">{inv.energy_adjustment?.toLocaleString()}</TableCell>
                   <TableCell className="text-right font-mono text-red-600">{inv.total_deduction?.toLocaleString()}</TableCell>
                   <TableCell className="text-right font-mono font-semibold text-[#C8102E]">{inv.final_payable?.toLocaleString()}</TableCell>
                   <TableCell><Badge className={STATUS_BADGE_CLASS[inv.status] || STATUS_BADGE_CLASS.draft}>{inv.status}</Badge></TableCell>
-                  <TableCell className="text-xs text-gray-700">{inv.workflow_state || inv.status}</TableCell>
                   <TableCell className="text-xs">{inv.approval_dates?.submitted_at ? formatDateIN(inv.approval_dates.submitted_at.slice(0, 10)) : "—"}</TableCell>
                   <TableCell className="text-xs">{inv.approval_dates?.paid_at ? formatDateIN(inv.approval_dates.paid_at.slice(0, 10)) : "—"}</TableCell>
                   <TableCell className="text-right">
@@ -372,9 +358,9 @@ export default function BillingPage() {
               <div className="grid grid-cols-3 gap-3 bg-gray-50 p-4 rounded-md">
                 <div><span className="text-gray-500 text-xs uppercase">Period</span><p className="font-medium">{selected.period_start} - {selected.period_end}</p></div>
                 <div><span className="text-gray-500 text-xs uppercase">Depot</span><p className="font-medium">{selected.depot}</p></div>
+                <div><span className="text-gray-500 text-xs uppercase">Concessionaire</span><p className="font-medium">{selected.concessionaire || "—"}</p></div>
                 <div><span className="text-gray-500 text-xs uppercase">Generated</span><p className="font-medium">{selected.created_at?.slice(0, 10)}</p></div>
                 <div><span className="text-gray-500 text-xs uppercase">Status</span><p className="font-medium">{selected.status}</p></div>
-                <div><span className="text-gray-500 text-xs uppercase">Workflow</span><p className="font-medium">{selected.workflow_state}</p></div>
                 <div><span className="text-gray-500 text-xs uppercase">Paid At</span><p className="font-medium">{selected.approval_dates?.paid_at?.slice(0, 10) || "—"}</p></div>
               </div>
 

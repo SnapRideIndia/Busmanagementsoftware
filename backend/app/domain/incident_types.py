@@ -11,9 +11,10 @@ from typing import Any, Final
 
 
 class IncidentChannel(str, Enum):
-    WEB = "web"
-    TELEPHONIC = "telephonic"
-    OTHER = "other"
+    """Source: system (ITS/automated) vs manual (staff / phone / ad-hoc)."""
+
+    SYSTEM = "system"
+    MANUAL = "manual"
 
 
 class IncidentSeverity(str, Enum):
@@ -185,6 +186,7 @@ def incident_types_public() -> list[dict[str, Any]]:
             "code": r["code"],
             "label": r["label"],
             "category": r["category"],
+            "ui_group": _ui_group_for_code(r["code"]),
             "counts_for_reliability_breakdown": r["counts_for_reliability_breakdown"],
             "counts_for_safety_kpi": r["counts_for_safety_maf_minor"] or r["counts_for_safety_major"],
         }

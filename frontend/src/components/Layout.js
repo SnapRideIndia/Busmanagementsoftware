@@ -8,7 +8,6 @@ import {
   MapPin,
   Zap,
   BarChart3,
-  Calculator,
   Receipt,
   FileBarChart,
   AlertTriangle,
@@ -49,7 +48,8 @@ const navGroups = [
       { to: "/duties", label: "Duty Roster", icon: ClipboardList },
       { to: "/incidents", label: "Incidents & Penalties", icon: AlertTriangle },
       { to: "/alerts-center", label: "Alerts Center", icon: AlertTriangle },
-      { to: "/deductions", label: "Deductions", icon: Calculator },
+      // Deductions UI hidden for now — route kept in App.js (`/deductions`).
+      // { to: "/deductions", label: "Deductions", icon: Calculator },
       { to: "/infractions", label: "Infraction Catalogue", icon: Scale },
       { to: "/energy", label: "Energy", icon: Zap },
     ],

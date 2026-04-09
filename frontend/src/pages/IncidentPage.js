@@ -3,7 +3,9 @@ import API, { formatApiError, buildQuery, unwrapListResponse, fetchAllPaginated 
 import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import TableLoadRows from "../components/TableLoadRows";
-import { formatDateIN } from "../lib/dates";
+import ReportDownloads from "../components/ReportDownloads";
+import { getBackendOrigin } from "../lib/api";
+import { formatDateTimeINAmPm } from "../lib/dates";
 import { cn } from "../lib/utils";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -29,9 +31,7 @@ import { Badge } from "../components/ui/badge";
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "../components/ui/select";
@@ -59,6 +59,7 @@ import {
   Lock,
   User,
   Clock,
+  Copy,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -74,9 +75,53 @@ function toDatetimeLocalValue(isoLike) {
   return localDatetimeInputValue(dt);
 }
 
+// /** Unique resolve_days from linked infractions (catalogue / incident rows). */
+// function resolveDaysSummary(inc) {
+//   const rows = inc?.infractions || [];
+//   if (!rows.length) return null;
+//   const nums = [
+//     ...new Set(
+//       rows
+//         .map((r) => r.resolve_days)
+//         .filter((d) => d != null && d !== "")
+//         .map((d) => Number(d))
+//         .filter((n) => !Number.isNaN(n) && n > 0),
+//     ),
+//   ].sort((a, b) => a - b);
+//   if (!nums.length) return null;
+//   if (nums.length === 1) return `${nums[0]} day${nums[0] === 1 ? "" : "s"}`;
+//   return nums.map((n) => `${n}d`).join(" · ");
+// }
+
+/** Blank / legacy generic: show O08 when code missing in stored data. */
+function displayInfractionCode(code) {
+  const s = code != null ? String(code).trim() : "";
+  return s || "O08";
+}
+
+/** Schedule-S group (safety / operations / quality). API: schedule_group; legacy: pillar. */
+function infractionScheduleGroupLabel(inf) {
+  const p = String(inf?.schedule_group || inf?.pillar || "").toLowerCase();
+  if (p === "safety") return "Safety";
+  if (p === "quality") return "Quality";
+  if (p === "operations") return "Operations";
+  return "";
+}
+
+async function copyIncidentId(id) {
+  const s = String(id || "");
+  if (!s) return;
+  try {
+    await navigator.clipboard.writeText(s);
+    toast.success("Incident ID copied");
+  } catch {
+    toast.error("Could not copy ID");
+  }
+}
+
 const emptyForm = () => ({
-  incident_type: "",
   description: "",
+  severity: "medium",
   occurred_at: localDatetimeInputValue(),
   vehicles_affected: [],
   vehicles_affected_count: 1,
@@ -91,6 +136,7 @@ const emptyForm = () => ({
   duty_id: "",
   location_text: "",
   telephonic_reference: "",
+  channel: "manual",
   infractions: [],
 });
 
@@ -122,6 +168,9 @@ export default function IncidentPage() {
   const [filterType, setFilterType] = useState("");
   const [filterDateFrom, setFilterDateFrom] = useState("");
   const [filterDateTo, setFilterDateTo] = useState("");
+  const [filterOccurredFrom, setFilterOccurredFrom] = useState("");
+  const [filterOccurredTo, setFilterOccurredTo] = useState("");
+  const [filterSearch, setFilterSearch] = useState("");
   const [assignTeam, setAssignTeam] = useState("");
   const [assignTo, setAssignTo] = useState("");
   const [noteText, setNoteText] = useState("");
@@ -129,6 +178,10 @@ export default function IncidentPage() {
   const [fetchError, setFetchError] = useState(null);
   const [catalogue, setCatalogue] = useState([]);
   const [catLoading, setCatLoading] = useState(false);
+  const [penaltyCategory, setPenaltyCategory] = useState("");
+  const [penaltyCodePick, setPenaltyCodePick] = useState("none");
+  const [editPenaltyCategory, setEditPenaltyCategory] = useState("");
+  const [editPenaltyCodePick, setEditPenaltyCodePick] = useState("none");
 
   const typeLabels = useMemo(() => {
     const m = {};
@@ -138,32 +191,12 @@ export default function IncidentPage() {
     return m;
   }, [meta]);
 
-  const incidentTypeGroups = useMemo(() => {
-    const types = meta?.incident_types || [];
-    const order = ["alerts", "speed_rules", "reports", "extended"];
-    const labels = {
-      alerts: "Alert types (dashboard / email)",
-      speed_rules: "Speed rules",
-      reports: "Breakdown, accident & trips",
-      extended: "Other incidents",
-    };
-    const map = new Map();
-    order.forEach((g) => map.set(g, []));
-    types.forEach((t) => {
-      const g = t.ui_group && map.has(t.ui_group) ? t.ui_group : "extended";
-      map.get(g).push(t);
-    });
-    return order
-      .filter((g) => (map.get(g) || []).length > 0)
-      .map((g) => ({ key: g, label: labels[g] || g, items: map.get(g) }));
-  }, [meta?.incident_types]);
-
   const loadMeta = useCallback(async () => {
     try {
       setCatLoading(true);
       const [{ data: metaData }, { data: catData }] = await Promise.all([
         API.get(Endpoints.incidents.meta()),
-        API.get(Endpoints.infractions.catalogue()),
+        API.get(Endpoints.infractions.catalogue(), { params: { limit: 100, page: 1 } }),
       ]);
       setMeta(metaData);
       setCatalogue(catData.items || []);
@@ -179,6 +212,7 @@ export default function IncidentPage() {
     setFetchError(null);
     try {
       const params = buildQuery({
+        search: filterSearch,
         status: filterStatus,
         depot: filterDepot,
         bus_id: filterBusId,
@@ -186,6 +220,8 @@ export default function IncidentPage() {
         incident_type: filterType,
         date_from: filterDateFrom,
         date_to: filterDateTo,
+        occurred_from: filterOccurredFrom,
+        occurred_to: filterOccurredTo,
         page,
         limit: listMeta.limit,
       });
@@ -207,7 +243,20 @@ export default function IncidentPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterStatus, filterDepot, filterBusId, filterSeverity, filterType, filterDateFrom, filterDateTo, page, listMeta.limit]);
+  }, [
+    filterStatus,
+    filterSearch,
+    filterDepot,
+    filterBusId,
+    filterSeverity,
+    filterType,
+    filterDateFrom,
+    filterDateTo,
+    filterOccurredFrom,
+    filterOccurredTo,
+    page,
+    listMeta.limit,
+  ]);
 
   useEffect(() => {
     loadMeta();
@@ -219,11 +268,46 @@ export default function IncidentPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [filterStatus, filterDepot, filterBusId, filterSeverity, filterType, filterDateFrom, filterDateTo, listMeta.limit]);
+  }, [
+    filterStatus,
+    filterSearch,
+    filterDepot,
+    filterBusId,
+    filterSeverity,
+    filterType,
+    filterDateFrom,
+    filterDateTo,
+    filterOccurredFrom,
+    filterOccurredTo,
+    listMeta.limit,
+  ]);
+
+  const infractionCategories = useMemo(() => {
+    const s = new Set((catalogue || []).map((c) => c.category).filter(Boolean));
+    return [...s].sort();
+  }, [catalogue]);
+
+  const codesForCategory = useMemo(() => {
+    if (!penaltyCategory) return [];
+    return (catalogue || [])
+      .filter((c) => c.category === penaltyCategory)
+      .sort((a, b) => String(a.code).localeCompare(String(b.code)));
+  }, [catalogue, penaltyCategory]);
+
+  const editCodesForCategory = useMemo(() => {
+    if (!editPenaltyCategory) return [];
+    return (catalogue || [])
+      .filter((c) => c.category === editPenaltyCategory)
+      .sort((a, b) => String(a.code).localeCompare(String(b.code)));
+  }, [catalogue, editPenaltyCategory]);
 
   const handleAdd = async () => {
-    if (!form.incident_type || !form.description.trim()) {
-      toast.error("Type and description are required");
+    if (!form.description.trim()) {
+      toast.error("Description is required");
+      return;
+    }
+    if (!(form.infractions || []).length) {
+      toast.error("Link at least one penalty: choose category, then code.");
       return;
     }
     if (!form.occurred_at || !String(form.occurred_at).trim()) {
@@ -235,12 +319,16 @@ export default function IncidentPage() {
       const vehiclesCount = vehicles.length || (form.bus_id ? 1 : Number(form.vehicles_affected_count) || 1);
       await API.post(Endpoints.incidents.create(), {
         ...form,
+        incident_type: "",
         occurred_at: String(form.occurred_at).trim(),
         vehicles_affected: vehicles,
         vehicles_affected_count: vehiclesCount,
         damage_summary: form.damage_summary || "",
         engineer_action: form.engineer_action || "",
-        infractions: form.infractions || [],
+        infractions: (form.infractions || []).map((x) => ({
+          code: x.infraction_code,
+          deductible: true,
+        })),
       });
       toast.success("Incident reported");
       setOpen(false);
@@ -308,7 +396,7 @@ export default function IncidentPage() {
     const remarks = prompt("Enter closure remarks:");
     if (remarks === null) return;
     try {
-      await API.put(`${Endpoints.incidents.get(selected.id)}/infractions/${idx}/close`, { close_remarks: remarks });
+      await API.put(Endpoints.incidents.closeInfraction(selected.id, idx), { close_remarks: remarks });
       toast.success("Infraction closed");
       const { data } = await API.get(Endpoints.incidents.get(selected.id));
       setSelected(data);
@@ -320,6 +408,8 @@ export default function IncidentPage() {
 
   const openEdit = (inc) => {
     setEditIncidentId(inc.id);
+    setEditPenaltyCategory("");
+    setEditPenaltyCodePick("none");
     setEditForm({
       description: inc.description || "",
       occurred_at: toDatetimeLocalValue(inc.occurred_at || inc.created_at),
@@ -351,7 +441,10 @@ export default function IncidentPage() {
         vehicles_affected_count: Number(editForm.vehicles_affected_count) || 1,
         damage_summary: editForm.damage_summary || "",
         engineer_action: editForm.engineer_action || "",
-        infractions: editForm.infractions || [],
+        infractions: (editForm.infractions || []).map((x) => ({
+          code: x.infraction_code,
+          deductible: true,
+        })),
       });
       toast.success("Incident updated");
       setEditOpen(false);
@@ -396,17 +489,62 @@ export default function IncidentPage() {
     return `Rs.${total.toLocaleString()}`;
   };
 
+  const reportParams = useMemo(
+    () =>
+      buildQuery({
+        report_type: "incidents",
+        status: filterStatus,
+        depot: filterDepot,
+        bus_id: filterBusId,
+        severity: filterSeverity,
+        incident_type: filterType,
+        date_from: filterDateFrom,
+        date_to: filterDateTo,
+        occurred_from: filterOccurredFrom,
+        occurred_to: filterOccurredTo,
+      }),
+    [
+      filterStatus,
+      filterDepot,
+      filterBusId,
+      filterSeverity,
+      filterType,
+      filterDateFrom,
+      filterDateTo,
+      filterOccurredFrom,
+      filterOccurredTo,
+    ],
+  );
+  const reportPdfHref = useMemo(() => {
+    const q = new URLSearchParams({ ...reportParams, fmt: "pdf" });
+    const origin = getBackendOrigin();
+    return `${origin || ""}/api/reports/download?${q.toString()}`;
+  }, [reportParams]);
+  const reportExcelHref = useMemo(() => {
+    const q = new URLSearchParams({ ...reportParams, fmt: "excel" });
+    const origin = getBackendOrigin();
+    return `${origin || ""}/api/reports/download?${q.toString()}`;
+  }, [reportParams]);
+
   return (
     <div data-testid="incident-page">
       <div className="page-header flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="page-title">Incidents</h1>
-        <Button
-          onClick={() => { setForm(emptyForm()); setOpen(true); }}
-          className="bg-[#C8102E] hover:bg-[#A50E25]"
-          data-testid="report-incident-btn"
-        >
-          <Plus size={16} className="mr-1.5" /> Report incident
-        </Button>
+        <div className="flex items-center gap-2">
+          <ReportDownloads pdfHref={reportPdfHref} excelHref={reportExcelHref} disabled={loading && incidents.length === 0} />
+          <Button
+            onClick={() => {
+              setForm(emptyForm());
+              setPenaltyCategory("");
+              setPenaltyCodePick("none");
+              setOpen(true);
+            }}
+            className="bg-[#C8102E] hover:bg-[#A50E25]"
+            data-testid="report-incident-btn"
+          >
+            <Plus size={16} className="mr-1.5" /> Report incident
+          </Button>
+        </div>
       </div>
 
       <p className="text-sm text-gray-600 mb-4 max-w-4xl">Log, assign, and track incident cases.</p>
@@ -470,12 +608,29 @@ export default function IncidentPage() {
               <Input className="w-28 font-mono text-xs h-9" value={filterType} onChange={(e) => setFilterType(e.target.value)} placeholder="Code" />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs text-gray-500 uppercase">From</Label>
+              <Label className="text-xs text-gray-500 uppercase">Reported from</Label>
               <Input type="date" className="w-36 h-9" value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs text-gray-500 uppercase">To</Label>
+              <Label className="text-xs text-gray-500 uppercase">Reported to</Label>
               <Input type="date" className="w-36 h-9" value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-gray-500 uppercase">Occurred from</Label>
+              <Input type="date" className="w-36 h-9" value={filterOccurredFrom} onChange={(e) => setFilterOccurredFrom(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-gray-500 uppercase">Occurred to</Label>
+              <Input type="date" className="w-36 h-9" value={filterOccurredTo} onChange={(e) => setFilterOccurredTo(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-gray-500 uppercase">Search</Label>
+              <Input
+                className="w-40 text-xs h-9"
+                value={filterSearch}
+                onChange={(e) => setFilterSearch(e.target.value)}
+                placeholder="ID, type, code, bus..."
+              />
             </div>
         </div>
 
@@ -489,17 +644,21 @@ export default function IncidentPage() {
                     <TableHead>Channel</TableHead>
                     <TableHead>Depot</TableHead>
                     <TableHead>Infractions</TableHead>
+                    {/* <TableHead className="whitespace-nowrap">Resolve days</TableHead> */}
                     <TableHead>Bus</TableHead>
                     <TableHead>Severity</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Assigned</TableHead>
+                    <TableHead>Occurred</TableHead>
                     <TableHead>Reported</TableHead>
+                    <TableHead>Resolved</TableHead>
                     <TableHead className="text-right">Deductions</TableHead>
                     <TableHead className="text-right w-[108px]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   <TableLoadRows
-                    colSpan={11}
+                    colSpan={14}
                     loading={loading}
                     error={fetchError}
                     onRetry={load}
@@ -508,27 +667,67 @@ export default function IncidentPage() {
                   >
                     {incidents.map((inc) => (
                       <TableRow key={inc.id} className="hover:bg-gray-50" data-testid={`incident-row-${inc.id}`}>
-                        <TableCell className="font-mono whitespace-nowrap">{inc.id}</TableCell>
+                        <TableCell className="p-2 align-middle max-w-[120px]">
+                          <div className="group flex items-center gap-0.5">
+                            <span
+                              className="truncate font-mono text-[11px] text-gray-800 min-w-0 flex-1"
+                              title={inc.id}
+                            >
+                              {inc.id}
+                            </span>
+                            <button
+                              type="button"
+                              className="shrink-0 rounded p-1 text-gray-500 opacity-0 transition-opacity hover:bg-gray-100 hover:text-gray-900 group-hover:opacity-100 focus:opacity-100 focus:outline-none focus:ring-1 focus:ring-gray-300"
+                              aria-label="Copy incident ID"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                copyIncidentId(inc.id);
+                              }}
+                            >
+                              <Copy className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </TableCell>
                         <TableCell className="py-3">
                           <span className="font-medium text-gray-900 block leading-snug">{typeLabels[inc.incident_type] || inc.incident_type}</span>
                           <span className="block text-[10px] text-gray-500 font-mono mt-0.5">{inc.incident_type}</span>
                         </TableCell>
-                        <TableCell className="capitalize">{inc.channel || "—"}</TableCell>
+                        <TableCell className="text-gray-800">
+                          {inc.channel === "system" ? "System" : inc.channel === "manual" ? "Manual" : (inc.channel || "—")}
+                        </TableCell>
                         <TableCell>{inc.depot || "—"}</TableCell>
                         <TableCell>
                           <div className="flex flex-wrap gap-1">
-                            {(inc.infractions || []).map(inf => (
-                              <Badge key={inf.infraction_code} variant="outline" className="text-[10px] py-0 border-amber-200 bg-amber-50 text-amber-800">
-                                {inf.infraction_code}
+                            {(inc.infractions || []).map((inf, ixf) => (
+                              <Badge key={`${displayInfractionCode(inf.infraction_code)}-${ixf}`} variant="outline" className="text-[10px] py-0 border-amber-200 bg-amber-50 text-amber-800">
+                                {displayInfractionCode(inf.infraction_code)}
                               </Badge>
                             ))}
                             {(!inc.infractions || inc.infractions.length === 0) && <span className="text-gray-300">—</span>}
                           </div>
                         </TableCell>
+                        {/* <TableCell className="text-gray-700 text-[11px] whitespace-nowrap max-w-[100px]" title={resolveDaysSummary(inc) || ""}>
+                          {resolveDaysSummary(inc) ?? "—"}
+                        </TableCell> */}
                         <TableCell className="font-mono whitespace-nowrap">{inc.bus_id || "—"}</TableCell>
                         <TableCell><Badge className={cn("px-2 py-0.5", severityColor(inc.severity))}>{inc.severity}</Badge></TableCell>
                         <TableCell><Badge variant="outline" className={cn("px-2 py-0.5", statusColor(inc.status))}>{inc.status?.replace(/_/g, " ")}</Badge></TableCell>
-                        <TableCell className="text-gray-500 whitespace-nowrap text-[12px]">{formatDateIN(inc.created_at?.slice(0, 10))}</TableCell>
+                        <TableCell className="text-gray-700 max-w-[140px] text-[11px] leading-snug">
+                          {inc.assigned_team || inc.assigned_to ? (
+                            <span className="block truncate" title={[inc.assigned_team, inc.assigned_to].filter(Boolean).join(" · ")}>
+                              {[inc.assigned_team, inc.assigned_to].filter(Boolean).join(" · ") || "—"}
+                            </span>
+                          ) : (
+                            <span className="text-gray-300">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-gray-600 whitespace-nowrap text-[11px]">
+                          {inc.occurred_at ? formatDateTimeINAmPm(inc.occurred_at) : "—"}
+                        </TableCell>
+                        <TableCell className="text-gray-500 whitespace-nowrap text-[12px]">{formatDateTimeINAmPm(inc.created_at)}</TableCell>
+                        <TableCell className="text-gray-500 whitespace-nowrap text-[12px]">
+                          {inc.resolved_at ? formatDateTimeINAmPm(inc.resolved_at) : (inc.closed_at ? formatDateTimeINAmPm(inc.closed_at) : "—")}
+                        </TableCell>
                         <TableCell className="text-right font-medium whitespace-nowrap">{finalizedDeduction(inc)}</TableCell>
                         <TableCell className="text-right p-2">
                            <DropdownMenu>
@@ -543,10 +742,14 @@ export default function IncidentPage() {
                               <DropdownMenuSub>
                                 <DropdownMenuSubTrigger className="gap-2"><PlayCircle className="h-4 w-4 opacity-70" /> Update status</DropdownMenuSubTrigger>
                                 <DropdownMenuPortal>
-                                  <DropdownMenuSubContent className="text-xs">
-                                    {inc.status === 'open' && <DropdownMenuItem onClick={() => setStatus(inc.id, 'investigating')}>Start investigation</DropdownMenuItem>}
-                                    {inc.status !== 'resolved' && inc.status !== 'closed' && <DropdownMenuItem onClick={() => setStatus(inc.id, 'resolved')}>Mark resolved</DropdownMenuItem>}
-                                    {inc.status === 'resolved' && <DropdownMenuItem onClick={() => setStatus(inc.id, 'closed')}>Close case</DropdownMenuItem>}
+                                  <DropdownMenuSubContent className="text-xs max-h-[280px] overflow-y-auto">
+                                    {(meta?.statuses || ["open", "investigating", "assigned", "in_progress", "resolved", "closed"])
+                                      .filter((st) => st && st !== inc.status)
+                                      .map((st) => (
+                                      <DropdownMenuItem key={st} onClick={() => setStatus(inc.id, st)}>
+                                        Set to {String(st).replace(/_/g, " ")}
+                                      </DropdownMenuItem>
+                                    ))}
                                   </DropdownMenuSubContent>
                                 </DropdownMenuPortal>
                               </DropdownMenuSub>
@@ -570,26 +773,19 @@ export default function IncidentPage() {
         </Card>
       </div>
 
-       <Dialog open={open} onOpenChange={setOpen}>
+       <Dialog open={open} onOpenChange={(o) => {
+        setOpen(o);
+        if (!o) {
+          setPenaltyCategory("");
+          setPenaltyCodePick("none");
+        }
+      }}>
         <DialogContent className="max-w-lg max-h-[95vh] overflow-y-auto" data-testid="incident-dialog">
           <DialogHeader><DialogTitle>Report incident</DialogTitle></DialogHeader>
           <div className="space-y-4 pt-2">
-            <div className="space-y-2">
-              <Label>Incident Type</Label>
-              <Select value={form.incident_type} onValueChange={(v) => setForm({ ...form, incident_type: v })} disabled={!meta?.incident_types?.length}>
-                <SelectTrigger data-testid="incident-type-select">
-                  <SelectValue placeholder={meta?.incident_types?.length ? "Select type" : "Loading types..."} />
-                </SelectTrigger>
-                <SelectContent className="max-h-[300px]">
-                  {incidentTypeGroups.map(({ key, label, items }) => (
-                    <SelectGroup key={key}>
-                      <SelectLabel className="text-[10px] text-gray-400 uppercase border-b pb-1 mb-1">{label}</SelectLabel>
-                      {items.map((t) => <SelectItem key={t.code} value={t.code}>{t.label}</SelectItem>)}
-                    </SelectGroup>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <p className="text-[11px] text-gray-500 leading-snug">
+              IRMS incident type is derived from the <span className="font-semibold text-gray-700">first linked penalty code</span> (Schedule-S). Link at least one code below.
+            </p>
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
@@ -597,7 +793,11 @@ export default function IncidentPage() {
                 <Select value={form.channel} onValueChange={(v) => setForm({ ...form, channel: v })}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {(meta?.channels || ["web", "telephonic", "mobile", "other"]).map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                    {(meta?.channels || ["manual", "system"]).map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c === "system" ? "System" : "Manual"}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -617,36 +817,67 @@ export default function IncidentPage() {
               <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} placeholder="What happened..." />
             </div>
 
-            {/* Unified Infraction Linker */}
+            {/* Unified Infraction Linker — category then code (full catalogue; API default limit was 20). */}
             <div className="rounded-md border border-amber-200 bg-amber-50/20 p-3 space-y-3">
-              <Label className="text-amber-900 font-bold flex items-center gap-2"> <ClipboardList className="h-4 w-4" /> Link Penalties </Label>
-              <div className="space-y-2">
-                <Select value="none" onValueChange={(v) => {
-                    if (!v || v === "none") return;
-                    const cat = catalogue.find(c => c.code === v);
-                    if (!cat) return;
-                    if ((form.infractions || []).some(x => x.infraction_code === v)) return;
-                    setForm({ ...form, infractions: [...(form.infractions || []), { infraction_code: v, description: cat.description }] });
-                  }}>
-                  <SelectTrigger className="h-8 text-xs border-amber-200 bg-white"><SelectValue placeholder="Add infraction code..." /></SelectTrigger>
-                  <SelectContent className="max-h-[200px]">
-                    <SelectItem value="none">— Select Code —</SelectItem>
-                    {catalogue.map(c => (
-                      <SelectItem key={c.code} value={c.code} className="text-[11px]">
-                         <span className="font-mono font-bold mr-2">{c.code}</span> — {c.description.slice(0, 40)}...
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <Label className="text-amber-900 font-bold flex items-center gap-2"> <ClipboardList className="h-4 w-4" /> Link penalties (Schedule-S) </Label>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label className="text-[10px] text-gray-500 uppercase">Category</Label>
+                  <Select
+                    value={penaltyCategory || "none"}
+                    onValueChange={(v) => {
+                      const next = v === "none" ? "" : v;
+                      setPenaltyCategory(next);
+                      setPenaltyCodePick("none");
+                    }}
+                  >
+                    <SelectTrigger className="h-8 text-xs border-amber-200 bg-white"><SelectValue placeholder="Select…" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">— Category —</SelectItem>
+                      {infractionCategories.map((cat) => (
+                        <SelectItem key={cat} value={cat}>Category {cat}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[10px] text-gray-500 uppercase">Code</Label>
+                  <Select
+                    value={penaltyCodePick}
+                    disabled={!penaltyCategory || catLoading}
+                    onValueChange={(v) => {
+                      setPenaltyCodePick("none");
+                      if (!v || v === "none" || !penaltyCategory) return;
+                      const cat = catalogue.find((c) => c.code === v);
+                      if (!cat) return;
+                      if ((form.infractions || []).some((x) => x.infraction_code === v)) return;
+                      setForm({
+                        ...form,
+                        infractions: [...(form.infractions || []), { infraction_code: v, description: cat.description }],
+                      });
+                    }}
+                  >
+                    <SelectTrigger className="h-8 text-xs border-amber-200 bg-white"><SelectValue placeholder={penaltyCategory ? "Add code…" : "Pick category first"} /></SelectTrigger>
+                    <SelectContent className="max-h-[280px]">
+                      <SelectItem value="none">— Code —</SelectItem>
+                      {codesForCategory.map((c) => (
+                        <SelectItem key={c.code} value={c.code} className="text-[11px]">
+                          <span className="font-mono font-bold mr-1">{c.code}</span>
+                          <span className="text-gray-600">{c.description.slice(0, 42)}{c.description.length > 42 ? "…" : ""}</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
                 <div className="flex flex-wrap gap-2 mt-2">
                   {(form.infractions || []).map(inf => (
-                    <Badge key={inf.infraction_code} className="bg-amber-100 text-amber-900 border-amber-200 gap-2 px-2 py-1">
-                      {inf.infraction_code}
+                    <Badge key={`${displayInfractionCode(inf.infraction_code)}-${inf.infraction_code}`} className="bg-amber-100 text-amber-900 border-amber-200 gap-2 px-2 py-1">
+                      {displayInfractionCode(inf.infraction_code)}
                       <button type="button" onClick={() => setForm({ ...form, infractions: form.infractions.filter(x => x.infraction_code !== inf.infraction_code) })}>×</button>
                     </Badge>
                   ))}
                 </div>
-              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -723,7 +954,13 @@ export default function IncidentPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+      <Dialog open={editOpen} onOpenChange={(o) => {
+        setEditOpen(o);
+        if (!o) {
+          setEditPenaltyCategory("");
+          setEditPenaltyCodePick("none");
+        }
+      }}>
         <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Edit Incident Meta — {editIncidentId}</DialogTitle></DialogHeader>
           <div className="space-y-5 mt-4">
@@ -733,37 +970,68 @@ export default function IncidentPage() {
             </div>
 
             <div className="rounded-lg border border-amber-200 bg-amber-50/20 p-4 space-y-3">
-              <Label className="text-amber-900 font-bold flex items-center gap-2 px-1"><ClipboardList className="h-4 w-4" /> Manage Penalties</Label>
-              <div className="space-y-3">
-                <Select value="none" onValueChange={(v) => {
-                    if (!v || v === "none") return;
-                    const cat = catalogue.find(c => c.code === v);
-                    if (!cat) return;
-                    if (editForm.infractions?.some(x => x.infraction_code === v)) return;
-                    setEditForm({ ...editForm, infractions: [...(editForm.infractions || []), { infraction_code: v, description: cat.description }] });
-                  }}>
-                  <SelectTrigger className="h-9 text-xs border-amber-200 bg-white"><SelectValue placeholder="Add penalty code..." /></SelectTrigger>
-                  <SelectContent className="max-h-[240px]">
-                    {catalogue.map(c => (
-                      <SelectItem key={c.code} value={c.code} className="text-[11px] py-1.5 border-b border-gray-50 last:border-0 text-gray-700">
-                         <div className="flex flex-col">
+              <Label className="text-amber-900 font-bold flex items-center gap-2 px-1"><ClipboardList className="h-4 w-4" /> Manage penalties</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label className="text-[10px] text-gray-500 uppercase">Category</Label>
+                  <Select
+                    value={editPenaltyCategory || "none"}
+                    onValueChange={(v) => {
+                      const next = v === "none" ? "" : v;
+                      setEditPenaltyCategory(next);
+                      setEditPenaltyCodePick("none");
+                    }}
+                  >
+                    <SelectTrigger className="h-9 text-xs border-amber-200 bg-white"><SelectValue placeholder="Select…" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">— Category —</SelectItem>
+                      {infractionCategories.map((cat) => (
+                        <SelectItem key={cat} value={cat}>Category {cat}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[10px] text-gray-500 uppercase">Code</Label>
+                  <Select
+                    value={editPenaltyCodePick}
+                    disabled={!editPenaltyCategory}
+                    onValueChange={(v) => {
+                      setEditPenaltyCodePick("none");
+                      if (!v || v === "none" || !editPenaltyCategory) return;
+                      const cat = catalogue.find((c) => c.code === v);
+                      if (!cat) return;
+                      if (editForm.infractions?.some((x) => x.infraction_code === v)) return;
+                      setEditForm({
+                        ...editForm,
+                        infractions: [...(editForm.infractions || []), { infraction_code: v, description: cat.description }],
+                      });
+                    }}
+                  >
+                    <SelectTrigger className="h-9 text-xs border-amber-200 bg-white"><SelectValue placeholder={editPenaltyCategory ? "Add code…" : "Pick category first"} /></SelectTrigger>
+                    <SelectContent className="max-h-[280px]">
+                      <SelectItem value="none">— Code —</SelectItem>
+                      {editCodesForCategory.map((c) => (
+                        <SelectItem key={c.code} value={c.code} className="text-[11px] py-1.5 border-b border-gray-50 last:border-0 text-gray-700">
+                          <div className="flex flex-col">
                             <span className="font-mono font-bold text-amber-800">{c.code} — ₹{c.amount}</span>
                             <span className="text-gray-500 text-[10px] leading-snug">{c.description}</span>
-                         </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
                 <div className="flex flex-wrap gap-2 mt-2">
                   {(editForm.infractions || []).map(inf => (
-                    <Badge key={inf.infraction_code} className="bg-white text-gray-700 border-amber-200 px-2 py-1 gap-2 shadow-sm font-medium">
-                      <span className="font-mono text-amber-900">{inf.infraction_code}</span>
+                    <Badge key={`${displayInfractionCode(inf.infraction_code)}-${inf.infraction_code}`} className="bg-white text-gray-700 border-amber-200 px-2 py-1 gap-2 shadow-sm font-medium">
+                      <span className="font-mono text-amber-900">{displayInfractionCode(inf.infraction_code)}</span>
                       <button type="button" onClick={() => setEditForm({ ...editForm, infractions: editForm.infractions.filter(x => x.infraction_code !== inf.infraction_code) })}
                         className="text-red-400 hover:text-red-600 text-lg leading-[0]">×</button>
                     </Badge>
                   ))}
                 </div>
-              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -823,6 +1091,45 @@ export default function IncidentPage() {
                     <Label className="text-[10px] text-gray-400 uppercase tracking-widest font-black">Depot Context</Label>
                     <p className="text-base font-bold text-gray-700">{selected?.depot || "General Pool"}</p>
                   </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-gray-400 uppercase tracking-widest font-black">Occurred</Label>
+                    <p className="text-sm font-semibold text-gray-800">{selected?.occurred_at ? formatDateTimeINAmPm(selected.occurred_at) : "—"}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-gray-400 uppercase tracking-widest font-black">Reported</Label>
+                    <p className="text-sm font-semibold text-gray-800">{selected?.created_at ? formatDateTimeINAmPm(selected.created_at) : "—"}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-gray-400 uppercase tracking-widest font-black">Resolved</Label>
+                    <p className="text-sm font-semibold text-gray-800">{selected?.resolved_at ? formatDateTimeINAmPm(selected.resolved_at) : "—"}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-gray-400 uppercase tracking-widest font-black">Driver</Label>
+                    <p className="font-mono text-sm font-bold text-gray-800">{selected?.driver_id || "—"}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-gray-400 uppercase tracking-widest font-black">Route / duty / trip</Label>
+                    <p className="text-xs text-gray-600">{selected?.route_name || "—"}</p>
+                    <p className="text-xs text-gray-800 leading-relaxed font-mono">
+                      {(selected?.route_id || "—")} · {(selected?.duty_id || "—")} · {(selected?.trip_id || "—")}
+                    </p>
+                  </div>
+                  <div className="space-y-1 col-span-2">
+                    <Label className="text-[10px] text-gray-400 uppercase tracking-widest font-black">Location</Label>
+                    <p className="text-sm text-gray-800">{selected?.location_text || "—"}</p>
+                  </div>
+                  <div className="space-y-1 col-span-2">
+                    <Label className="text-[10px] text-gray-400 uppercase tracking-widest font-black">Assignment</Label>
+                    <p className="text-sm font-bold text-gray-800">
+                      {(selected?.assigned_team || selected?.assigned_to)
+                        ? [selected?.assigned_team, selected?.assigned_to].filter(Boolean).join(" · ")
+                        : "—"}
+                    </p>
+                  </div>
+                  {/* <div className="space-y-1 col-span-2">
+                    <Label className="text-[10px] text-gray-400 uppercase tracking-widest font-black">Resolve days (linked penalties)</Label>
+                    <p className="text-sm font-semibold text-gray-800">{resolveDaysSummary(selected) ?? "—"}</p>
+                  </div> */}
                </div>
 
                <div className="mb-10">
@@ -838,11 +1145,18 @@ export default function IncidentPage() {
                     <span className="text-[10px] text-amber-600 font-bold bg-amber-50 px-3 py-1 rounded-full border border-amber-100">Flattened Deductions</span>
                   </div>
                   <div className="grid gap-4">
-                    {(selected?.infractions || []).map((inf, idx) => (
+                    {(selected?.infractions || []).map((inf, idx) => {
+                      const groupLbl = infractionScheduleGroupLabel(inf);
+                      return (
                       <div key={idx} className="bg-white border border-amber-100 rounded-xl p-4 shadow-sm flex items-start justify-between hover:shadow-md transition-shadow">
                          <div className="space-y-2 flex-1 pr-6">
-                           <div className="flex items-center gap-2">
-                             <Badge className="font-mono text-[10px] bg-amber-600 text-white border-none px-2">{inf.infraction_code}</Badge>
+                           <div className="flex items-center gap-2 flex-wrap">
+                             <Badge className="font-mono text-[10px] bg-amber-600 text-white border-none px-2">{displayInfractionCode(inf.infraction_code)}</Badge>
+                             {groupLbl ? (
+                               <Badge variant="outline" className="text-[8px] font-bold uppercase text-gray-700 border-gray-200 bg-gray-50 px-1.5 py-0">
+                                 {groupLbl}
+                               </Badge>
+                             ) : null}
                              <Badge variant="outline" className={cn("text-[9px] font-black h-5 px-2 tracking-tight", inf.status === 'closed' ? "text-green-700 border-green-200 bg-green-50" : "text-amber-700 border-amber-200 bg-amber-50")}>
                                 {inf.status?.toUpperCase() || 'OPEN'}
                              </Badge>
@@ -852,11 +1166,24 @@ export default function IncidentPage() {
                               <span className="text-[10px] text-gray-400 font-bold uppercase tracking-tighter">Fine Amount:</span>
                               <span className="text-sm font-black text-gray-900 font-mono">₹{(inf.amount_current || inf.amount).toLocaleString()}</span>
                            </div>
+                           {/* {(inf.resolve_days != null && inf.resolve_days !== "") || inf.resolve_by ? (
+                             <p className="text-[10px] text-gray-600 leading-relaxed">
+                               {inf.resolve_days != null && inf.resolve_days !== "" ? (
+                                 <span><strong>{inf.resolve_days}</strong> day resolve period</span>
+                               ) : null}
+                               {inf.resolve_by ? (
+                                 <span>
+                                   {inf.resolve_days != null && inf.resolve_days !== "" ? " · " : null}
+                                   Resolve by <strong>{formatDateIN(inf.resolve_by)}</strong>
+                                 </span>
+                               ) : null}
+                             </p>
+                           ) : null} */}
                            {inf.closed_at && (
                              <div className="mt-3 pt-3 border-t border-dashed border-gray-100">
                                 <div className="flex items-center gap-2 text-green-700">
                                    <CheckCircle2 className="h-3 w-3" />
-                                   <span className="text-[10px] font-bold">Verified by Depot on {inf.closed_at.slice(0,10)}</span>
+                                   <span className="text-[10px] font-bold">Verified by Depot on {formatDateTimeINAmPm(inf.closed_at)}</span>
                                 </div>
                                 <p className="text-[10px] text-gray-500 mt-1 pl-5">Remarks: {inf.close_remarks}</p>
                              </div>
@@ -868,7 +1195,8 @@ export default function IncidentPage() {
                            </Button>
                          )}
                       </div>
-                    ))}
+                    );
+                    })}
                     {(!selected?.infractions || selected.infractions.length === 0) && (
                       <div className="py-12 text-center border-2 border-dashed border-gray-100 rounded-2xl text-gray-400 text-xs italic">
                          No penalties attached to this instance.
@@ -889,8 +1217,8 @@ export default function IncidentPage() {
                     <div className="absolute -left-[7px] top-0 w-3 h-3 rounded-full bg-white border-2 border-gray-300 group-hover:border-[#C8102E] transition-colors shadow-sm" />
                     <div className="text-[12px] font-black text-gray-900 leading-tight">{e.action}</div>
                     <div className="text-[11px] text-gray-600 mt-1.5 leading-relaxed">{e.detail}</div>
-                    <div className="text-[10px] text-gray-400 mt-2 uppercase font-black tracking-tighter flex items-center gap-2">
-                       <User size={10} /> {e.by} <span className="opacity-30">|</span> <Clock size={10} /> {e.at?.split('T')[0]}
+                    <div className="text-[10px] text-gray-400 mt-2 font-semibold tracking-tight flex items-center gap-2">
+                       <User size={10} /> {e.by} <span className="opacity-30">|</span> <Clock size={10} /> {e.at ? formatDateTimeINAmPm(e.at) : "—"}
                     </div>
                   </li>
                 ))}

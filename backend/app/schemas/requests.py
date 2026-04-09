@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.domain.incident_evidence import normalize_occurred_at_iso
 from app.domain.incident_types import IncidentChannel, IncidentSeverity, IncidentStatus
+from app.domain.infractions_master import normalize_catalog_infraction_code
 from app.domain.user_roles import ALLOWED_ROLE_IDS, PLATFORM_ADMIN_ROLES
 
 
@@ -153,12 +154,25 @@ class EnergyReq(BaseModel):
 class InfractionEntryReq(BaseModel):
     """One infraction code to embed in an incident."""
 
-    code: str = Field(..., min_length=1, max_length=16)
+    code: str = Field(default="O08", max_length=16)
     deductible: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_legacy_infraction_key(cls, data: object) -> object:
+        """Accept `infraction_code` from UI payloads as alias for `code`."""
+        if isinstance(data, dict) and data.get("code") in (None, "") and data.get("infraction_code"):
+            return {**data, "code": data["infraction_code"]}
+        return data
+
+    @field_validator("code", mode="before")
+    @classmethod
+    def code_normalize(cls, v: object) -> str:
+        return normalize_catalog_infraction_code(v)
 
 
 class IncidentCreateReq(BaseModel):
-    incident_type: str = Field(..., min_length=1, max_length=64)
+    incident_type: str = Field(default="", max_length=64)
     description: str = Field(..., min_length=1, max_length=8000)
     occurred_at: str = Field(..., min_length=1, max_length=48)
     vehicles_affected: list[str] = Field(default_factory=list)
@@ -175,7 +189,7 @@ class IncidentCreateReq(BaseModel):
     location_text: str = Field(default="", max_length=512)
     related_infraction_id: str = Field(default="", max_length=64)
     severity: str = Field(default=IncidentSeverity.MEDIUM.value)
-    channel: str = Field(default=IncidentChannel.WEB.value)
+    channel: str = Field(default=IncidentChannel.MANUAL.value)
     telephonic_reference: str = Field(default="", max_length=64)
     infractions: list[InfractionEntryReq] = Field(default_factory=list)
 
@@ -216,13 +230,17 @@ class IncidentCreateReq(BaseModel):
             raise ValueError(f"severity must be one of {sorted(allowed)}")
         return v
 
-    @field_validator("channel")
+    @field_validator("channel", mode="before")
     @classmethod
-    def channel_ok(cls, v: str) -> str:
+    def channel_ok(cls, v: object) -> str:
         allowed = {e.value for e in IncidentChannel}
-        if v not in allowed:
-            raise ValueError(f"channel must be one of {sorted(allowed)}")
-        return v
+        s = str(v or "").strip().lower()
+        legacy = {"web": "manual", "telephonic": "manual", "mobile": "manual", "other": "manual"}
+        if s in legacy:
+            s = legacy[s]
+        if s not in allowed:
+            s = IncidentChannel.MANUAL.value
+        return s
 
 
 class IncidentUpdateReq(BaseModel):

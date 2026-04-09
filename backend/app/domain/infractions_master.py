@@ -1,8 +1,76 @@
-"""Tender-frozen infraction master for Schedule-S + TGSRTC report heads."""
+"""Tender-frozen infraction master for Schedule-S + billing report heads."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+# Table H in this master: O-series rows.
+OTHER_TABLE_H_CODES: tuple[str, ...] = ("O08", "O09", "O10", "O11", "O12")
+
+# Optional nearest official Table C serial when a 0xx row is used.
+SUGGESTED_TABLE_C_FOR_UNLISTED_INCIDENT_TYPE: dict[str, str] = {
+    "BREAKDOWN": "C12",
+    "ACCIDENT": "C04",
+    "PANIC_OR_SECURITY": "C10",
+    "PASSENGER_COMPLAINT": "C10",
+}
+
+_LEGACY_INFRACTION_ALIASES: dict[str, str] = {
+    "OTHND": "O08",
+    "OTHNC": "O08",
+    "A21": "O08",
+    "A22": "O08",
+    "OTHER": "O08",
+    "OTHERS": "O08",
+    "OTHLEG": "O08",
+    "C18": "O01",
+    "C19": "O03",
+}
+
+
+def suggested_official_table_c_code(incident_type: str | None) -> str | None:
+    """Closest official Table C serial for a 0xx / legacy-generic case; None if no hint."""
+    it = str(incident_type or "").strip().upper()
+    return SUGGESTED_TABLE_C_FOR_UNLISTED_INCIDENT_TYPE.get(it)
+
+
+def normalize_catalog_infraction_code(raw: str | None) -> str:
+    """Map blank and legacy aliases to active O-codes, or pass through official codes."""
+    s = str(raw or "").strip().upper()
+    if not s:
+        return "O08"
+    if s in _LEGACY_INFRACTION_ALIASES:
+        return _LEGACY_INFRACTION_ALIASES[s]
+    if s.startswith("OD") and len(s) >= 3 and s[2:].isdigit():
+        return "O08"
+    if s.startswith("O") and len(s) >= 2 and s[1:].isdigit():
+        num = int(s[1:])
+        if num == 1:
+            return "O01"
+        if num == 2:
+            return "O02"
+        if num == 3:
+            return "O03"
+        if num == 4:
+            return "O04"
+        if num == 5:
+            return "O05"
+        if num == 6:
+            return "O08"
+        if num == 7:
+            return "O08"
+        if num == 8:
+            return "O08"
+        if num == 9:
+            return "O09"
+        if num == 10:
+            return "O10"
+        if num == 11:
+            return "O11"
+        if num == 12:
+            return "O12"
+        return "O08"
+    return s
 
 
 @dataclass(frozen=True)
@@ -20,6 +88,7 @@ INFRACTION_SLABS: dict[str, InfractionSlab] = {
     "E": InfractionSlab(category="E", amount=3000.0, resolve_days=1),
     "F": InfractionSlab(category="F", amount=10000.0, resolve_days=1),
     "G": InfractionSlab(category="G", amount=200000.0, resolve_days=1),
+    "OTHERS": InfractionSlab(category="OTHERS", amount=0.0, resolve_days=0),
 }
 
 # Tender: repeat non-rectification escalation has ceiling Rs. 3,000 for A-E.
@@ -50,7 +119,37 @@ TENDER_REPORT_HEADS = [
     "service wise infractions report",
 ]
 
-# Exact tender wording from PM E-Drive Schedule-S tables A-G.
+def _schedule_group_for_infraction_row(item: dict) -> str:
+    """
+    PM E-DRIVE Schedule-S **group** (sometimes called a “pillar” in tender text): one of
+    **safety** | **operations** | **quality** for Tables A–D-style rows.
+    Safety rows match safety_flag=True; operations vs quality split by code list.
+    Tables E/F/G are safety-class for capping rules.
+    """
+    explicit = item.get("schedule_group") or item.get("pillar")
+    if explicit:
+        return str(explicit).lower()
+    if item.get("safety_flag"):
+        return "safety"
+    code = str(item.get("code", "")).upper()
+    operations_codes = {
+        "A11", "A12", "A13", "A14", "A15", "A16",
+        "B05", "B06", "B07", "B08",
+        "C08", "C09", "C10", "C11", "C12", "C13",
+    }
+    quality_codes = {
+        "A17", "A18", "A19", "A20",
+        "B09", "B10", "B11", "B12", "B13",
+        "C14", "C15", "C16", "C17",
+    }
+    if code in operations_codes:
+        return "operations"
+    if code in quality_codes:
+        return "quality"
+    return "operations"
+
+
+# Exact tender wording from PM E-Drive Schedule-S tables A–G; O01–O05 (16.6, OTHERS slab) and O08–O12 (Category A slab).
 INFRACTION_MASTER = [
     # Table A
     {"code": "A01", "category": "A", "table": "A", "description": "Damaged/Missing window safety guard rails.", "safety_flag": True},
@@ -73,8 +172,7 @@ INFRACTION_MASTER = [
     {"code": "A18", "category": "A", "table": "A", "description": "Oil spillage on wheel rims, hubs, tyres, etc", "safety_flag": False},
     {"code": "A19", "category": "A", "table": "A", "description": "Discoloration or unpainted repair work inside the bus or on any of its items", "safety_flag": False},
     {"code": "A20", "category": "A", "table": "A", "description": "Not maintaining USB charging ports in operating condition", "safety_flag": False},
-    {"code": "A21", "category": "A", "table": "A", "description": "No driver provided for scheduled duty/trip", "safety_flag": False},
-    {"code": "A22", "category": "A", "table": "A", "description": "No conductor provided for scheduled duty/trip", "safety_flag": False},
+    # Table A ends at A20 in PM E-DRIVE.
     # Table B
     {"code": "B01", "category": "B", "table": "B", "description": "To operate with defective front, side and/or back brake lights", "safety_flag": True},
     {"code": "B02", "category": "B", "table": "B", "description": "Section of handrail loose or with sharp edges", "safety_flag": True},
@@ -122,33 +220,119 @@ INFRACTION_MASTER = [
     {"code": "E04", "category": "E", "table": "E", "description": "skipping red signals, stopping the bus beyond the stop line at traffic signals", "safety_flag": True},
     {"code": "F01", "category": "F", "table": "F", "description": "“Serious nature of  breakdowns” means breakdowns in those critical systems of bus such as which may result in fire, heavy damage to bus, major injury etc.", "safety_flag": True},
     {"code": "G01", "category": "G", "table": "G", "description": "“Fatal Accidents” means any incident in which bus involved on road/ inside STU’s depot / parking premises, which causes death to passengers / pedestrians.", "safety_flag": True},
+    # Incidents en-route rows, billed in OTHERS (0 slab in this catalogue).
+    {
+        "code": "O01",
+        "category": "OTHERS",
+        "table": "16.6",
+        "description": (
+            "In case of a breakdown of a bus during normal operations, the operator shall "
+            "immediately inform the Control Centre and its maintenance team whereupon the Operator shall ensure speedy "
+            "tow-away of the affected Bus within 1 (one) hour of the Breakdown. The Operator shall as soon as is "
+            "reasonable practicable, provide a replacement Bus to complete the route after such breakdown, or shall "
+            "transfer all (or as many as capacity permits) Users to the next Bus plying on the same Operational Route "
+            "in order to minimise inconvenience to the Users. If this is not done, the Operator shall be liable to "
+            "Damages of 20 kms deduction per instance. In case bus is not "
+            "repaired or towed away from the break down spot within a period of 1 (one) hour, Operator shall be liable "
+            "to pay additional damages of deduction of 20 kms per each additional hour."
+        ),
+        "safety_flag": False,
+        "schedule_group": "operations",
+    },
+    {
+        "code": "O02",
+        "category": "OTHERS",
+        "table": "16.6",
+        "description": (
+            "The operator shall ensure regular communication with buses throughout the operation period "
+            "by making use of relevant technology."
+        ),
+        "safety_flag": False,
+        "schedule_group": "operations",
+    },
+    {
+        "code": "O03",
+        "category": "OTHERS",
+        "table": "16.6",
+        "description": (
+            "In an unforeseen event involving unruly behaviour by passengers or vandalism in or involving "
+            "the Bus, the Operator shall forthwith intimate the Authority. If the Bus in question is not in a condition "
+            "to complete the Operational Route or go back to the Bus Depot, then the Operator shall arrange to tow-away "
+            "such Bus within 1 (one) to 3 (three) hours of such occurrence, failing which Operator shall be liable to pay "
+            "Damages of 20 kms deduction for each such incident. The Operator shall, on a best effort basis provide a "
+            "replacement Bus to complete the route after such incident or shall transfer all (or as many as capacity "
+            "permits) Users to the next Bus plying on the same Operational Route in order to minimize inconvenience "
+            "to the Users."
+        ),
+        "safety_flag": False,
+        "schedule_group": "operations",
+    },
+    {
+        "code": "O04",
+        "category": "OTHERS",
+        "table": "16.6",
+        "description": (
+            "The operator shall make provisions for the adequate availability of first aid kits on the "
+            "Buses or at the Maintenance Depots for assisting any persons or Users in need of first aid on-site and shall "
+            "also co-ordinate with the relevant Government Instrumentalities including but not limited to the police to "
+            "ensure timely medical help to any injured Users."
+        ),
+        "safety_flag": False,
+        "schedule_group": "operations",
+    },
+    {
+        "code": "O05",
+        "category": "OTHERS",
+        "table": "16.6",
+        "description": (
+            "The operator shall extend all cooperation requested by the Authority including but not "
+            "limited to filing complaints to the police and or any other investigation undertaken in relation to any "
+            "incidents on the Buses."
+        ),
+        "safety_flag": False,
+        "schedule_group": "operations",
+    },
+    # O-series rows (Category A slab with cap/escalation logic).
+    {"code": "O08", "category": "A", "table": "H", "description": "Staff error or unauthorized curtailments by staff.", "safety_flag": False, "schedule_group": "operations"},
+    {"code": "O09", "category": "A", "table": "H", "description": "A bus blocked in the garage and unable to depart on time.", "safety_flag": False, "schedule_group": "operations"},
+    {"code": "O10", "category": "A", "table": "H", "description": "A bus running got discharged en-route.", "safety_flag": False, "schedule_group": "operations"},
+    {"code": "O11", "category": "A", "table": "H", "description": "A bus in service withdrawn due to a defective PIS or GPS.", "safety_flag": False, "schedule_group": "operations"},
+    {"code": "O12", "category": "A", "table": "H", "description": "The reason for lost kilometers is unknown or in doubt.", "safety_flag": False, "schedule_group": "operations"},
 ]
 
 
 def build_master_rows() -> list[dict]:
     rows: list[dict] = []
+    incident_166_20km_codes = {"O01", "O03"}
     for item in INFRACTION_MASTER:
         cat = item["category"]
         slab = INFRACTION_SLABS[cat]
         esc_to = ESCALATION_CHAIN.get(cat, "")
         esc_amount = INFRACTION_SLABS[esc_to].amount if esc_to else 0.0
-        rows.append(
-            {
-                "id": f"INF-{item['code']}",
-                "code": item["code"],
-                "category": cat,
-                "table": item["table"],
-                "description": item["description"],
-                "amount": slab.amount,
-                "resolve_days": slab.resolve_days,
-                "safety_flag": bool(item["safety_flag"]),
-                "repeat_escalation": bool(esc_to),
-                "escalation_to_category": esc_to,
-                "escalation_amount": esc_amount,
-                "is_capped_non_safety": cat in {"A", "B", "C", "D"} and not bool(item["safety_flag"]),
-                "active": True,
-            }
-        )
+        group = _schedule_group_for_infraction_row(item)
+        row = {
+            "id": f"INF-{item['code']}",
+            "code": item["code"],
+            "category": cat,
+            "table": item["table"],
+            "description": item["description"],
+            "amount": slab.amount,
+            "resolve_days": slab.resolve_days,
+            "safety_flag": bool(item["safety_flag"]),
+            "schedule_group": group,
+            "pillar": group,
+            "repeat_escalation": bool(esc_to),
+            "escalation_to_category": esc_to,
+            "escalation_amount": esc_amount,
+            "is_capped_non_safety": cat in {"A", "B", "C", "D"} and not bool(item["safety_flag"]),
+            "active": True,
+        }
+        if cat == "OTHERS":
+            row["schedule_s_penalty_zero"] = True
+        if str(item.get("code", "")).upper() in incident_166_20km_codes:
+            row["km_deduction_rule"] = "20_km_x_pk_rate"
+            row["km_deduction_km"] = 20
+        rows.append(row)
     return rows
 
 

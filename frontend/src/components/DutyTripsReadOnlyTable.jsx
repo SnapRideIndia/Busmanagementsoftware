@@ -15,10 +15,10 @@ export default function DutyTripsReadOnlyTable({ trips, className = "" }) {
             <TableHead className="whitespace-nowrap w-10">#</TableHead>
             <TableHead className="whitespace-nowrap">Direction</TableHead>
             <TableHead className="whitespace-nowrap">Trip ID</TableHead>
-            <TableHead className="whitespace-nowrap">Sch. dep</TableHead>
-            <TableHead className="whitespace-nowrap">Sch. arr</TableHead>
-            <TableHead className="whitespace-nowrap">Act. dep</TableHead>
-            <TableHead className="whitespace-nowrap">Act. arr</TableHead>
+            <TableHead className="whitespace-nowrap">Scheduled departure</TableHead>
+            <TableHead className="whitespace-nowrap">Scheduled arrival</TableHead>
+            <TableHead className="whitespace-nowrap">Actual departure</TableHead>
+            <TableHead className="whitespace-nowrap">Actual arrival</TableHead>
             <TableHead className="whitespace-nowrap">Status</TableHead>
             <TableHead className="whitespace-nowrap min-w-[120px]">Reason / note</TableHead>
           </TableRow>

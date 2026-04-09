@@ -191,11 +191,8 @@ export default function GccKpiPage() {
         <Link to="/infractions" className="text-[#C8102E] font-medium hover:underline">
           Infractions
         </Link>
-        ,{" "}
-        <Link to="/deductions" className="text-gray-700 underline hover:text-[#C8102E]">
-          Deductions
-        </Link>
         .
+        {/* <Link to="/deductions">Deductions</Link> hidden while deduction UI is off */}
       </p>
 
       <div className="flex flex-wrap gap-3 mb-6 items-end">

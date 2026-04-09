@@ -34,6 +34,21 @@ export function formatDateTimeIN(value) {
   });
 }
 
+/** Date + time in en-IN with 12-hour clock and AM/PM (for incident logs / tables). */
+export function formatDateTimeINAmPm(value) {
+  if (value == null || value === "") return "—";
+  const t = Date.parse(String(value).trim());
+  if (Number.isNaN(t)) return "—";
+  return new Date(t).toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
 /** Short axis label for charts (DD/MM). */
 export function formatChartAxisDate(value) {
   if (value == null || value === "") return "";

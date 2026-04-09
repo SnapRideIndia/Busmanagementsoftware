@@ -114,6 +114,7 @@ export const Endpoints = {
     get: (id) => `/incidents/${enc(id)}`,
     update: (id) => `/incidents/${enc(id)}`,
     addNote: (id) => `/incidents/${enc(id)}/notes`,
+    closeInfraction: (incidentId, idx) => `/incidents/${enc(incidentId)}/infractions/${Number(idx)}/close`,
   },
 
   infractions: {

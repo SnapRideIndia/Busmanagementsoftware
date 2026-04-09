@@ -28,9 +28,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../components/ui/dialog";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+import { GoogleMap, InfoWindowF, MarkerF, useJsApiLoader } from "@react-google-maps/api";
 
 const SPEED_GAUGE_MAX = 80;
 
@@ -54,6 +52,8 @@ const TELEM_STATUS_FILTERS = [
   { id: "panic", label: "Panic" },
 ];
 
+const GOOGLE_MAPS_API_KEY = "AIzaSyCtC_0HfLwBvG3KRI2ZAcAyQqRrkJSeKSE";
+
 function telemMarkerColor(status) {
   switch (status) {
     case "in_service":
@@ -73,22 +73,6 @@ function telemMarkerColor(status) {
   }
 }
 
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png",
-  iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
-  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
-});
-
-const busIcon = (status) =>
-  L.divIcon({
-    className: "custom-marker",
-    html: `<div style="width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:bold;color:#fff;background:${telemMarkerColor(
-      status
-    )};border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.3)">B</div>`,
-    iconSize: [28, 28],
-    iconAnchor: [14, 14],
-  });
 
 function SpeedGauge({ speed, max = SPEED_GAUGE_MAX, size = 48 }) {
   const pct = Math.min(1, Math.max(0, speed / max));
@@ -129,14 +113,6 @@ function SpeedGauge({ speed, max = SPEED_GAUGE_MAX, size = 48 }) {
       </span>
     </div>
   );
-}
-
-function MapRecenter({ center }) {
-  const map = useMap();
-  useEffect(() => {
-    map.setView(center, Math.max(map.getZoom(), 11));
-  }, [center, map]);
-  return null;
 }
 
 function statusBadgeClass(status) {
@@ -289,6 +265,12 @@ function FleetVehicleCard({ row, busAlerts, selected, onSelect, onCamera }) {
 }
 
 export default function LiveTrackingPage() {
+  const { isLoaded: mapsLoaded, loadError: mapsLoadError } = useJsApiLoader({
+    id: "google-maps-live-tracking",
+    googleMapsApiKey: GOOGLE_MAPS_API_KEY,
+  });
+  const [mapRef, setMapRef] = useState(null);
+  const [mapPopupBusId, setMapPopupBusId] = useState(null);
   const [positions, setPositions] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -386,6 +368,12 @@ export default function LiveTrackingPage() {
     }
   }, [selectedBusId, filteredFleet]);
 
+  useEffect(() => {
+    if (mapPopupBusId && !filteredFleet.some((p) => p.bus_id === mapPopupBusId)) {
+      setMapPopupBusId(null);
+    }
+  }, [mapPopupBusId, filteredFleet]);
+
   const counts = useMemo(() => {
     const running = positions.filter((p) => p.status === "in_service").length;
     const breakdown = positions.filter((p) => p.status === "breakdown").length;
@@ -397,20 +385,37 @@ export default function LiveTrackingPage() {
   const mapCenter = useMemo(() => {
     if (selectedBusId) {
       const b = filteredFleet.find((p) => p.bus_id === selectedBusId) || positions.find((p) => p.bus_id === selectedBusId);
-      if (b) return [b.lat, b.lng];
+      if (b) return { lat: Number(b.lat), lng: Number(b.lng) };
     }
     const src = filteredFleet.length ? filteredFleet : positions;
     if (src.length) {
       const lat = src.reduce((s, p) => s + p.lat, 0) / src.length;
       const lng = src.reduce((s, p) => s + p.lng, 0) / src.length;
-      return [lat, lng];
+      return { lat: Number(lat), lng: Number(lng) };
     }
-    return [17.385, 78.4867];
+    return { lat: 17.385, lng: 78.4867 };
   }, [positions, filteredFleet, selectedBusId]);
 
   const mapMarkers = filteredFleet;
 
-  /** Fixed-height map pane: no vertical scroll; only Leaflet pan/zoom inside. */
+  useEffect(() => {
+    if (!mapRef || !mapsLoaded) return;
+    mapRef.panTo(mapCenter);
+  }, [mapCenter, mapRef, mapsLoaded]);
+
+  const busMarkerIcon = useCallback(
+    (status) => ({
+      path: window.google.maps.SymbolPath.CIRCLE,
+      scale: 10,
+      fillColor: telemMarkerColor(status),
+      fillOpacity: 1,
+      strokeColor: "#ffffff",
+      strokeWeight: 2,
+    }),
+    [],
+  );
+
+  /** Fixed-height map pane: no vertical scroll; only map pan/zoom inside. */
   const renderMapBlock = (heightClassName) => (
     <div
       className={`relative z-0 isolate rounded-xl overflow-hidden border border-gray-200 shadow-sm ${heightClassName}`}
@@ -430,47 +435,74 @@ export default function LiveTrackingPage() {
           </span>
         </div>
       </div>
-      <MapContainer center={mapCenter} zoom={12} style={{ height: "100%", width: "100%" }} className="rounded-xl z-0 h-full">
-        <MapRecenter center={mapCenter} />
-        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="© OpenStreetMap" />
-        {mapMarkers.map((bus) => (
-          <Marker key={bus.bus_id} position={[bus.lat, bus.lng]} icon={busIcon(bus.status)}>
-            <Popup>
-              <div className="text-sm space-y-2 min-w-[200px]">
-                <p className="font-bold font-mono">{bus.bus_id}</p>
-                <p className="text-xs text-gray-500">{bus.registration_no}</p>
-                <p className="text-xs">
-                  {bus.status.replace(/_/g, " ")} · {bus.speed} km/h · SOC {bus.soc}%
-                </p>
-                <p className="text-xs text-gray-600">{bus.route}</p>
-                <p className="text-xs">{bus.driver}</p>
-                {(alertsByBus.get(bus.bus_id) || []).filter((a) => !a.resolved).length > 0 ? (
-                  <div className="pt-2 border-t border-gray-100 space-y-1">
-                    <p className="text-[10px] font-bold uppercase text-gray-400">Active alerts</p>
-                    {(alertsByBus.get(bus.bus_id) || [])
-                      .filter((a) => !a.resolved)
-                      .slice(0, 4)
-                      .map((a) => (
+      {!mapsLoaded ? (
+        <div className="h-full w-full grid place-items-center text-sm text-gray-500 bg-gray-50">Loading Google Maps…</div>
+      ) : mapsLoadError ? (
+        <div className="h-full w-full grid place-items-center text-sm text-red-600 bg-red-50">
+          Failed to load Google Maps.
+        </div>
+      ) : (
+        <GoogleMap
+          center={mapCenter}
+          zoom={12}
+          mapContainerStyle={{ height: "100%", width: "100%" }}
+          onLoad={(m) => setMapRef(m)}
+          options={{
+            streetViewControl: false,
+            mapTypeControl: false,
+            fullscreenControl: false,
+          }}
+        >
+          {mapMarkers.map((bus) => (
+            <MarkerF
+              key={bus.bus_id}
+              position={{ lat: Number(bus.lat), lng: Number(bus.lng) }}
+              icon={busMarkerIcon(bus.status)}
+              onClick={() => setMapPopupBusId(bus.bus_id)}
+            />
+          ))}
+          {mapPopupBusId ? (() => {
+            const bus = mapMarkers.find((b) => b.bus_id === mapPopupBusId);
+            if (!bus) return null;
+            const activeAlerts = (alertsByBus.get(bus.bus_id) || []).filter((a) => !a.resolved);
+            return (
+              <InfoWindowF
+                position={{ lat: Number(bus.lat), lng: Number(bus.lng) }}
+                onCloseClick={() => setMapPopupBusId(null)}
+              >
+                <div className="text-sm space-y-2 min-w-[200px]">
+                  <p className="font-bold font-mono">{bus.bus_id}</p>
+                  <p className="text-xs text-gray-500">{bus.registration_no}</p>
+                  <p className="text-xs">
+                    {bus.status.replace(/_/g, " ")} · {bus.speed} km/h · SOC {bus.soc}%
+                  </p>
+                  <p className="text-xs text-gray-600">{bus.route}</p>
+                  <p className="text-xs">{bus.driver}</p>
+                  {activeAlerts.length > 0 ? (
+                    <div className="pt-2 border-t border-gray-100 space-y-1">
+                      <p className="text-[10px] font-bold uppercase text-gray-400">Active alerts</p>
+                      {activeAlerts.slice(0, 4).map((a) => (
                         <p key={a.id} className="text-xs text-red-800 bg-red-50 rounded px-2 py-1">
                           {a.alert_type}
                         </p>
                       ))}
-                  </div>
-                ) : null}
-                <Button
-                  type="button"
-                  size="sm"
-                  className="w-full text-xs"
-                  onClick={() => setCameraBusId(bus.bus_id)}
-                >
-                  <Video className="w-3.5 h-3.5 mr-1" />
-                  Live camera
-                </Button>
-              </div>
-            </Popup>
-          </Marker>
-        ))}
-      </MapContainer>
+                    </div>
+                  ) : null}
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="w-full text-xs"
+                    onClick={() => setCameraBusId(bus.bus_id)}
+                  >
+                    <Video className="w-3.5 h-3.5 mr-1" />
+                    Live camera
+                  </Button>
+                </div>
+              </InfoWindowF>
+            );
+          })() : null}
+        </GoogleMap>
+      )}
     </div>
   );
 

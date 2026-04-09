@@ -50,11 +50,17 @@ from app.domain.infractions_master import (
     ESCALATION_CHAIN,
     INFRACTION_SLABS,
     MASTER_BY_CODE,
+    SUGGESTED_TABLE_C_FOR_UNLISTED_INCIDENT_TYPE,
     TENDER_REPORT_HEADS,
     build_master_rows,
+    normalize_catalog_infraction_code,
 )
 from app.services.punctuality import minutes_to_hhmm, parse_hhmm_to_minutes
 from app.domain.incident_evidence import occurred_at_range_mongo_filter
+from app.domain.incident_infraction_bridge import (
+    ALERT_CODE_TO_INCIDENT_AND_INFRACTION,
+    infer_incident_type_from_infraction_code,
+)
 from app.domain.incident_types import (
     DEFAULT_ASSIGNMENT_TEAMS,
     IncidentChannel,
@@ -194,11 +200,40 @@ async def _get_flattened_infractions(period_start: str, period_end: str, bus_ids
         for inf in (inc.get("infractions") or []):
             row = dict(base_meta)
             row.update(inf)
+            icode = _normalize_infraction_code(inf.get("infraction_code"))
+            if not row.get("schedule_group") and not row.get("pillar"):
+                m = MASTER_BY_CODE.get(icode)
+                if m:
+                    sg = m.get("schedule_group") or m.get("pillar")
+                    if sg:
+                        row["schedule_group"] = sg
+                        row["pillar"] = sg
             flat.append(row)
     return flat
 
+_INCIDENT_166_20KM_CODES = {"O01", "O03"}
 
-def _resolve_infraction_amount(row: dict, *, as_of_ymd: str) -> float:
+
+async def _pk_rate_for_bus(bus_id: str | None) -> float:
+    bid = str(bus_id or "").strip()
+    if not bid:
+        return 0.0
+    bus = await db.buses.find_one({"bus_id": bid}, {"_id": 0, "tender_id": 1})
+    if not bus:
+        return 0.0
+    tid = str(bus.get("tender_id", "") or "").strip()
+    if not tid:
+        return 0.0
+    tender = await db.tenders.find_one({"tender_id": tid}, {"_id": 0, "pk_rate": 1})
+    if not tender:
+        return 0.0
+    try:
+        return float(tender.get("pk_rate", 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _resolve_infraction_amount(row: dict, *, as_of_ymd: str, km20_pk_rate: float = 0.0) -> float:
     """Compute the effective penalty for an infraction, applying repeated
     slab escalation for each resolve-period that elapses without closure.
 
@@ -212,6 +247,14 @@ def _resolve_infraction_amount(row: dict, *, as_of_ymd: str) -> float:
     from datetime import date as _date
 
     category = str(row.get("category") or "").upper()
+    code = _normalize_infraction_code(row.get("infraction_code"))
+    if code in _INCIDENT_166_20KM_CODES:
+        current = float(row.get("amount_current", row.get("amount_snapshot", row.get("amount", 0))) or 0)
+        if current > 0:
+            return current
+        if km20_pk_rate > 0:
+            return round(20.0 * float(km20_pk_rate), 2)
+        return current
     base = float(row.get("amount_snapshot", row.get("amount", 0)) or 0)
     if category not in ESCALATION_CHAIN:
         return base
@@ -243,14 +286,14 @@ def _resolve_infraction_amount(row: dict, *, as_of_ymd: str) -> float:
     return min(float(escalated_amt), ESCALATION_CEILING_RS)
 
 
-def _infraction_deduction_rollup(rows: list[dict], monthly_due: float, *, as_of_ymd: str) -> dict:
+def _infraction_deduction_rollup(rows: list[dict], monthly_due: float, *, as_of_ymd: str, km20_pk_rate: float = 0.0) -> dict:
     capped_sum = 0.0
     uncapped_sum = 0.0
     detail: list[dict] = []
     for row in rows:
         if row.get("deductible") is False:
             continue
-        amt = _resolve_infraction_amount(row, as_of_ymd=as_of_ymd)
+        amt = _resolve_infraction_amount(row, as_of_ymd=as_of_ymd, km20_pk_rate=km20_pk_rate)
         cat = str(row.get("category") or "").upper()
         safety = bool(row.get("safety_flag"))
         code = str(row.get("infraction_code") or "")
@@ -1590,6 +1633,9 @@ def _synth_alert_rows_for_buses(buses: list[dict]) -> list[dict]:
             aid = f"AL-{bid}-{slot}-{pick}-{i}"
             route_code = _ROUTE_CODES[int(_telem_u01(k, 940 + i) * len(_ROUTE_CODES)) % len(_ROUTE_CODES)]
             route_label = f"Route {route_code}"
+            inc_inf = ALERT_CODE_TO_INCIDENT_AND_INFRACTION.get(
+                code, ("PASSENGER_COMPLAINT", "O08")
+            )
             rows.append(
                 {
                     "id": aid,
@@ -1603,6 +1649,8 @@ def _synth_alert_rows_for_buses(buses: list[dict]) -> list[dict]:
                     "route": route_label,
                     "source": "live_operations",
                     "message": f"{spec['alert_type']} detected on {bid} ({route_label})",
+                    "incident_type": inc_inf[0],
+                    "default_infraction_code": inc_inf[1],
                 }
             )
     # Active first, then high->low severity, then most-recent timestamp.
@@ -1959,7 +2007,7 @@ async def apply_deductions(
                 "infractions_deduction": 0,
                 "total_deduction": 0,
                 "breakdown": [],
-                "infractions_breakdown": _infraction_deduction_rollup([], 0, as_of_ymd=period_end),
+                "infractions_breakdown": _infraction_deduction_rollup([], 0, as_of_ymd=period_end, km20_pk_rate=0.0),
             }
     trip_q: dict = {"date": {"$gte": period_start, "$lte": period_end}}
     if scope_bus_ids:
@@ -1997,7 +2045,12 @@ async def apply_deductions(
             system_deduction += amount
         breakdown.append({"rule": rule["name"], "type": rt, "percent": pct, "amount": round(amount, 2)})
     infraction_rows = await _get_flattened_infractions(period_start, period_end, scope_bus_ids)
-    infraction_rollup = _infraction_deduction_rollup(infraction_rows, base_payment, as_of_ymd=period_end)
+    infraction_rollup = _infraction_deduction_rollup(
+        infraction_rows,
+        base_payment,
+        as_of_ymd=period_end,
+        km20_pk_rate=avg_pk_rate,
+    )
     infractions_deduction = infraction_rollup["total_applied"]
     total_deduction = availability_deduction + performance_deduction + system_deduction + infractions_deduction
     return {
@@ -2035,6 +2088,27 @@ async def generate_invoice(req: BillingGenerateReq, _: dict = Depends(require_pe
     bus_map = {b["bus_id"]: b for b in buses}
     tenders = await db.tenders.find({}, {"_id": 0}).to_list(100)
     tender_map = {t["tender_id"]: t for t in tenders}
+    tender_ids_for_scope = sorted(
+        {
+            str(bus_map.get(bid, {}).get("tender_id", "") or "").strip()
+            for bid in bus_ids
+            if str(bus_map.get(bid, {}).get("tender_id", "") or "").strip()
+        }
+    )
+    concessionaires_for_scope = sorted(
+        {
+            str(tender_map.get(tid, {}).get("concessionaire", "") or "").strip()
+            for tid in tender_ids_for_scope
+            if str(tender_map.get(tid, {}).get("concessionaire", "") or "").strip()
+        }
+    )
+    concessionaire_label = (
+        concessionaires_for_scope[0]
+        if len(concessionaires_for_scope) == 1
+        else (" / ".join(concessionaires_for_scope[:3]) + (f" (+{len(concessionaires_for_scope) - 3})" if len(concessionaires_for_scope) > 3 else ""))
+        if concessionaires_for_scope
+        else "Unassigned"
+    )
     trip_query = {"date": {"$gte": period_start, "$lte": period_end}}
     if bus_ids:
         trip_query["bus_id"] = {"$in": bus_ids}
@@ -2114,7 +2188,12 @@ async def generate_invoice(req: BillingGenerateReq, _: dict = Depends(require_pe
         elif rt == "system":
             system_deduction += amount
     infraction_rows = await _get_flattened_infractions(period_start, period_end, bus_ids)
-    infraction_rollup = _infraction_deduction_rollup(infraction_rows, base_payment, as_of_ymd=period_end)
+    infraction_rollup = _infraction_deduction_rollup(
+        infraction_rows,
+        base_payment,
+        as_of_ymd=period_end,
+        km20_pk_rate=avg_pk_rate,
+    )
     infractions_deduction = infraction_rollup["total_applied"]
     total_deduction = availability_deduction + performance_deduction + system_deduction + infractions_deduction
     excess_km = max(0, total_km - scheduled_km)
@@ -2190,6 +2269,9 @@ async def generate_invoice(req: BillingGenerateReq, _: dict = Depends(require_pe
         "invoice_id": f"INV-{str(uuid.uuid4())[:8].upper()}",
         "period_start": period_start, "period_end": period_end,
         "depot": depot or "All",
+        "concessionaire": concessionaire_label,
+        "concessionaires": concessionaires_for_scope,
+        "tender_ids": tender_ids_for_scope,
         "selected_bus_id": bus_id or "",
         "selected_trip_id": trip_id or "",
         "bus_ids": sorted([b for b in bus_ids if b]),
@@ -2240,6 +2322,57 @@ async def generate_invoice(req: BillingGenerateReq, _: dict = Depends(require_pe
     await db.billing.insert_one(dict(invoice))
     invoice.pop("_id", None)
     return invoice
+
+
+async def _enrich_billing_invoice_tender_fields(items: list[dict]) -> list[dict]:
+    """Backfill concessionaire/tender relation fields for legacy invoices at read-time."""
+    if not items:
+        return items
+    idxs: list[int] = []
+    all_bus_ids: set[str] = set()
+    for i, inv in enumerate(items):
+        if not isinstance(inv, dict):
+            continue
+        has_conc = str(inv.get("concessionaire", "") or "").strip()
+        has_tenders = isinstance(inv.get("tender_ids"), list) and bool(inv.get("tender_ids"))
+        if has_conc and has_tenders:
+            continue
+        b_ids = [str(x or "").strip() for x in (inv.get("bus_ids") or []) if str(x or "").strip()]
+        if not b_ids and str(inv.get("selected_bus_id") or "").strip():
+            b_ids = [str(inv.get("selected_bus_id") or "").strip()]
+        if not b_ids:
+            continue
+        idxs.append(i)
+        all_bus_ids.update(b_ids)
+    if not idxs or not all_bus_ids:
+        return items
+
+    buses = await db.buses.find({"bus_id": {"$in": sorted(all_bus_ids)}}, {"_id": 0, "bus_id": 1, "tender_id": 1}).to_list(len(all_bus_ids) + 20)
+    bus_tender = {str(b.get("bus_id", "") or ""): str(b.get("tender_id", "") or "") for b in buses}
+    tender_ids = sorted({tid for tid in bus_tender.values() if tid})
+    tenders = await db.tenders.find({"tender_id": {"$in": tender_ids}}, {"_id": 0, "tender_id": 1, "concessionaire": 1}).to_list(len(tender_ids) + 10)
+    tender_con = {str(t.get("tender_id", "") or ""): str(t.get("concessionaire", "") or "") for t in tenders}
+
+    out = list(items)
+    for i in idxs:
+        inv = dict(out[i])
+        b_ids = [str(x or "").strip() for x in (inv.get("bus_ids") or []) if str(x or "").strip()]
+        if not b_ids and str(inv.get("selected_bus_id") or "").strip():
+            b_ids = [str(inv.get("selected_bus_id") or "").strip()]
+        tids = sorted({bus_tender.get(bid, "") for bid in b_ids if bus_tender.get(bid, "")})
+        cons = sorted({str(tender_con.get(tid, "") or "").strip() for tid in tids if str(tender_con.get(tid, "") or "").strip()})
+        label = (
+            cons[0]
+            if len(cons) == 1
+            else (" / ".join(cons[:3]) + (f" (+{len(cons) - 3})" if len(cons) > 3 else ""))
+            if cons
+            else "Unassigned"
+        )
+        inv["tender_ids"] = tids
+        inv["concessionaires"] = cons
+        inv["concessionaire"] = label
+        out[i] = inv
+    return out
 
 @router.get("/billing/trip-ids")
 async def list_billing_trip_ids(
@@ -2314,6 +2447,7 @@ async def list_invoices(
     total = await db.billing.count_documents(q)
     cur = db.billing.find(q, {"_id": 0}).sort("created_at", -1).skip((p - 1) * lim).limit(lim)
     items = await cur.to_list(lim)
+    items = await _enrich_billing_invoice_tender_fields(items)
     return paged_payload(items, total=total, page=page, limit=limit)
 
 @router.get("/billing/{invoice_id}")
@@ -2321,13 +2455,17 @@ async def get_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
     inv = await db.billing.find_one({"invoice_id": invoice_id}, {"_id": 0})
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
-    return inv
+    enriched = await _enrich_billing_invoice_tender_fields([inv])
+    return enriched[0] if enriched else inv
 
 @router.get("/billing/{invoice_id}/export-pdf")
 async def export_invoice_pdf(invoice_id: str, user: dict = Depends(get_current_user)):
     inv = await db.billing.find_one({"invoice_id": invoice_id}, {"_id": 0})
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    enriched = await _enrich_billing_invoice_tender_fields([inv])
+    if enriched:
+        inv = enriched[0]
     bus_rows = list(inv.get("bus_wise_summary") or [])
     trip_rows = list(inv.get("trip_wise_details") or [])
     def _row_revenue(row: dict) -> float:
@@ -2341,6 +2479,7 @@ async def export_invoice_pdf(invoice_id: str, user: dict = Depends(get_current_u
     pdf.cell(190, 6, f"Invoice ID: {inv['invoice_id']}", ln=True)
     pdf.cell(190, 6, _fpdf_cell_text(f"Period: {_to_indian_date_text(inv.get('period_start', ''))} to {_to_indian_date_text(inv.get('period_end', ''))}"), ln=True)
     pdf.cell(190, 6, f"Depot: {inv.get('depot', 'All')}", ln=True)
+    pdf.cell(190, 6, _fpdf_cell_text(f"Concessionaire: {inv.get('concessionaire', 'Unassigned')}"), ln=True)
     pdf.cell(190, 6, _fpdf_cell_text(f"Generated: {_to_indian_date_text(inv.get('created_at', ''))}"), ln=True)
     pdf.ln(5)
     pdf.set_font("Helvetica", "B", 11)
@@ -2444,6 +2583,9 @@ async def export_invoice_excel(invoice_id: str, user: dict = Depends(get_current
     inv = await db.billing.find_one({"invoice_id": invoice_id}, {"_id": 0})
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    enriched = await _enrich_billing_invoice_tender_fields([inv])
+    if enriched:
+        inv = enriched[0]
     bus_rows = list(inv.get("bus_wise_summary") or [])
     trip_rows = list(inv.get("trip_wise_details") or [])
     def _row_revenue(row: dict) -> float:
@@ -2456,6 +2598,7 @@ async def export_invoice_excel(invoice_id: str, user: dict = Depends(get_current
     ws.append(["Invoice ID", inv["invoice_id"]])
     ws.append(["Period", f"{_to_indian_date_text(inv.get('period_start', ''))} to {_to_indian_date_text(inv.get('period_end', ''))}"])
     ws.append(["Depot", inv.get("depot", "All")])
+    ws.append(["Concessionaire", inv.get("concessionaire", "Unassigned")])
     ws.append([])
     ws.append(["Component", "Value"])
     fields = [
@@ -2872,6 +3015,8 @@ async def _collect_report_rows(
     status: str,
     incident_type: str,
     severity: str,
+    alert_code: str = "",
+    resolved: str = "",
     user: dict | None = None,
     route: str = "",
     period: str = "daily",
@@ -2891,6 +3036,27 @@ async def _collect_report_rows(
 ) -> tuple[str, list]:
     bid = _norm_q(bus_id)
     dep = _norm_q(depot)
+
+    if report_type == "alerts":
+        bus_q: dict = {}
+        if dep:
+            bus_q["depot"] = dep
+        if bid:
+            bus_q["bus_id"] = bid
+        buses = await db.buses.find(bus_q, {"_id": 0, "bus_id": 1, "depot": 1, "route_name": 1}).to_list(5000)
+        alerts = _synth_alert_rows_for_buses(buses)
+        ac = _norm_q(alert_code)
+        if ac:
+            alerts = [a for a in alerts if a.get("alert_code") == ac]
+        sev = _norm_q(severity)
+        if sev:
+            alerts = [a for a in alerts if a.get("severity") == sev]
+        res = _norm_q(resolved) or _norm_q(status)
+        if res in ("true", "resolved", "closed"):
+            alerts = [a for a in alerts if a.get("resolved") is True]
+        elif res in ("false", "active", "open"):
+            alerts = [a for a in alerts if a.get("resolved") is False]
+        return "alerts", alerts
 
     if report_type == "ticket_revenue":
         rows = await _collect_ticket_revenue_rows(date_from, date_to, depot, bus_id, route, period)
@@ -2914,6 +3080,7 @@ async def _collect_report_rows(
         if date_from and date_to:
             bq["$and"] = [{"period_start": {"$lte": date_to}}, {"period_end": {"$gte": date_from}}]
         data = await db.billing.find(bq, {"_id": 0}).to_list(1000)
+        data = await _enrich_billing_invoice_tender_fields(data)
         for row in data:
             ids = row.get("bus_ids") or []
             row["bus_id"] = ", ".join(ids[:5]) + (f" (+{len(ids) - 5} more)" if len(ids) > 5 else "")
@@ -3342,6 +3509,8 @@ async def generate_report(
     status: str = "",
     incident_type: str = "",
     severity: str = "",
+    alert_code: str = "",
+    resolved: str = "",
     route: str = "",
     period: str = "daily",
     category: str = "",
@@ -3370,6 +3539,8 @@ async def generate_report(
         status=status,
         incident_type=incident_type,
         severity=severity,
+        alert_code=alert_code,
+        resolved=resolved,
         user=user,
         route=route,
         period=period,
@@ -3404,6 +3575,78 @@ def _report_download_headers(report_type: str, cols: list[str]) -> list[str]:
     if report_type == "trip_km_verification":
         return [TRIP_KM_REPORT_HEADER_LABELS.get(c, c.replace("_", " ").title()) for c in cols]
     return [str(c).replace("_", " ").title() for c in cols]
+
+
+def _pdf_col_widths_for_report(report_type: str, cols: list[str]) -> list[float]:
+    """Preferred column widths (A4 landscape inner width ~= 270mm)."""
+    if report_type == "alerts":
+        preferred = {
+            "id": 22.0,
+            "alert_code": 20.0,
+            "alert_type": 22.0,
+            "message": 26.0,
+            "severity": 15.0,
+            "bus_id": 16.0,
+            "depot": 22.0,
+            "route": 22.0,
+            "incident_type": 20.0,
+            "default_infraction_code": 20.0,
+            "resolved": 14.0,
+            "timestamp": 31.0,
+        }
+        widths = [preferred.get(c, 18.0) for c in cols]
+        s = sum(widths)
+        if s > 0:
+            scale = 270.0 / s
+            return [w * scale for w in widths]
+    if report_type == "incidents":
+        preferred = {
+            "id": 28.0,
+            "incident_type": 24.0,
+            "channel": 15.0,
+            "bus_id": 16.0,
+            "depot": 20.0,
+            "assigned_team": 24.0,
+            "severity": 14.0,
+            "status": 16.0,
+            "occurred_at": 26.0,
+            "vehicles_affected": 20.0,
+            "vehicles_affected_count": 12.0,
+            "damage_summary": 20.0,
+            "engineer_action": 20.0,
+            "attachments_summary": 15.0,
+            "created_at": 20.0,
+        }
+        widths = [preferred.get(c, 18.0) for c in cols]
+        s = sum(widths)
+        if s > 0:
+            scale = 270.0 / s
+            return [w * scale for w in widths]
+    return [270.0 / max(len(cols), 1)] * len(cols)
+
+
+def _pdf_char_limit_for_width_mm(width_mm: float) -> int:
+    """
+    Conservative visible char estimate for Helvetica 8pt.
+    Keeps text inside cell boundaries to avoid visual overlap.
+    """
+    return max(4, int(width_mm * 0.56))
+
+
+def _fpdf_wrap_cell_lines(value: object, width_mm: float) -> list[str]:
+    """Wrap a cell value into printable lines for the given PDF column width."""
+    text = _fpdf_cell_text(value)
+    limit = _pdf_char_limit_for_width_mm(width_mm)
+    parts = str(text).replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    lines: list[str] = []
+    for part in parts:
+        seg = part.strip()
+        if not seg:
+            lines.append("")
+            continue
+        wrapped = textwrap.wrap(seg, width=max(1, limit), break_long_words=True, break_on_hyphens=True)
+        lines.extend(wrapped or [""])
+    return lines or [""]
 
 
 def _to_indian_date_text(value: object) -> object:
@@ -3474,6 +3717,8 @@ async def download_report(
     status: str = "",
     incident_type: str = "",
     severity: str = "",
+    alert_code: str = "",
+    resolved: str = "",
     route: str = "",
     period: str = "daily",
     category: str = "",
@@ -3500,6 +3745,8 @@ async def download_report(
         status=status,
         incident_type=incident_type,
         severity=severity,
+        alert_code=alert_code,
+        resolved=resolved,
         user=user,
         route=route,
         period=period,
@@ -3540,12 +3787,28 @@ async def download_report(
             "attachments_summary",
             "created_at",
         ]
+    elif report_type == "alerts":
+        cols = [
+            "id",
+            "alert_code",
+            "alert_type",
+            "message",
+            "severity",
+            "bus_id",
+            "depot",
+            "route",
+            "incident_type",
+            "default_infraction_code",
+            "resolved",
+            "timestamp",
+        ]
     elif report_type == "billing":
         cols = [
             "invoice_id",
             "period_start",
             "period_end",
             "depot",
+            "concessionaire",
             "bus_id",
             "base_payment",
             "energy_adjustment",
@@ -3655,6 +3918,19 @@ async def download_report(
         ws.append(header_row)
         for row in data:
             ws.append([_excel_cell_value(row.get(c, "")) for c in cols])
+        # Improve readability for long text values in generic report exports.
+        for col_idx in range(1, len(cols) + 1):
+            letter = get_column_letter(col_idx)
+            max_len = len(str(header_row[col_idx - 1] or ""))
+            for row_idx in range(2, min(len(data) + 2, 1502)):
+                cell = ws.cell(row_idx, col_idx)
+                cell.alignment = Alignment(vertical="top", horizontal="left", wrap_text=True)
+                val_len = len(str(cell.value or ""))
+                if val_len > max_len:
+                    max_len = min(val_len, 64)
+            ws.column_dimensions[letter].width = max(12, min(40, max_len + 2))
+        for col_idx in range(1, len(cols) + 1):
+            ws.cell(1, col_idx).alignment = Alignment(vertical="center", horizontal="center", wrap_text=True)
         buf = io.BytesIO()
         wb.save(buf)
         buf.seek(0)
@@ -3683,15 +3959,47 @@ async def download_report(
             align="C",
         )
     pdf.set_font("Helvetica", "", 8)
-    col_w = 270 / max(len(pdf_cols), 1)
+    col_ws = _pdf_col_widths_for_report(report_type, pdf_cols)
     headers = _report_download_headers(report_type, pdf_cols)
-    for h in headers:
-        pdf.cell(col_w, 6, _fpdf_cell_text(h, 18), border=1)
-    pdf.ln()
+
+    line_h = 3.8
+
+    def _draw_pdf_header():
+        pdf.set_font("Helvetica", "B", 8)
+        y_start = pdf.get_y()
+        max_h = 6.0
+        for i, h in enumerate(headers):
+            w = col_ws[i]
+            hdr_lines = _fpdf_wrap_cell_lines(h, w)
+            hdr_h = max(6.0, line_h * len(hdr_lines) + 1.0)
+            if hdr_h > max_h:
+                max_h = hdr_h
+            x0 = pdf.get_x()
+            y0 = pdf.get_y()
+            pdf.rect(x0, y0, w, hdr_h, style="D")
+            pdf.set_xy(x0 + 0.6, y0 + 0.8)
+            pdf.multi_cell(w - 1.2, line_h, "\n".join(hdr_lines), border=0)
+            pdf.set_xy(x0 + w, y0)
+        pdf.set_xy(pdf.l_margin, y_start + max_h)
+        pdf.set_font("Helvetica", "", 8)
+
+    _draw_pdf_header()
     for row in data[:100]:
-        for c in pdf_cols:
-            pdf.cell(col_w, 5, _fpdf_cell_text(row.get(c, ""), 20), border=1)
-        pdf.ln()
+        wrapped_cells = [_fpdf_wrap_cell_lines(row.get(c, ""), col_ws[i]) for i, c in enumerate(pdf_cols)]
+        row_h = max(5.0, line_h * max(len(lines) for lines in wrapped_cells) + 1.0)
+        if pdf.get_y() + row_h > 194:
+            pdf.add_page("L")
+            _draw_pdf_header()
+        y0 = pdf.get_y()
+        x0 = pdf.get_x()
+        for i, _c in enumerate(pdf_cols):
+            w = col_ws[i]
+            pdf.rect(x0, y0, w, row_h, style="D")
+            pdf.set_xy(x0 + 0.6, y0 + 0.8)
+            pdf.multi_cell(w - 1.2, line_h, "\n".join(wrapped_cells[i]), border=0)
+            x0 += w
+            pdf.set_xy(x0, y0)
+        pdf.set_xy(pdf.l_margin, y0 + row_h)
     buf = io.BytesIO()
     pdf.output(buf)
     buf.seek(0)
@@ -3742,9 +4050,28 @@ def _incident_attachment_dir(incident_id: str) -> Path:
     return settings.upload_dir / "incidents" / safe_id
 
 
+def _normalize_incident_channel(ch: object) -> str:
+    """API output: system vs manual; map legacy web/telephonic/mobile/other → manual."""
+    s = str(ch or "").strip().lower()
+    if s == "system":
+        return "system"
+    if s == "manual":
+        return "manual"
+    if s in ("web", "telephonic", "mobile", "other", ""):
+        return "manual"
+    return "manual"
+
+
 def _incident_public_doc(doc: dict) -> dict:
     """Omit server-only attachment paths from API JSON."""
     out = dict(doc)
+    if "channel" in out:
+        out["channel"] = _normalize_incident_channel(out.get("channel"))
+    infs = out.get("infractions")
+    if isinstance(infs, list):
+        for inf in infs:
+            if isinstance(inf, dict) and inf.get("infraction_code"):
+                inf["infraction_code"] = normalize_catalog_infraction_code(inf.get("infraction_code"))
     atts = out.get("attachments")
     if isinstance(atts, list):
         out["attachments"] = [{k: v for k, v in a.items() if k != "stored_name"} for a in atts if isinstance(a, dict)]
@@ -3773,11 +4100,14 @@ async def incidents_meta(user: dict = Depends(get_current_user)):
             "max_bytes": settings.max_upload_bytes,
             "allowed_content_types": sorted(settings.allowed_upload_content_types),
         },
+        # When O-rows are used for unlisted cases, UI may hint closest official Table C row.
+        "suggested_official_table_c_if_unlisted": dict(SUGGESTED_TABLE_C_FOR_UNLISTED_INCIDENT_TYPE),
     }
 
 
 @router.get("/incidents")
 async def list_incidents(
+    search: str = "",
     status: str = "",
     incident_type: str = "",
     depot: str = "",
@@ -3812,6 +4142,22 @@ async def list_incidents(
     sev = _norm_q(severity)
     if sev:
         q["severity"] = sev
+    search_q = _norm_q(search)
+    if search_q:
+        esc = re.escape(search_q)
+        q["$and"] = q.get("$and", [])
+        q["$and"].append(
+            {
+                "$or": [
+                    {"id": {"$regex": esc, "$options": "i"}},
+                    {"incident_type": {"$regex": esc, "$options": "i"}},
+                    {"description": {"$regex": esc, "$options": "i"}},
+                    {"bus_id": {"$regex": esc, "$options": "i"}},
+                    {"depot": {"$regex": esc, "$options": "i"}},
+                    {"infractions.infraction_code": {"$regex": esc, "$options": "i"}},
+                ]
+            }
+        )
     if date_from:
         q.setdefault("created_at", {})["$gte"] = f"{date_from[:10]}T00:00:00"
     if date_to:
@@ -3834,43 +4180,23 @@ async def get_incident(incident_id: str, user: dict = Depends(get_current_user))
     return _incident_public_doc(doc)
 
 
-def _resolve_infractions_list(request_infractions: list, occurred_at: str) -> list[dict]:
-    """Helper to take a list of InfractionEntryReq and return fully-hydrated infraction snapshots."""
-    now_date = (occurred_at or datetime.now(timezone.utc).isoformat())[:10]
-    out = []
-    for entry in request_infractions:
-        code = str(entry.code if hasattr(entry, "code") else entry.get("code", "")).strip().upper()
-        if not code:
-            continue
-        master = MASTER_BY_CODE.get(code)
-        if not master:
-            continue # skipped if not in catalogue
-        
-        # Calculate resolve_by date
-        res_days = int(master.get("resolve_days", 1))
-        res_by = _add_days_ymd(now_date, res_days)
-        
-        out.append({
-            "infraction_code": master["code"],
-            "category": master["category"],
-            "description": master["description"],
-            "amount": master["amount"],
-            "amount_snapshot": master["amount"], # base frozen at creation
-            "resolve_days": res_days,
-            "resolve_by": res_by,
-            "safety_flag": bool(master.get("safety_flag")),
-            "deductible": entry.deductible if hasattr(entry, "deductible") else entry.get("deductible", True),
-            "status": "open",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "closed_at": None,
-            "close_remarks": ""
-        })
-    return out
+def _normalize_infraction_code(raw: str | None) -> str:
+    """Map missing/legacy codes via normalize_catalog_infraction_code (O-series active codes)."""
+    return normalize_catalog_infraction_code(raw)
 
 
 @router.post("/incidents")
 async def create_incident(req: IncidentCreateReq, user: dict = Depends(require_permission("operations.incidents.create"))):
-    code = normalize_incident_type(req.incident_type)
+    raw_type = (req.incident_type or "").strip()
+    if raw_type:
+        code = normalize_incident_type(raw_type)
+    elif req.infractions:
+        code = infer_incident_type_from_infraction_code(req.infractions[0].code)
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Either incident_type or at least one linked penalty (infraction code) is required.",
+        )
     if code not in creatable_incident_type_codes():
         raise HTTPException(
             status_code=400,
@@ -3920,19 +4246,29 @@ async def create_incident(req: IncidentCreateReq, user: dict = Depends(require_p
     # Unified Infractions Logic
     infractions_to_log = list(req.infractions)
     
-    # Auto-attach logic (Choice 3.A)
+    # Auto-attach Schedule-S codes when incident taxonomy implies a standard penalty.
     auto_mappings = {
         "OVERSPEED": "E01",
         "OVERSPEED_CRITICAL": "E01",
         "ITS_GPS_FAILURE": "B08",
         "ROUTE_DEVIATION": "B06",
+        "IDLE_EXCESS": "A12",
+        "BUNCHING_ALERT": "B05",
+        "HARNESS_REMOVAL": "C09",
+        "PANIC_OR_SECURITY": "O03",
+        "PASSENGER_COMPLAINT": "C13",
     }
     if code in auto_mappings:
         auto_code = auto_mappings[code]
         if not any(inf.code == auto_code for inf in infractions_to_log):
             infractions_to_log.append(InfractionEntryReq(code=auto_code, deductible=True))
 
-    resolved_infractions = await _resolve_infractions_list(infractions_to_log, req.occurred_at)
+    km20_pk_rate = await _pk_rate_for_bus(bus_id)
+    resolved_infractions = await _resolve_infractions_list(
+        infractions_to_log,
+        req.occurred_at,
+        km20_pk_rate=km20_pk_rate,
+    )
 
     doc = {
         "id": f"INC-{uuid.uuid4().hex[:8].upper()}",
@@ -4089,7 +4425,12 @@ async def update_incident(
     inf_list = list(existing.get("infractions") or [])
     if req.infractions is not None:
         # Resolve new list from request
-        inf_list = await _resolve_infractions_list(req.infractions, existing.get("occurred_at", ""))
+        km20_pk_rate = await _pk_rate_for_bus(existing.get("bus_id"))
+        inf_list = await _resolve_infractions_list(
+            req.infractions,
+            existing.get("occurred_at", ""),
+            km20_pk_rate=km20_pk_rate,
+        )
         updates["infractions"] = inf_list
         log = _append_incident_activity(
             log,
@@ -4103,10 +4444,15 @@ async def update_incident(
         now_iso = _incident_now_iso()
         closed_any = False
         as_of_ymd = now_iso[:10]
+        km20_pk_rate = await _pk_rate_for_bus(existing.get("bus_id"))
         for inf in inf_list:
             if inf.get("status") != "closed":
                 # Freeze deduction at close time (with escalation up to close date).
-                inf["amount_current"] = _resolve_infraction_amount(inf, as_of_ymd=as_of_ymd)
+                inf["amount_current"] = _resolve_infraction_amount(
+                    inf,
+                    as_of_ymd=as_of_ymd,
+                    km20_pk_rate=km20_pk_rate,
+                )
                 inf["status"] = "closed"
                 inf["closed_at"] = now_iso
                 closed_any = True
@@ -4125,44 +4471,52 @@ async def update_incident(
 
 
 @router.put("/incidents/{incident_id}/infractions/{idx}/close")
-async def close_specific_infraction(
+async def close_incident_infraction(
     incident_id: str,
     idx: int,
     req: InfractionCloseReq,
     user: dict = Depends(require_permission("operations.incidents.update")),
 ):
-    """Close one specific infraction within an incident."""
+    """Close one infraction; freeze Schedule-S slab amount at close date (amount_current)."""
     existing = await db.incidents.find_one({"id": incident_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Incident not found")
-    
+
     inf_list = list(existing.get("infractions") or [])
     if idx < 0 or idx >= len(inf_list):
         raise HTTPException(status_code=400, detail="Invalid infraction index")
-    
+
     inf = inf_list[idx]
     if inf.get("status") == "closed":
-        return {"message": "Infraction already closed"}
-    
+        return {"message": "Already closed", "id": incident_id, "idx": idx}
+
     name = user.get("name", "") or user.get("email", "")
     now_iso = _incident_now_iso()
+    as_of_ymd = now_iso[:10]
+    km20_pk_rate = await _pk_rate_for_bus(existing.get("bus_id"))
+    # Freeze penalty at escalation level applicable as of close (row still open for _resolve_infraction_amount)
+    inf["amount_current"] = round(
+        _resolve_infraction_amount(inf, as_of_ymd=as_of_ymd, km20_pk_rate=km20_pk_rate),
+        2,
+    )
     inf["status"] = "closed"
     inf["closed_at"] = now_iso
-    inf["close_remarks"] = req.close_remarks
-    
+    inf["close_remarks"] = (req.close_remarks or "").strip() if req.close_remarks is not None else ""
+    inf["closed_by"] = name
+
     log = existing.get("activity_log") or []
     log = _append_incident_activity(
         log,
         action="infractions_close",
         user_name=name,
-        detail=f"Infraction {inf.get('infraction_code')} closed manually",
+        detail=f"Infraction {inf.get('infraction_code')} verified & resolved (₹{inf['amount_current']})",
     )
-    
+
     await db.incidents.update_one(
-        {"id": incident_id}, 
-        {"$set": {"infractions": inf_list, "activity_log": log, "updated_at": now_iso}}
+        {"id": incident_id},
+        {"$set": {"infractions": inf_list, "activity_log": log, "updated_at": now_iso}},
     )
-    return {"message": "Infraction closed"}
+    return {"message": "Infraction resolved", "id": incident_id, "idx": idx, "amount_current": inf["amount_current"]}
 
 
 @router.put("/incidents/{incident_id}/status-legacy")
@@ -4730,13 +5084,127 @@ def _duty_trip_cancel_reason_export(t: dict) -> str:
     custom = (t.get("cancel_reason_custom") or "").strip()
     if code == "other":
         return custom or "Other"
-    if code == "no_driver":
-        return "No driver"
-    if code == "no_conductor":
-        return "No conductor"
     if code in ("", "none"):
         return ""
     return code.replace("_", " ")
+
+
+def _duty_trip_needs_incident(t: dict) -> bool:
+    st = (t.get("trip_status") or "").strip().lower()
+    return st in ("cancelled", "not_operated")
+
+
+def _duty_trip_infraction_code(t: dict) -> str:
+    code = (t.get("cancel_reason_code") or "none").strip().lower()
+    if code in ("no_driver", "no_conductor"):
+        return "A12"
+    return "O08"
+
+
+def _merge_duty_trip_runtime_fields(existing_trips: list[dict], new_trips: list[dict]) -> list[dict]:
+    """Preserve runtime trip metadata (like linked incidents) when updating duty trips."""
+    by_trip_id: dict[str, dict] = {}
+    for t in existing_trips or []:
+        if not isinstance(t, dict):
+            continue
+        tid = str(t.get("trip_id") or "").strip()
+        if tid:
+            by_trip_id[tid] = t
+    merged: list[dict] = []
+    for t in new_trips or []:
+        if not isinstance(t, dict):
+            merged.append(t)
+            continue
+        tid = str(t.get("trip_id") or "").strip()
+        prev = by_trip_id.get(tid) if tid else None
+        if prev and not t.get("linked_incident_id") and prev.get("linked_incident_id"):
+            t = {**t, "linked_incident_id": prev.get("linked_incident_id")}
+        merged.append(t)
+    return merged
+
+
+async def _ensure_duty_trip_incidents(
+    *,
+    duty_doc: dict,
+    trips: list[dict],
+    actor_name: str,
+) -> list[dict]:
+    """Create one incident per cancelled/not-operated trip when not already linked."""
+    now_iso = _incident_now_iso()
+    out: list[dict] = []
+    for i, t in enumerate(trips or [], start=1):
+        trip = dict(t or {})
+        if not _duty_trip_needs_incident(trip):
+            out.append(trip)
+            continue
+        if str(trip.get("linked_incident_id") or "").strip():
+            out.append(trip)
+            continue
+
+        inf_code = normalize_catalog_infraction_code(_duty_trip_infraction_code(trip))
+        occ_date = str(duty_doc.get("date") or "").strip()
+        occ_time = str(trip.get("start_time") or "00:00").strip() or "00:00"
+        occurred_at = f"{occ_date}T{occ_time}:00" if occ_date else now_iso
+        km20_pk_rate = await _pk_rate_for_bus(duty_doc.get("bus_id"))
+        infs = await _resolve_infractions_list(
+            [InfractionEntryReq(code=inf_code, deductible=True)],
+            occurred_at,
+            km20_pk_rate=km20_pk_rate,
+        )
+        reason = _duty_trip_cancel_reason_export(trip) or "Cancelled / not operated"
+        incident_id = f"INC-{uuid.uuid4().hex[:8].upper()}"
+        status_txt = (trip.get("trip_status") or "").strip().lower() or "cancelled"
+        desc = (
+            f"Duty trip {trip.get('trip_id') or i} marked {status_txt.replace('_', ' ')}. "
+            f"Reason: {reason}."
+        )
+        incident_type = infer_incident_type_from_infraction_code(inf_code)
+        inc_doc = {
+            "id": incident_id,
+            "incident_type": incident_type,
+            "description": desc,
+            "occurred_at": occurred_at,
+            "vehicles_affected": [duty_doc.get("bus_id")] if duty_doc.get("bus_id") else [],
+            "vehicles_affected_count": 1,
+            "damage_summary": "",
+            "engineer_action": "",
+            "bus_id": duty_doc.get("bus_id", ""),
+            "driver_id": duty_doc.get("driver_license", ""),
+            "depot": duty_doc.get("depot", ""),
+            "route_name": duty_doc.get("route_name", ""),
+            "route_id": duty_doc.get("route_id", ""),
+            "trip_id": trip.get("trip_id", ""),
+            "duty_id": duty_doc.get("id", ""),
+            "location_text": "",
+            "telephonic_reference": "",
+            "channel": "manual",
+            "severity": "medium",
+            "status": "open",
+            "resolved_at": "",
+            "resolved_by": "",
+            "root_cause_note": "",
+            "resolution_note": "",
+            "next_action": "",
+            "preventive_action": "",
+            "assigned_to": "",
+            "assigned_team": "",
+            "infractions": infs,
+            "attachments": [],
+            "activity_log": [
+                {
+                    "at": now_iso,
+                    "by": actor_name,
+                    "action": "Created",
+                    "detail": f"Auto-created from duty cancellation ({trip.get('trip_id') or i}).",
+                }
+            ],
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        }
+        await db.incidents.insert_one(inc_doc)
+        trip["linked_incident_id"] = incident_id
+        out.append(trip)
+    return out
 
 
 @router.get("/duties")
@@ -5200,14 +5668,23 @@ async def create_duty(req: DutyReq, user: dict = Depends(require_permission("ope
     doc["sms_sent"] = False
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
     doc["created_by"] = user.get("name", "")
+    doc["trips"] = await _ensure_duty_trip_incidents(
+        duty_doc=doc,
+        trips=doc.get("trips", []),
+        actor_name=str(user.get("name") or user.get("email") or "user"),
+    )
     await db.duty_assignments.insert_one(doc)
     doc.pop("_id", None)
     return doc
 
 @router.put("/duties/{duty_id}")
-async def update_duty(duty_id: str, req: DutyReq, _: dict = Depends(require_permission("operations.duties.update"))):
+async def update_duty(duty_id: str, req: DutyReq, user: dict = Depends(require_permission("operations.duties.update"))):
     update = req.model_dump()
     update["trips"] = _apply_duty_trip_ids(duty_id, update.get("trips", []))
+    existing = await db.duty_assignments.find_one({"id": duty_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Duty not found")
+    update["trips"] = _merge_duty_trip_runtime_fields(existing.get("trips") or [], update.get("trips") or [])
     rid = (req.route_id or "").strip()
     route = await db.routes.find_one({"route_id": rid}, {"_id": 0})
     if not route:
@@ -5220,9 +5697,13 @@ async def update_duty(duty_id: str, req: DutyReq, _: dict = Depends(require_perm
     if driver:
         update["driver_name"] = driver.get("name", "")
         update["driver_phone"] = driver.get("phone", "")
+    update_with_id = {"id": duty_id, **existing, **update}
+    update["trips"] = await _ensure_duty_trip_incidents(
+        duty_doc=update_with_id,
+        trips=update.get("trips", []),
+        actor_name=str(user.get("name") or user.get("email") or "user"),
+    )
     result = await db.duty_assignments.update_one({"id": duty_id}, {"$set": update})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Duty not found")
     return {"message": "Duty updated"}
 
 @router.delete("/duties/{duty_id}")
@@ -5934,17 +6415,23 @@ async def list_infraction_catalogue(
     q = {"code": {"$in": allowed_codes}}
     st = (search or "").strip()
     if st:
-        esc = re.escape(st)
-        q["$and"] = [
-            {"code": {"$in": allowed_codes}},
-            {
-                "$or": [
-                    {"code": {"$regex": esc, "$options": "i"}},
-                    {"category": {"$regex": esc, "$options": "i"}},
-                    {"description": {"$regex": esc, "$options": "i"}},
-                ]
-            },
-        ]
+        tokens = [t for t in re.split(r"\s+", st) if t]
+        and_clauses: list[dict] = [{"code": {"$in": allowed_codes}}]
+        for tk in tokens:
+            esc = re.escape(tk)
+            and_clauses.append(
+                {
+                    "$or": [
+                        {"code": {"$regex": esc, "$options": "i"}},
+                        {"category": {"$regex": esc, "$options": "i"}},
+                        {"schedule_group": {"$regex": esc, "$options": "i"}},
+                        {"pillar": {"$regex": esc, "$options": "i"}},
+                        {"table": {"$regex": esc, "$options": "i"}},
+                        {"description": {"$regex": esc, "$options": "i"}},
+                    ]
+                }
+            )
+        q["$and"] = and_clauses
     total = await db.infraction_catalogue.count_documents(q)
     cur = db.infraction_catalogue.find(q, {"_id": 0}).sort("code", 1).skip((p - 1) * lim).limit(lim)
     items = await cur.to_list(lim)
@@ -5954,7 +6441,7 @@ async def list_infraction_catalogue(
 @router.get("/infractions/master")
 async def get_infraction_master(user: dict = Depends(get_current_user)):
     return {
-        "tables": ["A", "B", "C", "D", "E", "F", "G"],
+        "tables": ["A", "B", "C", "D", "E", "F", "G", "H", "16.6"],
         "report_heads": TENDER_REPORT_HEADS,
         "items": build_master_rows(),
         "cap_rules": {
@@ -6280,78 +6767,54 @@ async def delete_business_rule(rule_key: str, _: dict = Depends(require_permissi
 # UNIFIED INFRACTIONS HELPERS
 # ══════════════════════════════════════════════════════════
 
-async def _resolve_infractions_list(inf_reqs: list[InfractionEntryReq], occurred_at: str) -> list[dict]:
-    """Take infraction requests (codes) and resolve them against the master catalogue."""
+async def _resolve_infractions_list(
+    inf_reqs: list[InfractionEntryReq],
+    occurred_at: str,
+    *,
+    km20_pk_rate: float = 0.0,
+) -> list[dict]:
+    """Take infraction requests (codes) and resolve them against the master catalogue (DB + tender MASTER_BY_CODE)."""
     if not inf_reqs:
         return []
-        
+
     resolved = []
-    occ_date = occurred_at[:10]
-    
+    occ_date = (occurred_at or datetime.now(timezone.utc).isoformat())[:10]
+
     for req in inf_reqs:
-        master = await db.infraction_catalogue.find_one({"code": req.code}, {"_id": 0})
+        code = _normalize_infraction_code(req.code)
+        master = await db.infraction_catalogue.find_one({"code": code}, {"_id": 0})
         if not master:
-            continue # or raise error? usually we validate in request
-            
+            master = MASTER_BY_CODE.get(code)
+        if not master:
+            continue
+
         category = str(master.get("category") or "A").upper()
-        # Default resolve days from slabs if not set in master
         resolve_days = int(master.get("resolve_days") or INFRACTION_SLABS.get(category, INFRACTION_SLABS["A"]).resolve_days)
-        
-        entry = {
-            "infraction_code": master["code"],
-            "category": category,
-            "description": master["description"],
-            "amount": float(master["amount"]),
-            "amount_current": float(master["amount"]), # current as of resolution
-            "amount_snapshot": float(master["amount"]), # amount stuck since closure
-            "safety_flag": bool(master.get("safety_flag", False)),
-            "deductible": bool(req.deductible),
-            "status": "open",
-            "resolve_by": _add_days_ymd(occ_date, resolve_days),
-            "resolve_days": resolve_days,
-            "opened_at": datetime.now(timezone.utc).isoformat(),
-            "closed_at": "",
-            "close_remarks": ""
-        }
-        resolved.append(entry)
-        
+        amt = float(master.get("amount", 0))
+        if master["code"] in _INCIDENT_166_20KM_CODES and amt <= 0 and km20_pk_rate > 0:
+            amt = round(20.0 * float(km20_pk_rate), 2)
+
+        resolved.append(
+            {
+                "infraction_code": master["code"],
+                "category": category,
+                "description": master["description"],
+                "amount": amt,
+                "amount_current": amt,
+                "amount_snapshot": amt,
+                "safety_flag": bool(master.get("safety_flag", False)),
+                "schedule_group": str(
+                    master.get("schedule_group") or master.get("pillar") or "operations"
+                ),
+                "pillar": str(master.get("schedule_group") or master.get("pillar") or "operations"),
+                "deductible": bool(req.deductible),
+                "status": "open",
+                "resolve_by": _add_days_ymd(occ_date, resolve_days),
+                "resolve_days": resolve_days,
+                "opened_at": datetime.now(timezone.utc).isoformat(),
+                "closed_at": "",
+                "close_remarks": "",
+            }
+        )
+
     return resolved
-
-
-@router.put("/incidents/{incident_id}/infractions/{idx}/close")
-async def close_incident_infraction(
-    incident_id: str,
-    idx: int,
-    req: InfractionCloseReq,
-    user: dict = Depends(require_permission("operations.incidents.update")),
-):
-    existing = await db.incidents.find_one({"id": incident_id}, {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Incident not found")
-    
-    infractions = list(existing.get("infractions") or [])
-    if idx < 0 or idx >= len(infractions):
-        raise HTTPException(status_code=400, detail="Invalid infraction index")
-    
-    inf = infractions[idx]
-    if inf.get("status") == "closed":
-        return {"message": "Already closed", "id": incident_id, "idx": idx}
-        
-    inf["status"] = "closed"
-    inf["close_remarks"] = (req.close_remarks or "").strip()
-    inf["closed_at"] = _incident_now_iso()
-    inf["closed_by"] = user.get("name", "") or user.get("email", "")
-    
-    log = existing.get("activity_log") or []
-    log = _append_incident_activity(
-        log,
-        action="infractions_close",
-        user_name=user.get("name", ""),
-        detail=f"Infraction {inf.get('infraction_code')} verified & resolved",
-    )
-    
-    await db.incidents.update_one(
-        {"id": incident_id}, 
-        {"$set": {"infractions": infractions, "activity_log": log, "updated_at": _incident_now_iso()}}
-    )
-    return {"message": "Infraction resolved", "id": incident_id, "idx": idx}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import API, { buildQuery, fetchAllPaginated, formatApiError } from "../lib/api";
+import API, { buildQuery, fetchAllPaginated, formatApiError, getBackendOrigin } from "../lib/api";
 import { Endpoints } from "../lib/endpoints";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
@@ -8,6 +8,7 @@ import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import AsyncPanel from "../components/AsyncPanel";
 import TablePaginationBar from "../components/TablePaginationBar";
+import ReportDownloads from "../components/ReportDownloads";
 import { AlertTriangle, Bell, CheckCircle2, Search, Filter, RotateCcw } from "lucide-react";
 
 const SEV_STYLES = {
@@ -145,6 +146,29 @@ export default function AlertsCenterPage() {
     setSearch("");
   };
 
+  const reportParams = useMemo(
+    () =>
+      buildQuery({
+        report_type: "alerts",
+        depot,
+        bus_id: busId,
+        alert_code: alertCode,
+        severity,
+        resolved,
+      }),
+    [depot, busId, alertCode, severity, resolved],
+  );
+  const reportPdfHref = useMemo(() => {
+    const q = new URLSearchParams({ ...reportParams, fmt: "pdf" });
+    const origin = getBackendOrigin();
+    return `${origin || ""}/api/reports/download?${q.toString()}`;
+  }, [reportParams]);
+  const reportExcelHref = useMemo(() => {
+    const q = new URLSearchParams({ ...reportParams, fmt: "excel" });
+    const origin = getBackendOrigin();
+    return `${origin || ""}/api/reports/download?${q.toString()}`;
+  }, [reportParams]);
+
   return (
     <div data-testid="alerts-center-page" className="space-y-4">
       <div className="rounded-2xl border border-gray-200 bg-gradient-to-r from-[#FFF6F7] via-white to-white p-4 sm:p-5">
@@ -238,6 +262,7 @@ export default function AlertsCenterPage() {
             <Button onClick={() => load(1)} className="bg-[#C8102E] hover:bg-[#A50E25]">
               Refresh
             </Button>
+            <ReportDownloads pdfHref={reportPdfHref} excelHref={reportExcelHref} />
             <Button type="button" variant="outline" onClick={clearFilters}>
               <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
               Clear
@@ -274,6 +299,16 @@ export default function AlertsCenterPage() {
                           {a.severity}
                         </Badge>
                         <Badge variant="outline" className="text-[10px] bg-gray-50">{a.alert_code}</Badge>
+                        {a.incident_type ? (
+                          <Badge variant="outline" className="text-[10px] border-violet-200 bg-violet-50 text-violet-900 font-mono">
+                            {a.incident_type}
+                          </Badge>
+                        ) : null}
+                        {a.default_infraction_code ? (
+                          <Badge variant="outline" className="text-[10px] font-mono border-amber-200 bg-amber-50 text-amber-900">
+                            {a.default_infraction_code}
+                          </Badge>
+                        ) : null}
                         <span className="text-[11px] text-gray-600 font-mono">{a.bus_id}</span>
                         <span className="text-[11px] text-gray-500">{a.depot || "-"}</span>
                         <span className="text-[11px] text-gray-500">{a.route || "-"}</span>
