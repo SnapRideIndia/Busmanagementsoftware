@@ -589,7 +589,7 @@ export default function DutyPage() {
               <div className="space-y-2"><Label>Ending point</Label><Input value={form.end_point} readOnly disabled placeholder="Auto-filled from route" data-testid="duty-end-point" /></div>
             </div>
             <div className="border rounded-md p-3 bg-gray-50 space-y-3">
-              <Label className="text-sm font-semibold">Punctuality (duty-level, depot to depot)</Label>
+              <Label className="text-sm font-semibold">Punctuality</Label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1"><Label className="text-xs text-gray-600">Scheduled departure</Label><Input type="time" value={form.punctuality_scheduled_departure || ""} onChange={(e) => setForm({ ...form, punctuality_scheduled_departure: e.target.value })} data-testid="duty-punctuality-sched-dep" /></div>
                 <div className="space-y-1"><Label className="text-xs text-gray-600">Scheduled arrival</Label><Input type="time" value={form.punctuality_scheduled_arrival || ""} onChange={(e) => setForm({ ...form, punctuality_scheduled_arrival: e.target.value })} data-testid="duty-punctuality-sched-arr" /></div>
