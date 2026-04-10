@@ -5367,6 +5367,8 @@ def _duty_text_search_filter(q: str) -> dict:
         "$or": [
             {"driver_name": pat},
             {"driver_license": pat},
+            {"conductor_name": pat},
+            {"conductor_id": pat},
             {"route_name": pat},
             {"start_point": pat},
             {"end_point": pat},
@@ -5390,6 +5392,46 @@ def _apply_duty_trip_ids(duty_id: str, trips: list) -> list:
         t["trip_id"] = f"{duty_id}-T{tn_int}"
         out.append(t)
     return out
+
+
+def _enrich_duty_trips_points(trips: list, start_point: str, end_point: str) -> list:
+    """Ensure each duty trip has start/end points based on direction (A->B / B->A)."""
+    sp = str(start_point or "").strip()
+    ep = str(end_point or "").strip()
+    out: list[dict] = []
+    for i, raw in enumerate(trips or []):
+        t = dict(raw) if isinstance(raw, dict) else {}
+        direction = str(t.get("direction") or ("outward" if i % 2 == 0 else "return")).strip().lower()
+        t["direction"] = direction
+        if not str(t.get("start_point") or "").strip():
+            t["start_point"] = sp if direction != "return" else ep
+        if not str(t.get("end_point") or "").strip():
+            t["end_point"] = ep if direction != "return" else sp
+        out.append(t)
+    return out
+
+
+def _derive_duty_punctuality_from_trips(trips: list[dict]) -> dict[str, str]:
+    """Duty-level punctuality summary: first departure and last arrival across trip legs."""
+    ordered = sorted(
+        [dict(t) for t in (trips or []) if isinstance(t, dict)],
+        key=lambda t: int(t.get("trip_number", 0) or 0),
+    )
+    if not ordered:
+        return {
+            "punctuality_scheduled_departure": "",
+            "punctuality_scheduled_arrival": "",
+            "punctuality_actual_departure": "",
+            "punctuality_actual_arrival": "",
+        }
+    first = ordered[0]
+    last = ordered[-1]
+    return {
+        "punctuality_scheduled_departure": str(first.get("start_time") or "").strip(),
+        "punctuality_scheduled_arrival": str(last.get("end_time") or "").strip(),
+        "punctuality_actual_departure": str(first.get("actual_start_time") or "").strip(),
+        "punctuality_actual_arrival": str(last.get("actual_end_time") or "").strip(),
+    }
 
 
 def _duty_trip_sms_fragment(t: dict) -> str:
@@ -5662,19 +5704,23 @@ def _duty_summary_build_excel(
         "Date",
         "Depot",
         "Driver",
+        "Conductor",
         "Phone",
         "Bus",
         "Route",
         "From",
         "To",
+        "Punctuality Sch dep",
+        "Punctuality Sch arr",
+        "Punctuality Act dep",
+        "Punctuality Act arr",
         "Duty SMS sent",
         "Trip #",
-        "Direction",
         "Trip ID",
-        "Sched dep",
-        "Sched arr",
-        "Actual dep",
-        "Actual arr",
+        "Trip start",
+        "Trip end",
+        "Start time",
+        "End time",
         "Trip status",
         "Cancellation / note",
     ]
@@ -5739,7 +5785,7 @@ def _duty_summary_build_excel(
 
     data_start = header_row + 1
     r = data_start
-    wrap_cols = {4, 7, 8, 9, 13, 19}
+    wrap_cols = {4, 5, 8, 9, 10, 17, 23}
 
     def append_row(vals: list):
         nonlocal r
@@ -5774,13 +5820,17 @@ def _duty_summary_build_excel(
                     _excel_cell_value(ddate),
                     _excel_cell_value(ddepot),
                     _excel_cell_value(drv),
+                    _excel_cell_value(duty.get("conductor_name", "")),
                     _excel_cell_value(phone),
                     _excel_cell_value(bus),
                     _excel_cell_value(rname),
                     _excel_cell_value(sp),
                     _excel_cell_value(ep),
+                    _excel_cell_value(duty.get("punctuality_scheduled_departure", "")),
+                    _excel_cell_value(duty.get("punctuality_scheduled_arrival", "")),
+                    _excel_cell_value(duty.get("punctuality_actual_departure", "")),
+                    _excel_cell_value(duty.get("punctuality_actual_arrival", "")),
                     sms_yes,
-                    "",
                     "",
                     "",
                     "",
@@ -5801,19 +5851,23 @@ def _duty_summary_build_excel(
                     _excel_cell_value(ddate),
                     _excel_cell_value(ddepot),
                     _excel_cell_value(drv),
+                    _excel_cell_value(duty.get("conductor_name", "")),
                     _excel_cell_value(phone),
                     _excel_cell_value(bus),
                     _excel_cell_value(rname),
                     _excel_cell_value(sp),
                     _excel_cell_value(ep),
+                    _excel_cell_value(duty.get("punctuality_scheduled_departure", "")),
+                    _excel_cell_value(duty.get("punctuality_scheduled_arrival", "")),
+                    _excel_cell_value(duty.get("punctuality_actual_departure", "")),
+                    _excel_cell_value(duty.get("punctuality_actual_arrival", "")),
                     sms_yes,
                     _excel_cell_value(t.get("trip_number", "")),
-                    _excel_cell_value(t.get("direction", "")),
                     _excel_cell_value(t.get("trip_id", "")),
+                    _excel_cell_value(t.get("start_point", "")),
+                    _excel_cell_value(t.get("end_point", "")),
                     _excel_cell_value(t.get("start_time", "")),
                     _excel_cell_value(t.get("end_time", "")),
-                    _excel_cell_value(t.get("actual_start_time", "")),
-                    _excel_cell_value(t.get("actual_end_time", "")),
                     _excel_cell_value(t.get("trip_status", "")),
                     _excel_cell_value(_duty_trip_cancel_reason_export(t)),
                 ],
@@ -5827,13 +5881,13 @@ def _duty_summary_build_excel(
                 if cell.value is not None:
                     for part in str(cell.value).splitlines():
                         maxlen = max(maxlen, len(part))
-        if c in (4, 7, 8, 9):
+        if c in (4, 5, 8, 9, 10):
             wch = min(max(maxlen * 1.12 + 2.5, 14), 48)
-        elif c == 13:
+        elif c == 17:
             wch = min(max(maxlen * 1.1 + 2, 12), 36)
-        elif c == 19:
+        elif c == 23:
             wch = min(max(maxlen * 1.08 + 2, 16), 52)
-        elif c in (1, 2, 6, 11, 12, 14, 15, 16, 17, 18):
+        elif c in (1, 2, 6, 7, 11, 12, 13, 14, 15, 16, 18, 19, 20, 21, 22):
             wch = min(max(maxlen * 1.05 + 1.8, 10), 22)
         else:
             wch = min(max(maxlen * 1.08 + 2, 11), 28)
@@ -5862,8 +5916,8 @@ def _duty_summary_build_pdf(
     def draw_table_header():
         pdf.set_font("Helvetica", "B", 8)
         pdf.set_text_color(0, 0, 0)
-        weights = [0.05, 0.07, 0.12, 0.055, 0.055, 0.055, 0.055, 0.075, 0.415]
-        labs = ["Trip", "Dir", "Trip ID", "Sch dep", "Sch arr", "Act dep", "Act arr", "Status", "Cancellation / note"]
+        weights = [0.05, 0.12, 0.11, 0.11, 0.08, 0.08, 0.08, 0.37]
+        labs = ["Trip", "Trip ID", "Start", "End", "Start time", "End time", "Status", "Cancellation / note"]
         col_w = [epw * w for w in weights]
         for i, w in enumerate(col_w):
             pdf.cell(w, 6.5, _fpdf_cell_text(labs[i], 22), border=1, align="C", fill=False)
@@ -5905,6 +5959,13 @@ def _duty_summary_build_pdf(
             f"Duty SMS: {'Yes' if duty.get('sms_sent') else 'No'}"
         )
         pdf.cell(epw, 5, _fpdf_cell_text(b2, 220), ln=True, fill=False)
+        ptxt = (
+            f"  Punctuality: Sch {duty.get('punctuality_scheduled_departure', '') or '—'} - "
+            f"{duty.get('punctuality_scheduled_arrival', '') or '—'} | Act "
+            f"{duty.get('punctuality_actual_departure', '') or '—'} - "
+            f"{duty.get('punctuality_actual_arrival', '') or '—'}"
+        )
+        pdf.cell(epw, 5, _fpdf_cell_text(ptxt, 220), ln=True, fill=False)
         pdf.ln(1)
         trips = duty.get("trips") or []
         if not trips:
@@ -5919,12 +5980,11 @@ def _duty_summary_build_pdf(
             note = _duty_trip_cancel_reason_export(t)
             row = [
                 t.get("trip_number", ""),
-                t.get("direction", ""),
                 t.get("trip_id", ""),
+                t.get("start_point", ""),
+                t.get("end_point", ""),
                 t.get("start_time", ""),
                 t.get("end_time", ""),
-                t.get("actual_start_time", ""),
-                t.get("actual_end_time", ""),
                 (t.get("trip_status", "") or "").replace("_", " "),
                 note,
             ]
@@ -5940,7 +6000,7 @@ def _duty_summary_build_pdf(
             x0 = pdf.l_margin
             pdf.set_font("Helvetica", "", 7)
             pdf.set_text_color(0, 0, 0)
-            for i in range(8):
+            for i in range(7):
                 pdf.cell(
                     col_w[i],
                     row_h,
@@ -6036,6 +6096,11 @@ async def create_duty(req: DutyReq, user: dict = Depends(require_permission("ope
     bus = await db.buses.find_one({"bus_id": req.bus_id}, {"_id": 0})
     if not bus:
         raise HTTPException(status_code=404, detail="Bus not found")
+    conductor = None
+    if str(req.conductor_id or "").strip():
+        conductor = await db.conductors.find_one({"conductor_id": req.conductor_id.strip()}, {"_id": 0})
+        if not conductor:
+            raise HTTPException(status_code=404, detail="Conductor not found")
     rid = (req.route_id or "").strip()
     route = await db.routes.find_one({"route_id": rid}, {"_id": 0})
     if not route:
@@ -6048,8 +6113,17 @@ async def create_duty(req: DutyReq, user: dict = Depends(require_permission("ope
     doc["route_name"] = (route.get("name") or "").strip()
     doc["start_point"] = (route.get("origin") or "").strip()
     doc["end_point"] = (route.get("destination") or "").strip()
+    doc["trips"] = _enrich_duty_trips_points(doc.get("trips", []), doc["start_point"], doc["end_point"])
     doc["driver_name"] = driver.get("name", req.driver_name)
     doc["driver_phone"] = driver.get("phone", req.driver_phone)
+    doc["conductor_id"] = str(req.conductor_id or "").strip()
+    doc["conductor_name"] = (conductor or {}).get("name", req.conductor_name)
+    doc["conductor_phone"] = (conductor or {}).get("phone", req.conductor_phone)
+    p = _derive_duty_punctuality_from_trips(doc.get("trips", []))
+    doc["punctuality_scheduled_departure"] = str(req.punctuality_scheduled_departure or p["punctuality_scheduled_departure"]).strip()
+    doc["punctuality_scheduled_arrival"] = str(req.punctuality_scheduled_arrival or p["punctuality_scheduled_arrival"]).strip()
+    doc["punctuality_actual_departure"] = str(req.punctuality_actual_departure or p["punctuality_actual_departure"]).strip()
+    doc["punctuality_actual_arrival"] = str(req.punctuality_actual_arrival or p["punctuality_actual_arrival"]).strip()
     doc["depot"] = bus.get("depot", "")
     doc["status"] = "assigned"
     doc["sms_sent"] = False
@@ -6084,6 +6158,19 @@ async def update_duty(duty_id: str, req: DutyUpdateReq, user: dict = Depends(req
         update["driver_license"] = lic
         update["driver_name"] = driver.get("name", "")
         update["driver_phone"] = driver.get("phone", "")
+    if "conductor_id" in patch:
+        cid = (patch.get("conductor_id") or "").strip()
+        if cid:
+            conductor = await db.conductors.find_one({"conductor_id": cid}, {"_id": 0})
+            if not conductor:
+                raise HTTPException(status_code=404, detail="Conductor not found")
+            update["conductor_id"] = cid
+            update["conductor_name"] = conductor.get("name", "")
+            update["conductor_phone"] = conductor.get("phone", "")
+        else:
+            update["conductor_id"] = ""
+            update["conductor_name"] = ""
+            update["conductor_phone"] = ""
     if "bus_id" in patch:
         bid = (patch.get("bus_id") or "").strip()
         if not bid:
@@ -6104,6 +6191,14 @@ async def update_duty(duty_id: str, req: DutyUpdateReq, user: dict = Depends(req
         update["route_name"] = (route.get("name") or "").strip()
         update["start_point"] = (route.get("origin") or "").strip()
         update["end_point"] = (route.get("destination") or "").strip()
+    if "punctuality_scheduled_departure" in patch:
+        update["punctuality_scheduled_departure"] = str(patch.get("punctuality_scheduled_departure") or "").strip()
+    if "punctuality_scheduled_arrival" in patch:
+        update["punctuality_scheduled_arrival"] = str(patch.get("punctuality_scheduled_arrival") or "").strip()
+    if "punctuality_actual_departure" in patch:
+        update["punctuality_actual_departure"] = str(patch.get("punctuality_actual_departure") or "").strip()
+    if "punctuality_actual_arrival" in patch:
+        update["punctuality_actual_arrival"] = str(patch.get("punctuality_actual_arrival") or "").strip()
     if "date" in patch:
         d = (patch.get("date") or "").strip()
         if not d:
@@ -6114,12 +6209,21 @@ async def update_duty(duty_id: str, req: DutyUpdateReq, user: dict = Depends(req
     if "trips" in patch and patch.get("trips") is not None:
         new_trips = _apply_duty_trip_ids(duty_id, patch["trips"])
         new_trips = _merge_duty_trip_runtime_fields(existing.get("trips") or [], new_trips)
+        sp = update.get("start_point", existing.get("start_point", ""))
+        ep = update.get("end_point", existing.get("end_point", ""))
+        new_trips = _enrich_duty_trips_points(new_trips, sp, ep)
         update["trips"] = new_trips
 
     if not update:
         raise HTTPException(status_code=400, detail="No fields to update")
 
     merged_for_incidents = {**existing, **update}
+    if "trips" in update:
+        p = _derive_duty_punctuality_from_trips(update["trips"])
+        update.setdefault("punctuality_scheduled_departure", p["punctuality_scheduled_departure"])
+        update.setdefault("punctuality_scheduled_arrival", p["punctuality_scheduled_arrival"])
+        update.setdefault("punctuality_actual_departure", p["punctuality_actual_departure"])
+        update.setdefault("punctuality_actual_arrival", p["punctuality_actual_arrival"])
     if new_trips is not None:
         update["trips"] = await _ensure_duty_trip_incidents(
             duty_doc=merged_for_incidents,

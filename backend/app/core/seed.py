@@ -293,6 +293,12 @@ async def run_seed_data():
     drivers_list = await db.drivers.find({"status": "active"}, {"_id": 0}).to_list(500)
     driver_by_bus = {d.get("bus_id", ""): d for d in drivers_list if d.get("bus_id")}
     fallback_drivers = list(drivers_list)
+    conductors_list = await db.conductors.find({"status": "active"}, {"_id": 0}).to_list(500)
+    conductors_by_depot: dict[str, list[dict]] = {}
+    for c in conductors_list:
+        dep = str(c.get("depot", "") or "")
+        conductors_by_depot.setdefault(dep, []).append(c)
+    fallback_conductors = list(conductors_list)
 
     base_now = datetime.now(timezone.utc)
     trips_docs = []
@@ -312,6 +318,9 @@ async def run_seed_data():
                 continue
             bus_id = bus["bus_id"]
             drv = driver_by_bus.get(bus_id) or (fallback_drivers[bi % len(fallback_drivers)] if fallback_drivers else {})
+            depot_name = str(bus.get("depot", "") or "")
+            dep_cond = conductors_by_depot.get(depot_name) or fallback_conductors
+            cond = dep_cond[bi % len(dep_cond)] if dep_cond else {}
             route = all_routes[route_ptr % len(all_routes)]
             route_ptr += 1
 
@@ -361,8 +370,15 @@ async def run_seed_data():
                     {
                         "trip_number": trip_no,
                         "trip_id": trip_id,
+                        "start_point": route.get("origin", "") if trip_no == 1 else route.get("destination", ""),
+                        "end_point": route.get("destination", "") if trip_no == 1 else route.get("origin", ""),
                         "start_time": f"{trip_start:02d}:00",
                         "end_time": f"{trip_start + 2:02d}:00",
+                        "actual_start_time": f"{trip_start:02d}:{random.choice(['00', '05', '10'])}",
+                        "actual_end_time": f"{trip_start + 2:02d}:{random.choice(['00', '10', '20'])}",
+                        "trip_status": "scheduled",
+                        "cancel_reason_code": "none",
+                        "cancel_reason_custom": "",
                         "direction": "outward" if trip_no == 1 else "return",
                     }
                 )
@@ -395,11 +411,18 @@ async def run_seed_data():
                     "driver_license": drv.get("license_number", ""),
                     "driver_name": drv.get("name", ""),
                     "driver_phone": drv.get("phone", ""),
+                    "conductor_id": cond.get("conductor_id", ""),
+                    "conductor_name": cond.get("name", ""),
+                    "conductor_phone": cond.get("phone", ""),
                     "bus_id": bus_id,
                     "depot": bus.get("depot", ""),
                     "route_name": route.get("name", ""),
                     "start_point": route.get("origin", ""),
                     "end_point": route.get("destination", ""),
+                    "punctuality_scheduled_departure": duty_trips[0].get("start_time", "") if duty_trips else "",
+                    "punctuality_scheduled_arrival": duty_trips[-1].get("end_time", "") if duty_trips else "",
+                    "punctuality_actual_departure": duty_trips[0].get("actual_start_time", "") if duty_trips else "",
+                    "punctuality_actual_arrival": duty_trips[-1].get("actual_end_time", "") if duty_trips else "",
                     "date": day,
                     "trips": duty_trips,
                     "status": "assigned",
@@ -1108,6 +1131,7 @@ async def run_seed_data():
     if (not use_synced_operational_seed) and await db.duty_assignments.count_documents({}) == 0:
         drivers_list = await db.drivers.find({"status": "active"}, {"_id": 0}).to_list(100)
         buses_list = await db.buses.find({"status": "active"}, {"_id": 0}).to_list(100)
+        conductors_list = await db.conductors.find({"status": "active"}, {"_id": 0}).to_list(100)
         route_defs = [
             {"name": "Miyapur-Secunderabad Express", "start": "Miyapur", "end": "Secunderabad"},
             {"name": "LB Nagar-MGBS City", "start": "LB Nagar", "end": "MGBS"},
@@ -1123,6 +1147,7 @@ async def run_seed_data():
             date = (datetime.now(timezone.utc) + timedelta(days=day_offset)).strftime("%Y-%m-%d")
             for i, driver in enumerate(drivers_list[:8]):
                 bus = buses_list[i] if i < len(buses_list) else buses_list[0]
+                conductor = conductors_list[i % len(conductors_list)] if conductors_list else {}
                 rd = route_defs[i % len(route_defs)]
                 start_h = 6 + (i % 4) * 2
                 duties.append({
@@ -1130,15 +1155,46 @@ async def run_seed_data():
                     "driver_license": driver["license_number"],
                     "driver_name": driver["name"],
                     "driver_phone": driver.get("phone", ""),
+                    "conductor_id": conductor.get("conductor_id", ""),
+                    "conductor_name": conductor.get("name", ""),
+                    "conductor_phone": conductor.get("phone", ""),
                     "bus_id": bus["bus_id"],
                     "depot": bus.get("depot", ""),
                     "route_name": rd["name"],
                     "start_point": rd["start"],
                     "end_point": rd["end"],
+                    "punctuality_scheduled_departure": f"{start_h:02d}:00",
+                    "punctuality_scheduled_arrival": f"{start_h+5:02d}:30",
+                    "punctuality_actual_departure": f"{start_h:02d}:05",
+                    "punctuality_actual_arrival": f"{start_h+5:02d}:35",
                     "date": date,
                     "trips": [
-                        {"trip_number": 1, "start_time": f"{start_h:02d}:00", "end_time": f"{start_h+2:02d}:00", "direction": "outward"},
-                        {"trip_number": 2, "start_time": f"{start_h+3:02d}:30", "end_time": f"{start_h+5:02d}:30", "direction": "return"}
+                        {
+                            "trip_number": 1,
+                            "start_point": rd["start"],
+                            "end_point": rd["end"],
+                            "start_time": f"{start_h:02d}:00",
+                            "end_time": f"{start_h+2:02d}:00",
+                            "actual_start_time": f"{start_h:02d}:05",
+                            "actual_end_time": f"{start_h+2:02d}:05",
+                            "trip_status": "scheduled",
+                            "cancel_reason_code": "none",
+                            "cancel_reason_custom": "",
+                            "direction": "outward",
+                        },
+                        {
+                            "trip_number": 2,
+                            "start_point": rd["end"],
+                            "end_point": rd["start"],
+                            "start_time": f"{start_h+3:02d}:30",
+                            "end_time": f"{start_h+5:02d}:30",
+                            "actual_start_time": f"{start_h+3:02d}:35",
+                            "actual_end_time": f"{start_h+5:02d}:35",
+                            "trip_status": "scheduled",
+                            "cancel_reason_code": "none",
+                            "cancel_reason_custom": "",
+                            "direction": "return",
+                        }
                     ],
                     "status": "assigned",
                     "sms_sent": day_offset == 0,

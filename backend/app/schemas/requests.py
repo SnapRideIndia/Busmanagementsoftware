@@ -389,6 +389,9 @@ class DutyTripReq(BaseModel):
     """
 
     trip_number: int
+    trip_id: str = ""
+    start_point: str = ""
+    end_point: str = ""
     start_time: str = ""
     end_time: str = ""
     direction: str = "outward"
@@ -414,12 +417,19 @@ class DutyReq(BaseModel):
     driver_license: str
     driver_name: str = ""
     driver_phone: str = ""
+    conductor_id: str = ""
+    conductor_name: str = ""
+    conductor_phone: str = ""
     bus_id: str
     route_id: str = Field(..., min_length=1, max_length=64)
     # Snapshot fields (filled from route master on save).
     route_name: str = Field(default="", max_length=256)
     start_point: str = Field(default="", max_length=256)
     end_point: str = Field(default="", max_length=256)
+    punctuality_scheduled_departure: str = ""
+    punctuality_scheduled_arrival: str = ""
+    punctuality_actual_departure: str = ""
+    punctuality_actual_arrival: str = ""
     date: str
     trips: list[DutyTripReq] = Field(default_factory=list)
 
@@ -428,8 +438,13 @@ class DutyUpdateReq(BaseModel):
     """Partial update for PUT /duties/{id}. Only fields present in the JSON body are applied."""
 
     driver_license: str | None = None
+    conductor_id: str | None = None
     bus_id: str | None = None
     route_id: str | None = None
+    punctuality_scheduled_departure: str | None = None
+    punctuality_scheduled_arrival: str | None = None
+    punctuality_actual_departure: str | None = None
+    punctuality_actual_arrival: str | None = None
     date: str | None = None
     trips: list[DutyTripReq] | None = None
 

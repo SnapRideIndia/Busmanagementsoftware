@@ -21,8 +21,8 @@ export const TRIP_DIRECTION_OPTIONS = [
 
 export function defaultTripsForNewDuty() {
   return [
-    { trip_number: 1, start_time: "08:00", end_time: "10:00", direction: "outward", actual_start_time: "", actual_end_time: "", trip_status: "scheduled", cancel_reason_code: "none", cancel_reason_custom: "" },
-    { trip_number: 2, start_time: "11:30", end_time: "13:30", direction: "return", actual_start_time: "", actual_end_time: "", trip_status: "scheduled", cancel_reason_code: "none", cancel_reason_custom: "" },
+    { trip_number: 1, trip_id: "", start_point: "", end_point: "", start_time: "08:00", end_time: "10:00", direction: "outward", actual_start_time: "", actual_end_time: "", trip_status: "scheduled", cancel_reason_code: "none", cancel_reason_custom: "" },
+    { trip_number: 2, trip_id: "", start_point: "", end_point: "", start_time: "11:30", end_time: "13:30", direction: "return", actual_start_time: "", actual_end_time: "", trip_status: "scheduled", cancel_reason_code: "none", cancel_reason_custom: "" },
   ];
 }
 
@@ -30,6 +30,9 @@ export function normalizeTripFromApi(t, index) {
   const raw = t || {};
   return {
     trip_number: raw.trip_number ?? index + 1,
+    trip_id: raw.trip_id || "",
+    start_point: raw.start_point || "",
+    end_point: raw.end_point || "",
     start_time: raw.start_time || "",
     end_time: raw.end_time || "",
     direction: raw.direction || (index === 0 ? "outward" : "return"),
@@ -51,6 +54,9 @@ export function normalizeTripsFromApi(trips) {
 export function emptyTripRow(indexZeroBased) {
   return {
     trip_number: indexZeroBased + 1,
+    trip_id: "",
+    start_point: "",
+    end_point: "",
     start_time: "",
     end_time: "",
     direction: indexZeroBased % 2 === 0 ? "outward" : "return",

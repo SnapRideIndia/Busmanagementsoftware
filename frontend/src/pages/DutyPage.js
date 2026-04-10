@@ -11,7 +11,6 @@ import {
   normalizeTripsFromApi,
   TRIP_STATUS_OPTIONS,
   CANCEL_REASON_OPTIONS,
-  TRIP_DIRECTION_OPTIONS,
   tripStatusNeedsReason,
   emptyTripRow,
   renumberTrips,
@@ -35,6 +34,7 @@ export default function DutyPage() {
   const [searchParams] = useSearchParams();
   const [duties, setDuties] = useState([]);
   const [drivers, setDrivers] = useState([]);
+  const [conductors, setConductors] = useState([]);
   const [buses, setBuses] = useState([]);
   const [routes, setRoutes] = useState([]);
   const [open, setOpen] = useState(false);
@@ -47,11 +47,16 @@ export default function DutyPage() {
   const [listMeta, setListMeta] = useState({ total: 0, pages: 1, limit: 30 });
   const [form, setForm] = useState({
     driver_license: "",
+    conductor_id: "",
     bus_id: "",
     route_id: "",
     route_name: "",
     start_point: "",
     end_point: "",
+    punctuality_scheduled_departure: "",
+    punctuality_scheduled_arrival: "",
+    punctuality_actual_departure: "",
+    punctuality_actual_arrival: "",
     date: today,
     trips: defaultTripsForNewDuty(),
   });
@@ -88,9 +93,10 @@ export default function DutyPage() {
         page,
         limit: listMeta.limit,
       });
-      const [d, drItems, busItems, routeItems] = await Promise.all([
+      const [d, drItems, condItems, busItems, routeItems] = await Promise.all([
         API.get(Endpoints.operations.duties.list(), { params }),
         fetchAllPaginated(Endpoints.masters.drivers.list(), {}),
+        fetchAllPaginated(Endpoints.masters.conductors.list(), {}),
         fetchAllPaginated(Endpoints.masters.buses.list(), {}),
         /* All routes: editing a duty must show its route even if master row is inactive */
         fetchAllPaginated(Endpoints.masters.routes.list(), {}),
@@ -99,6 +105,7 @@ export default function DutyPage() {
       setDuties(du.items);
       setListMeta({ total: du.total, pages: du.pages, limit: du.limit });
       setDrivers(drItems);
+      setConductors(condItems);
       setBuses(busItems);
       setRoutes(Array.isArray(routeItems) ? routeItems : []);
     } catch (err) {
@@ -142,8 +149,11 @@ export default function DutyPage() {
     setEditBaseline(null);
     setRouteSelectExtra([]);
     setForm({
-      driver_license: "", bus_id: "", route_id: "", route_name: "",
-      start_point: "", end_point: "", date: filterDate || today,
+      driver_license: "", conductor_id: "", bus_id: "", route_id: "", route_name: "",
+      start_point: "", end_point: "",
+      punctuality_scheduled_departure: "", punctuality_scheduled_arrival: "",
+      punctuality_actual_departure: "", punctuality_actual_arrival: "",
+      date: filterDate || today,
       trips: defaultTripsForNewDuty(),
     });
   };
@@ -154,11 +164,16 @@ export default function DutyPage() {
     if (!baseline) return {};
     const patch = {};
     if ((current.driver_license || "") !== (baseline.driver_license || "")) patch.driver_license = current.driver_license;
+    if ((current.conductor_id || "") !== (baseline.conductor_id || "")) patch.conductor_id = current.conductor_id;
     if ((current.bus_id || "") !== (baseline.bus_id || "")) patch.bus_id = current.bus_id;
     if (String(current.route_id || "") !== String(baseline.route_id || "")) {
       patch.route_id = String(current.route_id || "");
     }
     if ((current.date || "") !== (baseline.date || "")) patch.date = current.date;
+    if ((current.punctuality_scheduled_departure || "") !== (baseline.punctuality_scheduled_departure || "")) patch.punctuality_scheduled_departure = current.punctuality_scheduled_departure;
+    if ((current.punctuality_scheduled_arrival || "") !== (baseline.punctuality_scheduled_arrival || "")) patch.punctuality_scheduled_arrival = current.punctuality_scheduled_arrival;
+    if ((current.punctuality_actual_departure || "") !== (baseline.punctuality_actual_departure || "")) patch.punctuality_actual_departure = current.punctuality_actual_departure;
+    if ((current.punctuality_actual_arrival || "") !== (baseline.punctuality_actual_arrival || "")) patch.punctuality_actual_arrival = current.punctuality_actual_arrival;
     if (dutyTripsSignature(current.trips) !== dutyTripsSignature(baseline.trips)) {
       patch.trips = renumberTrips(current.trips);
     }
@@ -199,8 +214,8 @@ export default function DutyPage() {
         await API.put(Endpoints.operations.duties.update(editing), patch);
         toast.success("Duty updated");
       } else {
-        if (!form.driver_license?.trim() || !form.bus_id?.trim() || !String(form.route_id || "").trim() || !form.date?.trim()) {
-          toast.error("Please fill driver, bus, route, and date");
+        if (!form.driver_license?.trim() || !form.conductor_id?.trim() || !form.bus_id?.trim() || !String(form.route_id || "").trim() || !form.date?.trim()) {
+          toast.error("Please fill driver, conductor, bus, route, and date");
           return;
         }
         if (!validateTrips()) return;
@@ -249,6 +264,16 @@ export default function DutyPage() {
     return s;
   };
 
+  const resolveConductorId = (stored) => {
+    const s = String(stored ?? "").trim();
+    if (!s) return "";
+    const exact = conductors.find((c) => String(c.conductor_id) === s);
+    if (exact) return String(exact.conductor_id);
+    const byTrim = conductors.find((c) => String(c.conductor_id ?? "").trim() === s);
+    if (byTrim) return String(byTrim.conductor_id);
+    return s;
+  };
+
   const openEdit = (d) => {
     const raw = normalizeTripsFromApi(d.trips);
     const trips = raw.length ? renumberTrips(raw) : defaultTripsForNewDuty();
@@ -278,15 +303,21 @@ export default function DutyPage() {
     } else {
       setRouteSelectExtra([]);
     }
+    const nextTrips = deriveTripTerminals(trips, d.start_point || "", d.end_point || "");
     const next = {
       driver_license: resolveDriverLicense(d.driver_license),
+      conductor_id: resolveConductorId(d.conductor_id),
       bus_id: String(d.bus_id ?? "").trim(),
       route_id: rid,
       route_name: d.route_name,
       start_point: d.start_point,
       end_point: d.end_point,
+      punctuality_scheduled_departure: d.punctuality_scheduled_departure || "",
+      punctuality_scheduled_arrival: d.punctuality_scheduled_arrival || "",
+      punctuality_actual_departure: d.punctuality_actual_departure || "",
+      punctuality_actual_arrival: d.punctuality_actual_arrival || "",
       date: d.date,
-      trips,
+      trips: nextTrips,
     };
     setForm(next);
     setEditBaseline(JSON.parse(JSON.stringify(next)));
@@ -307,18 +338,37 @@ export default function DutyPage() {
   const selectRoute = (routeId) => {
     const rid = routeId != null && routeId !== "" ? String(routeId) : "";
     const r = routes.find((x) => String(x.route_id ?? "") === rid);
-    setForm((prev) => ({
+    setForm((prev) => {
+      const routeStart = r?.origin || "";
+      const routeEnd = r?.destination || "";
+      const nextTrips = deriveTripTerminals(prev.trips, routeStart, routeEnd);
+      return ({
       ...prev,
       route_id: rid,
       route_name: r?.name || "",
-      start_point: r?.origin || "",
-      end_point: r?.destination || "",
-    }));
+      start_point: routeStart,
+      end_point: routeEnd,
+      trips: nextTrips,
+      punctuality_scheduled_departure: prev.punctuality_scheduled_departure || (nextTrips[0]?.start_time || ""),
+      punctuality_scheduled_arrival: prev.punctuality_scheduled_arrival || (nextTrips[nextTrips.length - 1]?.end_time || ""),
+      punctuality_actual_departure: prev.punctuality_actual_departure || (nextTrips[0]?.actual_start_time || ""),
+      punctuality_actual_arrival: prev.punctuality_actual_arrival || (nextTrips[nextTrips.length - 1]?.actual_end_time || ""),
+      });
+    });
   };
+
+  const deriveTripTerminals = (trips, routeStart, routeEnd) =>
+    (trips || []).map((t, i) => {
+      const dir = (t.direction || (i % 2 === 0 ? "outward" : "return")).toLowerCase();
+      const sp = dir === "return" ? routeEnd : routeStart;
+      const ep = dir === "return" ? routeStart : routeEnd;
+      return { ...t, direction: dir, start_point: t.start_point || sp || "", end_point: t.end_point || ep || "" };
+    });
 
   const addTrip = () => {
     const i = form.trips.length;
-    setForm({ ...form, trips: [...form.trips, emptyTripRow(i)] });
+    const nextTrips = [...form.trips, emptyTripRow(i)];
+    setForm({ ...form, trips: deriveTripTerminals(nextTrips, form.start_point, form.end_point) });
   };
 
   const removeTrip = (idx) => {
@@ -327,7 +377,7 @@ export default function DutyPage() {
       return;
     }
     const next = form.trips.filter((_, j) => j !== idx);
-    setForm({ ...form, trips: renumberTrips(next) });
+    setForm({ ...form, trips: deriveTripTerminals(renumberTrips(next), form.start_point, form.end_point) });
   };
 
   return (
@@ -422,10 +472,17 @@ export default function DutyPage() {
                 </div>
 
                 <div className="px-4 py-3 grid grid-cols-1 lg:grid-cols-12 gap-4 w-full">
-                  <div className="lg:col-span-4 min-w-0">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-1">Driver</p>
-                    <p className="font-medium text-sm leading-snug">{d.driver_name}</p>
-                    <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5"><Phone size={10} className="shrink-0" />{d.driver_phone}</p>
+                  <div className="lg:col-span-4 min-w-0 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-1">Driver</p>
+                      <p className="font-medium text-sm leading-snug">{d.driver_name || "—"}</p>
+                      <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5"><Phone size={10} className="shrink-0" />{d.driver_phone || "—"}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-1">Conductor</p>
+                      <p className="font-medium text-sm leading-snug">{d.conductor_name || "—"}</p>
+                      <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5"><Phone size={10} className="shrink-0" />{d.conductor_phone || "—"}</p>
+                    </div>
                   </div>
                   <div className="lg:col-span-2 min-w-0">
                     <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-1">Bus</p>
@@ -448,6 +505,9 @@ export default function DutyPage() {
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     <div className="px-4 pb-4 pt-1 bg-gray-50/80">
+                      <p className="text-xs text-gray-600 mb-2">
+                        Punctuality (duty): Sch {d.punctuality_scheduled_departure || "—"} - {d.punctuality_scheduled_arrival || "—"} | Act {d.punctuality_actual_departure || "—"} - {d.punctuality_actual_arrival || "—"}
+                      </p>
                       <DutyTripsReadOnlyTable trips={d.trips} />
                     </div>
                   </CollapsibleContent>
@@ -491,14 +551,26 @@ export default function DutyPage() {
                 </Select>
               </div>
               <div className="space-y-2">
+                <Label>Conductor</Label>
+                <Select
+                  value={form.conductor_id ? String(form.conductor_id) : undefined}
+                  onValueChange={(v) => setForm({ ...form, conductor_id: v })}
+                >
+                  <SelectTrigger data-testid="duty-conductor-select"><SelectValue placeholder="Select conductor" /></SelectTrigger>
+                  <SelectContent>{conductors.map((c) => <SelectItem key={c.conductor_id} value={String(c.conductor_id)}>{c.name} ({c.conductor_id})</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-2">
                 <Label>Bus</Label>
                 <Select value={form.bus_id ? String(form.bus_id) : undefined} onValueChange={(v) => setForm({ ...form, bus_id: v })}>
                   <SelectTrigger data-testid="duty-bus-select"><SelectValue placeholder="Select bus" /></SelectTrigger>
                   <SelectContent>{buses.map((b) => <SelectItem key={b.bus_id} value={b.bus_id}>{b.bus_id} ({b.depot})</SelectItem>)}</SelectContent>
                 </Select>
               </div>
+              <div className="space-y-2"><Label>Date</Label><Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} data-testid="duty-date" /></div>
             </div>
-            <div className="space-y-2"><Label>Date</Label><Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} data-testid="duty-date" /></div>
             <div className="space-y-2">
               <Label>Route</Label>
                 <Select value={form.route_id ? String(form.route_id).trim() : undefined} onValueChange={(v) => selectRoute(v)}>
@@ -516,6 +588,17 @@ export default function DutyPage() {
               <div className="space-y-2"><Label>Starting point</Label><Input value={form.start_point} readOnly disabled placeholder="Auto-filled from route" data-testid="duty-start-point" /></div>
               <div className="space-y-2"><Label>Ending point</Label><Input value={form.end_point} readOnly disabled placeholder="Auto-filled from route" data-testid="duty-end-point" /></div>
             </div>
+            <div className="border rounded-md p-3 bg-gray-50 space-y-3">
+              <Label className="text-sm font-semibold">Punctuality (duty-level, depot to depot)</Label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1"><Label className="text-xs text-gray-600">Scheduled departure</Label><Input type="time" value={form.punctuality_scheduled_departure || ""} onChange={(e) => setForm({ ...form, punctuality_scheduled_departure: e.target.value })} data-testid="duty-punctuality-sched-dep" /></div>
+                <div className="space-y-1"><Label className="text-xs text-gray-600">Scheduled arrival</Label><Input type="time" value={form.punctuality_scheduled_arrival || ""} onChange={(e) => setForm({ ...form, punctuality_scheduled_arrival: e.target.value })} data-testid="duty-punctuality-sched-arr" /></div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1"><Label className="text-xs text-gray-600">Actual departure</Label><Input type="time" value={form.punctuality_actual_departure || ""} onChange={(e) => setForm({ ...form, punctuality_actual_departure: e.target.value })} data-testid="duty-punctuality-actual-dep" /></div>
+                <div className="space-y-1"><Label className="text-xs text-gray-600">Actual arrival</Label><Input type="time" value={form.punctuality_actual_arrival || ""} onChange={(e) => setForm({ ...form, punctuality_actual_arrival: e.target.value })} data-testid="duty-punctuality-actual-arr" /></div>
+              </div>
+            </div>
 
             <div className="border-t pt-3 space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -529,12 +612,11 @@ export default function DutyPage() {
                   <TableHeader>
                     <TableRow className="table-header">
                       <TableHead className="w-10">#</TableHead>
-                      <TableHead className="whitespace-nowrap">Direction</TableHead>
                       <TableHead className="whitespace-nowrap min-w-[100px]">Trip ID</TableHead>
-                      <TableHead className="whitespace-nowrap">Scheduled departure</TableHead>
-                      <TableHead className="whitespace-nowrap">Scheduled arrival</TableHead>
-                      <TableHead className="whitespace-nowrap">Actual departure</TableHead>
-                      <TableHead className="whitespace-nowrap">Actual arrival</TableHead>
+                      <TableHead className="whitespace-nowrap">Start point</TableHead>
+                      <TableHead className="whitespace-nowrap">End point</TableHead>
+                      <TableHead className="whitespace-nowrap">Start time</TableHead>
+                      <TableHead className="whitespace-nowrap">End time</TableHead>
                       <TableHead className="whitespace-nowrap min-w-[100px]">Status</TableHead>
                       <TableHead className="whitespace-nowrap min-w-[120px]">Cancellation reason</TableHead>
                       <TableHead className="w-10" />
@@ -545,14 +627,6 @@ export default function DutyPage() {
                       <Fragment key={`trip-block-${idx}`}>
                         <TableRow className="align-top">
                           <TableCell className="font-mono text-xs pt-3">{idx + 1}</TableCell>
-                          <TableCell className="p-1">
-                            <Select value={t.direction || "outward"} onValueChange={(v) => updateTrip(idx, "direction", v)}>
-                              <SelectTrigger className="h-8 text-xs w-[100px]" data-testid={`trip-${idx}-direction`}><SelectValue /></SelectTrigger>
-                              <SelectContent>
-                                {TRIP_DIRECTION_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
-                              </SelectContent>
-                            </Select>
-                          </TableCell>
                           <TableCell className="p-1 pt-2.5 align-top min-w-0">
                             <span
                               className={`block text-xs font-mono px-1 break-all whitespace-normal ${t.trip_id ? "text-gray-800" : "text-gray-400"}`}
@@ -563,16 +637,16 @@ export default function DutyPage() {
                             </span>
                           </TableCell>
                           <TableCell className="p-1">
+                            <Input className="h-8 text-xs w-[150px]" value={t.start_point || ""} readOnly />
+                          </TableCell>
+                          <TableCell className="p-1">
+                            <Input className="h-8 text-xs w-[150px]" value={t.end_point || ""} readOnly />
+                          </TableCell>
+                          <TableCell className="p-1">
                             <Input type="time" className="h-8 text-xs w-[108px]" value={t.start_time || ""} onChange={(e) => updateTrip(idx, "start_time", e.target.value)} data-testid={`trip-${idx}-sched-start`} />
                           </TableCell>
                           <TableCell className="p-1">
                             <Input type="time" className="h-8 text-xs w-[108px]" value={t.end_time || ""} onChange={(e) => updateTrip(idx, "end_time", e.target.value)} data-testid={`trip-${idx}-sched-end`} />
-                          </TableCell>
-                          <TableCell className="p-1">
-                            <Input type="time" className="h-8 text-xs w-[108px]" value={t.actual_start_time || ""} onChange={(e) => updateTrip(idx, "actual_start_time", e.target.value)} data-testid={`trip-${idx}-actual-start`} />
-                          </TableCell>
-                          <TableCell className="p-1">
-                            <Input type="time" className="h-8 text-xs w-[108px]" value={t.actual_end_time || ""} onChange={(e) => updateTrip(idx, "actual_end_time", e.target.value)} data-testid={`trip-${idx}-actual-end`} />
                           </TableCell>
                           <TableCell className="p-1">
                             <Select value={t.trip_status || "scheduled"} onValueChange={(v) => updateTrip(idx, "trip_status", v)}>
@@ -602,7 +676,7 @@ export default function DutyPage() {
                         </TableRow>
                         {t.cancel_reason_code === "other" && tripStatusNeedsReason(t.trip_status) ? (
                           <TableRow key={`${idx}-custom`}>
-                            <TableCell colSpan={10} className="bg-gray-50 py-2">
+                            <TableCell colSpan={9} className="bg-gray-50 py-2">
                               <Label className="text-xs text-gray-500">Custom reason (trip {idx + 1})</Label>
                               <Input className="mt-1 h-8 text-sm" value={t.cancel_reason_custom || ""} onChange={(e) => updateTrip(idx, "cancel_reason_custom", e.target.value)} placeholder="Required when reason is Other" data-testid={`trip-${idx}-reason-custom`} />
                             </TableCell>

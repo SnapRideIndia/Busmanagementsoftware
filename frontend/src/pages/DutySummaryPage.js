@@ -285,6 +285,7 @@ export default function DutySummaryPage() {
                             <Phone size={12} className="shrink-0" />
                             {d.driver_phone || "—"}
                           </p>
+                          {d.conductor_name ? <p className="text-xs text-gray-500 mt-1">Conductor: {d.conductor_name}</p> : null}
                         </div>
                       </div>
 
@@ -311,6 +312,9 @@ export default function DutySummaryPage() {
                     </div>
 
                     <div className="px-4 py-4 bg-gray-50/90">
+                      <p className="text-xs text-gray-600 mb-2">
+                        Punctuality (duty): Sch {d.punctuality_scheduled_departure || "—"} - {d.punctuality_scheduled_arrival || "—"} | Act {d.punctuality_actual_departure || "—"} - {d.punctuality_actual_arrival || "—"}
+                      </p>
                       <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-2">Trip timetable</p>
                       <DutyTripsReadOnlyTable trips={d.trips} />
                     </div>

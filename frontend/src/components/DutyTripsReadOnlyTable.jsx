@@ -13,12 +13,11 @@ export default function DutyTripsReadOnlyTable({ trips, className = "" }) {
         <TableHeader>
           <TableRow className="table-header">
             <TableHead className="whitespace-nowrap w-10">#</TableHead>
-            <TableHead className="whitespace-nowrap">Direction</TableHead>
             <TableHead className="whitespace-nowrap">Trip ID</TableHead>
-            <TableHead className="whitespace-nowrap">Scheduled departure</TableHead>
-            <TableHead className="whitespace-nowrap">Scheduled arrival</TableHead>
-            <TableHead className="whitespace-nowrap">Actual departure</TableHead>
-            <TableHead className="whitespace-nowrap">Actual arrival</TableHead>
+            <TableHead className="whitespace-nowrap">Start point</TableHead>
+            <TableHead className="whitespace-nowrap">End point</TableHead>
+            <TableHead className="whitespace-nowrap">Start time</TableHead>
+            <TableHead className="whitespace-nowrap">End time</TableHead>
             <TableHead className="whitespace-nowrap">Status</TableHead>
             <TableHead className="whitespace-nowrap min-w-[120px]">Reason / note</TableHead>
           </TableRow>
@@ -33,14 +32,13 @@ export default function DutyTripsReadOnlyTable({ trips, className = "" }) {
             return (
               <TableRow key={t.trip_number} className="text-xs">
                 <TableCell className="font-mono font-medium">{t.trip_number}</TableCell>
-                <TableCell className="capitalize text-gray-700">{t.direction || "—"}</TableCell>
                 <TableCell className="font-mono text-gray-600 min-w-0 break-all whitespace-normal" title={t.trip_id || ""}>
                   {t.trip_id && String(t.trip_id).trim() ? t.trip_id : "-"}
                 </TableCell>
+                <TableCell>{t.start_point || "—"}</TableCell>
+                <TableCell>{t.end_point || "—"}</TableCell>
                 <TableCell className="font-mono">{dutyDashTime(t.start_time)}</TableCell>
                 <TableCell className="font-mono">{dutyDashTime(t.end_time)}</TableCell>
-                <TableCell className="font-mono">{dutyDashTime(t.actual_start_time)}</TableCell>
-                <TableCell className="font-mono">{dutyDashTime(t.actual_end_time)}</TableCell>
                 <TableCell>
                   <Badge className={`${tripStatusBadgeClass(t.trip_status)} text-[10px] font-normal`}>
                     {(t.trip_status || "scheduled").replace(/_/g, " ")}
