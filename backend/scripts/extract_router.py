@@ -59,12 +59,14 @@ from app.domain.incident_types import (
 )
 from app.schemas.requests import (
     BillingGenerateReq,
+    BillingInvoicePatchReq,
     BillingWorkflowReq,
     BusinessRuleReq,
     BusReq,
     DeductionRuleReq,
     DriverReq,
     DutyReq,
+    DutyUpdateReq,
     EnergyReq,
     ForgotPasswordReq,
     IncidentCreateReq,

@@ -21,7 +21,6 @@ export default function TenderPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
-  const [filterConcessionaire, setFilterConcessionaire] = useState("");
   const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 30 });
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -39,7 +38,6 @@ export default function TenderPage() {
           limit: 30,
           search,
           status: filterStatus,
-          concessionaire: filterConcessionaire,
         }),
       });
       const u = unwrapListResponse(data);
@@ -51,13 +49,13 @@ export default function TenderPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, search, filterStatus, filterConcessionaire]);
+  }, [page, search, filterStatus]);
   useEffect(() => {
     load();
   }, [load]);
   useEffect(() => {
     setPage(1);
-  }, [search, filterStatus, filterConcessionaire]);
+  }, [search, filterStatus]);
 
   const handleSave = async () => {
     try {
@@ -141,23 +139,12 @@ export default function TenderPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1">
-                <Label className="text-xs text-gray-500 uppercase">Concessionaire</Label>
-                <Input
-                  value={filterConcessionaire}
-                  onChange={(e) => setFilterConcessionaire(e.target.value)}
-                  placeholder="Filter by concessionaire"
-                  className="w-[240px] h-9"
-                  data-testid="tender-filter-concessionaire"
-                />
-              </div>
               <Button
                 variant="ghost"
                 className="h-9"
                 onClick={() => {
                   setSearch("");
                   setFilterStatus("");
-                  setFilterConcessionaire("");
                 }}
               >
                 Clear

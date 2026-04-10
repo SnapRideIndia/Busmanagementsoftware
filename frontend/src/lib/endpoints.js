@@ -146,6 +146,7 @@ export const Endpoints = {
     tripIds: () => "/billing/trip-ids",
     generate: () => "/billing/generate",
     get: (id) => `/billing/${enc(id)}`,
+    patch: (id) => `/billing/${enc(id)}`,
   },
 
   energy: {
@@ -161,6 +162,7 @@ export const Endpoints = {
 
   km: {
     details: () => "/km/details",
+    summary: () => "/km/summary",
   },
 
   tripKmApprovals: {

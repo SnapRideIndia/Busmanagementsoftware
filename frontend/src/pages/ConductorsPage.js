@@ -31,6 +31,7 @@ export default function ConductorsPage() {
   const [form, setForm] = useState(emptyConductor);
   const [filterDepot, setFilterDepot] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
+  const [filterSearch, setFilterSearch] = useState("");
   const [depotNames, setDepotNames] = useState([]);
   const [page, setPage] = useState(1);
   const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 20 });
@@ -54,7 +55,7 @@ export default function ConductorsPage() {
     try {
       const res = await API.get(
         Endpoints.masters.conductors.list(),
-        { params: buildQuery({ depot: filterDepot, status: filterStatus, page, limit: 20 }) }
+        { params: buildQuery({ depot: filterDepot, status: filterStatus, search: filterSearch, page, limit: 20 }) }
       );
       const u = unwrapListResponse(res.data);
       setRows(u.items);
@@ -65,7 +66,11 @@ export default function ConductorsPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterDepot, filterStatus, page]);
+  }, [filterDepot, filterStatus, filterSearch, page]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [filterSearch]);
 
   useEffect(() => {
     load();
@@ -124,6 +129,16 @@ export default function ConductorsPage() {
       <p className="page-desc mb-3 max-w-3xl">Field staff linked to depots; badge numbers must be unique.</p>
 
       <div className="flex flex-wrap gap-3 mb-4 items-end">
+        <div className="space-y-1">
+          <label className="text-xs font-medium uppercase text-gray-500">Search</label>
+          <Input
+            value={filterSearch}
+            onChange={(e) => setFilterSearch(e.target.value)}
+            placeholder="ID, name, badge, phone, depot…"
+            className="w-[min(100%,280px)]"
+            data-testid="conductor-filter-search"
+          />
+        </div>
         <div className="space-y-1">
           <label className="text-xs font-medium uppercase text-gray-500">Depot</label>
           <Select

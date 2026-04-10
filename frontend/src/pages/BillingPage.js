@@ -7,39 +7,47 @@ import { formatDateIN } from "../lib/dates";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Card, CardContent } from "../components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { Badge } from "../components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { Receipt, FileText, Download, Eye, IndianRupee } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuPortal,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "../components/ui/dropdown-menu";
+import { Receipt, FileText, Download, Eye, IndianRupee, MoreVertical, Pencil, Copy } from "lucide-react";
 import { toast } from "sonner";
 
-const WORKFLOW_STATES = [
-  "draft",
-  "submitted",
-  "processing",
-  "proposed",
-  "depot_approved",
-  "regional_approved",
-  "rm_sanctioned",
-  "voucher_raised",
-  "hq_approved",
-  "paid",
-];
+const WORKFLOW_STATES = ["draft", "submitted", "paid"];
+
+async function copyInvoiceId(id) {
+  const s = String(id || "");
+  if (!s) return;
+  try {
+    await navigator.clipboard.writeText(s);
+    toast.success("Invoice ID copied");
+  } catch {
+    toast.error("Could not copy ID");
+  }
+}
 
 const STATUS_BADGE_CLASS = {
   draft: "bg-gray-100 text-gray-700 hover:bg-gray-100",
   submitted: "bg-blue-100 text-blue-700 hover:bg-blue-100",
-  processing: "bg-indigo-100 text-indigo-700 hover:bg-indigo-100",
-  proposed: "bg-purple-100 text-purple-700 hover:bg-purple-100",
-  depot_approved: "bg-amber-100 text-amber-700 hover:bg-amber-100",
-  regional_approved: "bg-orange-100 text-orange-700 hover:bg-orange-100",
-  rm_sanctioned: "bg-teal-100 text-teal-700 hover:bg-teal-100",
-  voucher_raised: "bg-cyan-100 text-cyan-700 hover:bg-cyan-100",
-  hq_approved: "bg-emerald-100 text-emerald-700 hover:bg-emerald-100",
   paid: "bg-green-100 text-green-700 hover:bg-green-100",
 };
+
+function dateInputFromIso(iso) {
+  if (!iso || typeof iso !== "string") return "";
+  return iso.slice(0, 10);
+}
 
 export default function BillingPage() {
   const [invoices, setInvoices] = useState([]);
@@ -66,6 +74,10 @@ export default function BillingPage() {
   const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 20 });
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editingInvoice, setEditingInvoice] = useState(null);
+  const [editForm, setEditForm] = useState({ status: "draft", submitted_at: "", paid_at: "" });
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -164,6 +176,40 @@ export default function BillingPage() {
   const exportExcel = (id) => {
     const o = getBackendOrigin();
     window.open(`${o || ""}/api/billing/${id}/export-excel`, "_blank");
+  };
+
+  const openEditInvoice = (inv) => {
+    setEditingInvoice(inv);
+    setEditForm({
+      status: inv.status || "draft",
+      submitted_at: dateInputFromIso(inv.approval_dates?.submitted_at),
+      paid_at: dateInputFromIso(inv.approval_dates?.paid_at),
+    });
+    setEditOpen(true);
+  };
+
+  const saveEditInvoice = async () => {
+    if (!editingInvoice?.invoice_id) return;
+    const invId = editingInvoice.invoice_id;
+    setSavingEdit(true);
+    try {
+      const { data } = await API.patch(Endpoints.billing.patch(invId), {
+        status: editForm.status,
+        submitted_at: editForm.submitted_at,
+        paid_at: editForm.paid_at,
+      });
+      toast.success("Invoice updated");
+      setEditOpen(false);
+      setEditingInvoice(null);
+      await load();
+      if (viewOpen && selected?.invoice_id === invId) {
+        setSelected(data);
+      }
+    } catch (err) {
+      toast.error(formatApiError(err.response?.data?.detail) || "Failed to save");
+    } finally {
+      setSavingEdit(false);
+    }
   };
 
   const busesForFilter = filterDepot ? allBuses.filter((b) => b.depot === filterDepot) : allBuses;
@@ -272,7 +318,28 @@ export default function BillingPage() {
               >
                 {invoices.map((inv) => (
                 <TableRow key={inv.invoice_id} className="hover:bg-gray-50" data-testid={`invoice-row-${inv.invoice_id}`}>
-                  <TableCell className="font-mono font-medium text-[#C8102E]">{inv.invoice_id}</TableCell>
+                  <TableCell className="p-2 align-middle max-w-[132px]">
+                    <div className="group flex items-center gap-0.5">
+                      <span
+                        className="truncate font-mono text-[11px] font-medium text-[#C8102E] min-w-0 flex-1"
+                        title={inv.invoice_id}
+                      >
+                        {inv.invoice_id}
+                      </span>
+                      <button
+                        type="button"
+                        className="shrink-0 rounded p-1 text-gray-500 opacity-0 transition-opacity hover:bg-gray-100 hover:text-gray-900 group-hover:opacity-100 focus:opacity-100 focus:outline-none focus:ring-1 focus:ring-gray-300"
+                        aria-label="Copy invoice ID"
+                        data-testid={`copy-invoice-id-${inv.invoice_id}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          copyInvoiceId(inv.invoice_id);
+                        }}
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </TableCell>
                   <TableCell className="text-sm">{formatDateIN(inv.period_start)} – {formatDateIN(inv.period_end)}</TableCell>
                   <TableCell>{inv.depot}</TableCell>
                   <TableCell>{inv.concessionaire || "—"}</TableCell>
@@ -280,15 +347,67 @@ export default function BillingPage() {
                   <TableCell className="text-right font-mono text-blue-600">{inv.energy_adjustment?.toLocaleString()}</TableCell>
                   <TableCell className="text-right font-mono text-red-600">{inv.total_deduction?.toLocaleString()}</TableCell>
                   <TableCell className="text-right font-mono font-semibold text-[#C8102E]">{inv.final_payable?.toLocaleString()}</TableCell>
-                  <TableCell><Badge className={STATUS_BADGE_CLASS[inv.status] || STATUS_BADGE_CLASS.draft}>{inv.status}</Badge></TableCell>
+                  <TableCell>
+                    <Badge className={STATUS_BADGE_CLASS[inv.status] || STATUS_BADGE_CLASS.draft}>
+                      {inv.status}
+                    </Badge>
+                  </TableCell>
                   <TableCell className="text-xs">{inv.approval_dates?.submitted_at ? formatDateIN(inv.approval_dates.submitted_at.slice(0, 10)) : "—"}</TableCell>
                   <TableCell className="text-xs">{inv.approval_dates?.paid_at ? formatDateIN(inv.approval_dates.paid_at.slice(0, 10)) : "—"}</TableCell>
                   <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <Button variant="ghost" size="icon" onClick={() => viewInvoice(inv.invoice_id)} data-testid={`view-invoice-${inv.invoice_id}`}><Eye size={14} /></Button>
-                      <Button variant="ghost" size="icon" onClick={() => exportPdf(inv.invoice_id)} data-testid={`pdf-invoice-${inv.invoice_id}`}><FileText size={14} className="text-red-500" /></Button>
-                      <Button variant="ghost" size="icon" onClick={() => exportExcel(inv.invoice_id)} data-testid={`excel-invoice-${inv.invoice_id}`}><Download size={14} className="text-green-600" /></Button>
-                    </div>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          data-testid={`invoice-actions-${inv.invoice_id}`}
+                          aria-label="Invoice actions"
+                        >
+                          <MoreVertical size={16} />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-52 text-xs">
+                        <DropdownMenuItem
+                          className="gap-2"
+                          onClick={() => openEditInvoice(inv)}
+                          data-testid={`edit-invoice-${inv.invoice_id}`}
+                        >
+                          <Pencil className="h-3.5 w-3.5 opacity-70" /> Edit
+                        </DropdownMenuItem>
+                        <DropdownMenuSub>
+                          <DropdownMenuSubTrigger className="gap-2">
+                            <Receipt className="h-3.5 w-3.5 opacity-70" /> Billing
+                          </DropdownMenuSubTrigger>
+                          <DropdownMenuPortal>
+                            <DropdownMenuSubContent className="text-xs">
+                              <DropdownMenuItem
+                                className="gap-2"
+                                onClick={() => viewInvoice(inv.invoice_id)}
+                                data-testid={`view-invoice-${inv.invoice_id}`}
+                              >
+                                <Eye className="h-3.5 w-3.5 opacity-70" /> View
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className="gap-2"
+                                onClick={() => exportPdf(inv.invoice_id)}
+                                data-testid={`pdf-invoice-${inv.invoice_id}`}
+                              >
+                                <FileText className="h-3.5 w-3.5 text-red-500 opacity-90" /> PDF
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className="gap-2"
+                                onClick={() => exportExcel(inv.invoice_id)}
+                                data-testid={`excel-invoice-${inv.invoice_id}`}
+                              >
+                                <Download className="h-3.5 w-3.5 text-green-600 opacity-90" /> Excel
+                              </DropdownMenuItem>
+                            </DropdownMenuSubContent>
+                          </DropdownMenuPortal>
+                        </DropdownMenuSub>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </TableCell>
                 </TableRow>
                 ))}
@@ -352,16 +471,41 @@ export default function BillingPage() {
       {/* View Invoice Dialog */}
       <Dialog open={viewOpen} onOpenChange={setViewOpen}>
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto" data-testid="invoice-detail-dialog">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><IndianRupee size={18} /> Invoice {selected?.invoice_id}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 min-w-0 pr-8">
+              <IndianRupee size={18} className="shrink-0" />
+              <span className="shrink-0">Invoice</span>
+              {selected?.invoice_id ? (
+                <div className="group flex min-w-0 flex-1 items-center gap-0.5">
+                  <span
+                    className="truncate font-mono text-sm font-semibold text-[#C8102E]"
+                    title={selected.invoice_id}
+                  >
+                    {selected.invoice_id}
+                  </span>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded p-1 text-gray-500 opacity-0 transition-opacity hover:bg-gray-100 hover:text-gray-900 group-hover:opacity-100 focus:opacity-100 focus:outline-none focus:ring-1 focus:ring-gray-300"
+                    aria-label="Copy invoice ID"
+                    data-testid="copy-invoice-id-dialog"
+                    onClick={() => copyInvoiceId(selected.invoice_id)}
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ) : null}
+            </DialogTitle>
+          </DialogHeader>
           {selected && (
             <div className="space-y-4 text-sm">
-              <div className="grid grid-cols-3 gap-3 bg-gray-50 p-4 rounded-md">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 bg-gray-50 p-4 rounded-md">
                 <div><span className="text-gray-500 text-xs uppercase">Period</span><p className="font-medium">{selected.period_start} - {selected.period_end}</p></div>
                 <div><span className="text-gray-500 text-xs uppercase">Depot</span><p className="font-medium">{selected.depot}</p></div>
                 <div><span className="text-gray-500 text-xs uppercase">Concessionaire</span><p className="font-medium">{selected.concessionaire || "—"}</p></div>
                 <div><span className="text-gray-500 text-xs uppercase">Generated</span><p className="font-medium">{selected.created_at?.slice(0, 10)}</p></div>
                 <div><span className="text-gray-500 text-xs uppercase">Status</span><p className="font-medium">{selected.status}</p></div>
-                <div><span className="text-gray-500 text-xs uppercase">Paid At</span><p className="font-medium">{selected.approval_dates?.paid_at?.slice(0, 10) || "—"}</p></div>
+                <div><span className="text-gray-500 text-xs uppercase">Submitted</span><p className="font-medium">{selected.approval_dates?.submitted_at ? formatDateIN(selected.approval_dates.submitted_at.slice(0, 10)) : "—"}</p></div>
+                <div><span className="text-gray-500 text-xs uppercase">Paid</span><p className="font-medium">{selected.approval_dates?.paid_at ? formatDateIN(selected.approval_dates.paid_at.slice(0, 10)) : "—"}</p></div>
               </div>
 
               <div className="border rounded-md overflow-hidden">
@@ -475,6 +619,67 @@ export default function BillingPage() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent data-testid="billing-edit-dialog" className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit {editingInvoice?.invoice_id || "invoice"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 text-sm">
+            <div className="space-y-2">
+              <Label>Status</Label>
+              <Select
+                value={editForm.status}
+                onValueChange={(v) => setEditForm((p) => ({ ...p, status: v }))}
+              >
+                <SelectTrigger data-testid="billing-edit-status">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {WORKFLOW_STATES.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {s}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Submitted date</Label>
+              <Input
+                type="date"
+                value={editForm.submitted_at}
+                onChange={(e) => setEditForm((p) => ({ ...p, submitted_at: e.target.value }))}
+                data-testid="billing-edit-submitted"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Paid date</Label>
+              <Input
+                type="date"
+                value={editForm.paid_at}
+                onChange={(e) => setEditForm((p) => ({ ...p, paid_at: e.target.value }))}
+                data-testid="billing-edit-paid"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => setEditOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="bg-[#C8102E] hover:bg-[#A50E25]"
+                disabled={savingEdit}
+                onClick={saveEditInvoice}
+                data-testid="billing-edit-save"
+              >
+                {savingEdit ? "Saving…" : "Save"}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

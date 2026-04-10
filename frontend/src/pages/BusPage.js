@@ -29,6 +29,7 @@ export default function BusPage() {
   const [assignTender, setAssignTender] = useState("");
   const [filterDepot, setFilterDepot] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
+  const [filterSearch, setFilterSearch] = useState("");
   const [fleetDepots, setFleetDepots] = useState([]);
   const [page, setPage] = useState(1);
   const [listMeta, setListMeta] = useState({ total: 0, pages: 1, limit: 30 });
@@ -52,7 +53,7 @@ export default function BusPage() {
     setFetchError(null);
     try {
       const [b, allBuses, tenderRows] = await Promise.all([
-        API.get(Endpoints.masters.buses.list(), { params: buildQuery({ depot: filterDepot, status: filterStatus, page, limit: listMeta.limit }) }),
+        API.get(Endpoints.masters.buses.list(), { params: buildQuery({ depot: filterDepot, status: filterStatus, search: filterSearch, page, limit: listMeta.limit }) }),
         fetchAllPaginated(Endpoints.masters.buses.list(), {}),
         fetchAllPaginated(Endpoints.masters.tenders.list(), {}),
       ]);
@@ -67,7 +68,10 @@ export default function BusPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterDepot, filterStatus, page, listMeta.limit]);
+  }, [filterDepot, filterStatus, filterSearch, page, listMeta.limit]);
+  useEffect(() => {
+    setPage(1);
+  }, [filterSearch]);
   useEffect(() => {
     load();
   }, [load]);
@@ -118,6 +122,16 @@ export default function BusPage() {
 
       <div className="flex flex-wrap gap-3 mb-4 items-end">
         <div className="space-y-1">
+          <label className="text-xs font-medium uppercase text-gray-500">Search</label>
+          <Input
+            value={filterSearch}
+            onChange={(e) => setFilterSearch(e.target.value)}
+            placeholder="Bus ID, tender, depot, type…"
+            className="w-[min(100%,280px)]"
+            data-testid="bus-filter-search"
+          />
+        </div>
+        <div className="space-y-1">
           <label className="text-xs font-medium uppercase text-gray-500">Depot</label>
           <Select value={filterDepot || "all"} onValueChange={(v) => { setFilterDepot(v === "all" ? "" : v); setPage(1); }}>
             <SelectTrigger className="w-44"><SelectValue placeholder="All Depots" /></SelectTrigger>
@@ -146,11 +160,14 @@ export default function BusPage() {
             <TableHeader><TableRow className="table-header">
               <TableHead>Bus ID</TableHead><TableHead>Type</TableHead><TableHead>Capacity</TableHead>
               <TableHead>Tender</TableHead><TableHead>Depot</TableHead><TableHead>kWh/km</TableHead>
+              <TableHead className="text-right">Allowed Monthly Energy (kWh)</TableHead>
+              <TableHead className="text-right">Actual Monthly Energy (kWh)</TableHead>
+              <TableHead className="text-right">Variance (kWh)</TableHead>
               <TableHead>Status</TableHead><TableHead className="text-right">Actions</TableHead>
             </TableRow></TableHeader>
             <TableBody>
               <TableLoadRows
-                colSpan={8}
+                colSpan={11}
                 loading={loading}
                 error={fetchError}
                 onRetry={load}
@@ -165,6 +182,24 @@ export default function BusPage() {
                     <TableCell className="font-mono text-[12px]">{b.tender_id || "-"}</TableCell>
                     <TableCell>{b.depot || "-"}</TableCell>
                     <TableCell className="font-mono">{b.kwh_per_km}</TableCell>
+                    <TableCell className="text-right font-mono">
+                      {Number(b.allowed_monthly_energy || 0).toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </TableCell>
+                    <TableCell className="text-right font-mono">
+                      {Number(b.actual_monthly_energy || 0).toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </TableCell>
+                    <TableCell className={`text-right font-mono ${Number(b.monthly_energy_variance || 0) > 0 ? "text-red-600" : "text-green-700"}`}>
+                      {Number(b.monthly_energy_variance || 0).toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </TableCell>
                     <TableCell>
                       <Badge className={b.status === "active" ? "bg-green-100 text-green-700 hover:bg-green-100" : b.status === "maintenance" ? "bg-yellow-100 text-yellow-700 hover:bg-yellow-100" : "bg-gray-100 text-gray-600 hover:bg-gray-100"}>
                         {b.status}
@@ -239,6 +274,9 @@ export default function BusPage() {
                 <div><span className="text-gray-500">Tender:</span> {detail.tender_id || "None"}</div>
                 <div><span className="text-gray-500">Depot:</span> {detail.depot || "None"}</div>
                 <div><span className="text-gray-500">kWh/km:</span> {detail.kwh_per_km}</div>
+                <div><span className="text-gray-500">Allowed monthly energy:</span> {Number(detail.allowed_monthly_energy || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kWh</div>
+                <div><span className="text-gray-500">Actual monthly energy:</span> {Number(detail.actual_monthly_energy || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kWh</div>
+                <div><span className="text-gray-500">Monthly variance:</span> {Number(detail.monthly_energy_variance || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kWh</div>
                 <div><span className="text-gray-500">Status:</span> {detail.status}</div>
               </div>
               <p className="text-gray-500 font-medium mt-3">Recent Trips: {detail.trips?.length || 0}</p>

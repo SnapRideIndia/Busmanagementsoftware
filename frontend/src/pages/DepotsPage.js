@@ -22,6 +22,7 @@ export default function DepotsPage() {
   const [editingOriginalName, setEditingOriginalName] = useState(null);
   const [form, setForm] = useState(empty);
   const [filterActive, setFilterActive] = useState("");
+  const [filterSearch, setFilterSearch] = useState("");
   const [page, setPage] = useState(1);
   const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 20 });
   const [loading, setLoading] = useState(true);
@@ -31,7 +32,7 @@ export default function DepotsPage() {
     setLoading(true);
     setFetchError(null);
     try {
-      const { data } = await API.get(Endpoints.masters.depots.list(), { params: buildQuery({ active: filterActive, page, limit: 20 }) });
+      const { data } = await API.get(Endpoints.masters.depots.list(), { params: buildQuery({ active: filterActive, search: filterSearch, page, limit: 20 }) });
       const u = unwrapListResponse(data);
       setDepots(u.items);
       setMeta({ total: u.total, pages: u.pages, limit: u.limit });
@@ -41,7 +42,10 @@ export default function DepotsPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterActive, page]);
+  }, [filterActive, filterSearch, page]);
+  useEffect(() => {
+    setPage(1);
+  }, [filterSearch]);
   useEffect(() => {
     load();
   }, [load]);
@@ -110,6 +114,16 @@ export default function DepotsPage() {
       </div>
 
       <div className="flex flex-wrap gap-3 mb-4 items-end">
+        <div className="space-y-1">
+          <label className="text-xs font-medium uppercase text-gray-500">Search</label>
+          <Input
+            value={filterSearch}
+            onChange={(e) => setFilterSearch(e.target.value)}
+            placeholder="Name, code, address…"
+            className="w-[min(100%,280px)]"
+            data-testid="depot-filter-search"
+          />
+        </div>
         <div className="space-y-1">
           <label className="text-xs font-medium uppercase text-gray-500">Status</label>
           <Select value={filterActive || "all"} onValueChange={(v) => { setFilterActive(v === "all" ? "" : v); setPage(1); }}>

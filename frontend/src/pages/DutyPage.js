@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, Fragment } from "react";
+import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import API, { formatApiError, buildQuery, unwrapListResponse, fetchAllPaginated, messageFromAxiosError } from "../lib/api";
 import { Endpoints } from "../lib/endpoints";
@@ -55,6 +55,10 @@ export default function DutyPage() {
     date: today,
     trips: defaultTripsForNewDuty(),
   });
+  /** Snapshot when opening edit — used to send partial PUT bodies */
+  const [editBaseline, setEditBaseline] = useState(null);
+  /** Duty route row(s) not present in master list (e.g. inactive route filtered out before fix) — keeps Radix Select value valid */
+  const [routeSelectExtra, setRouteSelectExtra] = useState([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(null);
   const [tripsOpenByDutyId, setTripsOpenByDutyId] = useState({});
@@ -88,7 +92,8 @@ export default function DutyPage() {
         API.get(Endpoints.operations.duties.list(), { params }),
         fetchAllPaginated(Endpoints.masters.drivers.list(), {}),
         fetchAllPaginated(Endpoints.masters.buses.list(), {}),
-        fetchAllPaginated(Endpoints.masters.routes.list(), { active: true }),
+        /* All routes: editing a duty must show its route even if master row is inactive */
+        fetchAllPaginated(Endpoints.masters.routes.list(), {}),
       ]);
       const du = unwrapListResponse(d.data);
       setDuties(du.items);
@@ -120,11 +125,45 @@ export default function DutyPage() {
     if (qq !== null) setFilterSearchQ(qq);
   }, [searchParams]);
 
-  const resetForm = () => setForm({
-    driver_license: "", bus_id: "", route_id: "", route_name: "",
-    start_point: "", end_point: "", date: filterDate || today,
-    trips: defaultTripsForNewDuty(),
-  });
+  const routesForSelect = useMemo(() => {
+    const seen = new Set(routes.map((r) => String(r.route_id ?? "").trim()));
+    const out = [...routes];
+    for (const ex of routeSelectExtra) {
+      const id = String(ex.route_id ?? "").trim();
+      if (id && !seen.has(id)) {
+        seen.add(id);
+        out.push(ex);
+      }
+    }
+    return out;
+  }, [routes, routeSelectExtra]);
+
+  const resetForm = () => {
+    setEditBaseline(null);
+    setRouteSelectExtra([]);
+    setForm({
+      driver_license: "", bus_id: "", route_id: "", route_name: "",
+      start_point: "", end_point: "", date: filterDate || today,
+      trips: defaultTripsForNewDuty(),
+    });
+  };
+
+  const dutyTripsSignature = (trips) => JSON.stringify(renumberTrips(trips || []));
+
+  const buildDutyPatch = (baseline, current) => {
+    if (!baseline) return {};
+    const patch = {};
+    if ((current.driver_license || "") !== (baseline.driver_license || "")) patch.driver_license = current.driver_license;
+    if ((current.bus_id || "") !== (baseline.bus_id || "")) patch.bus_id = current.bus_id;
+    if (String(current.route_id || "") !== String(baseline.route_id || "")) {
+      patch.route_id = String(current.route_id || "");
+    }
+    if ((current.date || "") !== (baseline.date || "")) patch.date = current.date;
+    if (dutyTripsSignature(current.trips) !== dutyTripsSignature(baseline.trips)) {
+      patch.trips = renumberTrips(current.trips);
+    }
+    return patch;
+  };
 
   const validateTrips = () => {
     if (!form.trips.length) {
@@ -149,16 +188,27 @@ export default function DutyPage() {
   };
 
   const handleSave = async () => {
-    if (!form.driver_license || !form.bus_id || !form.route_id) {
-      toast.error("Please fill all required fields"); return;
-    }
-    if (!validateTrips()) return;
-    const payload = { ...form, trips: renumberTrips(form.trips) };
     try {
       if (editing) {
-        await API.put(Endpoints.operations.duties.update(editing), payload);
+        const patch = buildDutyPatch(editBaseline, form);
+        if (!patch || Object.keys(patch).length === 0) {
+          toast.info("No changes to save");
+          return;
+        }
+        if (patch.trips != null && !validateTrips()) return;
+        await API.put(Endpoints.operations.duties.update(editing), patch);
         toast.success("Duty updated");
       } else {
+        if (!form.driver_license?.trim() || !form.bus_id?.trim() || !String(form.route_id || "").trim() || !form.date?.trim()) {
+          toast.error("Please fill driver, bus, route, and date");
+          return;
+        }
+        if (!validateTrips()) return;
+        const payload = {
+          ...form,
+          route_id: String(form.route_id),
+          trips: renumberTrips(form.trips),
+        };
         await API.post(Endpoints.operations.duties.create(), payload);
         toast.success("Duty assigned");
       }
@@ -189,18 +239,59 @@ export default function DutyPage() {
     } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
   };
 
+  const resolveDriverLicense = (stored) => {
+    const s = String(stored ?? "").trim();
+    if (!s) return "";
+    const exact = drivers.find((dr) => String(dr.license_number) === s);
+    if (exact) return String(exact.license_number);
+    const byTrim = drivers.find((dr) => String(dr.license_number ?? "").trim() === s);
+    if (byTrim) return String(byTrim.license_number);
+    return s;
+  };
+
   const openEdit = (d) => {
     const raw = normalizeTripsFromApi(d.trips);
     const trips = raw.length ? renumberTrips(raw) : defaultTripsForNewDuty();
-    setForm({
-      driver_license: d.driver_license,
-      bus_id: d.bus_id,
-      route_id: d.route_id || "",
+    let rid = String(d.route_id ?? "").trim();
+    if (!rid && (d.route_name || "").trim()) {
+      const byName = routes.find((r) => (r.name || "").trim() === (d.route_name || "").trim());
+      if (byName) rid = String(byName.route_id ?? "").trim();
+    }
+    if (rid) {
+      const canon = routes.find((r) => String(r.route_id ?? "").trim() === rid);
+      if (canon) rid = String(canon.route_id ?? "").trim();
+      else {
+        const byIdCi = routes.find((r) => String(r.route_id ?? "").trim().toLowerCase() === rid.toLowerCase());
+        if (byIdCi) rid = String(byIdCi.route_id ?? "").trim();
+      }
+    }
+    const routeIdSet = new Set(routes.map((r) => String(r.route_id ?? "").trim()));
+    if (rid && !routeIdSet.has(rid)) {
+      setRouteSelectExtra([
+        {
+          route_id: rid,
+          name: (d.route_name || "").trim() || rid,
+          origin: d.start_point || "",
+          destination: d.end_point || "",
+        },
+      ]);
+    } else {
+      setRouteSelectExtra([]);
+    }
+    const next = {
+      driver_license: resolveDriverLicense(d.driver_license),
+      bus_id: String(d.bus_id ?? "").trim(),
+      route_id: rid,
       route_name: d.route_name,
-      start_point: d.start_point, end_point: d.end_point, date: d.date,
+      start_point: d.start_point,
+      end_point: d.end_point,
+      date: d.date,
       trips,
-    });
-    setEditing(d.id); setOpen(true);
+    };
+    setForm(next);
+    setEditBaseline(JSON.parse(JSON.stringify(next)));
+    setEditing(d.id);
+    setOpen(true);
   };
 
   const updateTrip = (idx, field, value) => {
@@ -214,8 +305,8 @@ export default function DutyPage() {
   };
 
   const selectRoute = (routeId) => {
-    const rid = routeId || "";
-    const r = routes.find((x) => String(x.route_id || "") === rid);
+    const rid = routeId != null && routeId !== "" ? String(routeId) : "";
+    const r = routes.find((x) => String(x.route_id ?? "") === rid);
     setForm((prev) => ({
       ...prev,
       route_id: rid,
@@ -392,16 +483,16 @@ export default function DutyPage() {
               <div className="space-y-2">
                 <Label>Driver</Label>
                 <Select
-                  value={form.driver_license || undefined}
+                  value={form.driver_license ? String(form.driver_license) : undefined}
                   onValueChange={(v) => setForm({ ...form, driver_license: v })}
                 >
                   <SelectTrigger data-testid="duty-driver-select"><SelectValue placeholder="Select driver" /></SelectTrigger>
-                  <SelectContent>{drivers.map((dr) => <SelectItem key={dr.license_number} value={dr.license_number}>{dr.name} ({dr.license_number})</SelectItem>)}</SelectContent>
+                  <SelectContent>{drivers.map((dr) => <SelectItem key={dr.license_number} value={String(dr.license_number)}>{dr.name} ({dr.license_number})</SelectItem>)}</SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
                 <Label>Bus</Label>
-                <Select value={form.bus_id || undefined} onValueChange={(v) => setForm({ ...form, bus_id: v })}>
+                <Select value={form.bus_id ? String(form.bus_id) : undefined} onValueChange={(v) => setForm({ ...form, bus_id: v })}>
                   <SelectTrigger data-testid="duty-bus-select"><SelectValue placeholder="Select bus" /></SelectTrigger>
                   <SelectContent>{buses.map((b) => <SelectItem key={b.bus_id} value={b.bus_id}>{b.bus_id} ({b.depot})</SelectItem>)}</SelectContent>
                 </Select>
@@ -410,11 +501,11 @@ export default function DutyPage() {
             <div className="space-y-2"><Label>Date</Label><Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} data-testid="duty-date" /></div>
             <div className="space-y-2">
               <Label>Route</Label>
-              <Select value={form.route_id || undefined} onValueChange={(v) => selectRoute(v)}>
+                <Select value={form.route_id ? String(form.route_id).trim() : undefined} onValueChange={(v) => selectRoute(v)}>
                 <SelectTrigger data-testid="duty-route-select"><SelectValue placeholder="Select route" /></SelectTrigger>
                 <SelectContent>
-                  {routes.map((r) => (
-                    <SelectItem key={r.route_id} value={r.route_id}>
+                  {routesForSelect.map((r) => (
+                    <SelectItem key={String(r.route_id)} value={String(r.route_id).trim()}>
                       {r.route_id} — {r.name}{r.origin || r.destination ? ` (${r.origin || "—"} → ${r.destination || "—"})` : ""}
                     </SelectItem>
                   ))}

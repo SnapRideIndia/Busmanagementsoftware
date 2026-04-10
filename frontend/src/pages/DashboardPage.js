@@ -70,8 +70,26 @@ export default function DashboardPage() {
         depot,
         bus_id: busId,
       });
-      const { data: d } = await API.get(Endpoints.dashboard.root(), { params });
-      setData(d);
+      const [{ data: d }, { data: km }] = await Promise.all([
+        API.get(Endpoints.dashboard.root(), { params }),
+        API.get(Endpoints.km.summary(), { params }),
+      ]);
+      const kmTotals = km?.totals || {};
+      const kmToday = km?.today || {};
+      const kmDaySeries = Array.isArray(km?.series?.day_wise) ? km.series.day_wise : [];
+      const merged = {
+        ...d,
+        total_km: kmTotals.actual_km ?? d.total_km,
+        scheduled_km: kmTotals.scheduled_km ?? d.scheduled_km,
+        availability_pct:
+          kmTotals.scheduled_km > 0
+            ? Math.round((Number(kmTotals.actual_km || 0) / Number(kmTotals.scheduled_km || 0)) * 1000) / 10
+            : d.availability_pct,
+        total_km_today: kmToday.actual_km ?? d.total_km_today,
+        scheduled_km_today: kmToday.scheduled_km ?? d.scheduled_km_today,
+        km_chart: kmDaySeries.length ? kmDaySeries : d.km_chart,
+      };
+      setData(merged);
     } catch (err) {
       setError(formatApiError(err.response?.data?.detail) || err.message || "Could not load dashboard");
       setData(null);

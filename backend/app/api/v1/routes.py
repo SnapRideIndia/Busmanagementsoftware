@@ -30,6 +30,7 @@ from openpyxl.utils import get_column_letter
 from app.api.deps import get_current_user, require_permission, require_any_permission, permissions_for_role
 from app.core.config import settings
 from app.core.database import db
+from app.core.energy_norms import kwh_per_km_for_bus_type
 from app.core.pagination import normalize_page_limit, paged_payload, slice_rows
 from app.core.security import (
     JWT_ALGORITHM,
@@ -73,6 +74,7 @@ from app.domain.incident_types import (
 )
 from app.schemas.requests import (
     BillingGenerateReq,
+    BillingInvoicePatchReq,
     BillingWorkflowReq,
     BusinessRuleReq,
     BusReq,
@@ -80,6 +82,7 @@ from app.schemas.requests import (
     DeductionRuleReq,
     DriverReq,
     DutyReq,
+    DutyUpdateReq,
     TripKmExceptionReq,
     TripKmKeysReq,
     EnergyReq,
@@ -369,6 +372,171 @@ async def _bus_ids_in_depot(depot: str) -> list[str]:
     cur = db.buses.find({"depot": depot}, {"bus_id": 1})
     return [b["bus_id"] async for b in cur]
 
+
+async def _trip_scope_query(
+    *,
+    date_from: str = "",
+    date_to: str = "",
+    depot: str = "",
+    bus_id: str = "",
+    trip_id: str = "",
+    duty_id: str = "",
+    route_name: str = "",
+) -> dict:
+    q: dict = {}
+    dm = _trip_energy_date_match(date_from, date_to)
+    if dm:
+        q["date"] = dm
+    bid = _norm_q(bus_id)
+    dep = _norm_q(depot)
+    if bid:
+        q["bus_id"] = bid
+    elif dep:
+        ids = await _bus_ids_in_depot(dep)
+        if ids:
+            q["bus_id"] = {"$in": ids}
+        else:
+            # Guaranteed no rows for this scope.
+            q["bus_id"] = {"$in": []}
+    if trip_id:
+        q["trip_id"] = {"$regex": re.escape(trip_id), "$options": "i"}
+    if duty_id:
+        q["duty_id"] = {"$regex": re.escape(duty_id), "$options": "i"}
+    if route_name:
+        q["route_name"] = {"$regex": route_name, "$options": "i"}
+    return q
+
+
+def _km_totals_from_trips(trips: list[dict]) -> dict:
+    sk = sum(float(t.get("scheduled_km", 0) or 0) for t in trips)
+    ak = sum(float(t.get("actual_km", 0) or 0) for t in trips)
+    return {
+        "scheduled_km": round(sk, 2),
+        "actual_km": round(ak, 2),
+        "variance_km": round(ak - sk, 2),
+        "achievement_pct": round((ak / sk * 100) if sk > 0 else 0, 2),
+        "trip_count": len(trips or []),
+    }
+
+
+def _km_rows_trip_wise(trips: list[dict]) -> list[dict]:
+    rows: list[dict] = []
+    for t in trips or []:
+        sk = float(t.get("scheduled_km", 0) or 0)
+        ak = float(t.get("actual_km", 0) or 0)
+        rows.append(
+            {
+                "date": t.get("date", ""),
+                "bus_id": t.get("bus_id", ""),
+                "route_name": t.get("route_name", ""),
+                "trip_id": t.get("trip_id", ""),
+                "duty_id": t.get("duty_id", ""),
+                "scheduled_km": round(sk, 2),
+                "actual_km": round(ak, 2),
+                "variance_km": round(ak - sk, 2),
+            }
+        )
+    return rows
+
+
+def _km_rows_day_wise(trips: list[dict]) -> list[dict]:
+    by_day: dict[str, dict] = {}
+    for t in trips or []:
+        dkey = str(t.get("date", "") or "")
+        cur = by_day.setdefault(dkey, {"date": dkey, "scheduled_km": 0.0, "actual_km": 0.0})
+        cur["scheduled_km"] += float(t.get("scheduled_km", 0) or 0)
+        cur["actual_km"] += float(t.get("actual_km", 0) or 0)
+    rows: list[dict] = []
+    for dkey in sorted(by_day.keys()):
+        cur = by_day[dkey]
+        sk = cur["scheduled_km"]
+        ak = cur["actual_km"]
+        rows.append(
+            {
+                "date": dkey,
+                "scheduled_km": round(sk, 2),
+                "actual_km": round(ak, 2),
+                "variance_km": round(ak - sk, 2),
+                "achievement_pct": round((ak / sk * 100) if sk > 0 else 0, 2),
+            }
+        )
+    return rows
+
+
+def _km_rows_bus_wise(trips: list[dict]) -> list[dict]:
+    by_bus: dict[str, dict] = {}
+    for t in trips or []:
+        bkey = str(t.get("bus_id", "") or "")
+        cur = by_bus.setdefault(
+            bkey,
+            {"bus_id": bkey, "scheduled_km": 0.0, "actual_km": 0.0, "trip_count": 0},
+        )
+        cur["scheduled_km"] += float(t.get("scheduled_km", 0) or 0)
+        cur["actual_km"] += float(t.get("actual_km", 0) or 0)
+        cur["trip_count"] += 1
+    rows: list[dict] = []
+    for bkey in sorted(by_bus.keys()):
+        cur = by_bus[bkey]
+        sk = cur["scheduled_km"]
+        ak = cur["actual_km"]
+        rows.append(
+            {
+                "bus_id": bkey,
+                "trip_count": cur["trip_count"],
+                "scheduled_km": round(sk, 2),
+                "actual_km": round(ak, 2),
+                "variance_km": round(ak - sk, 2),
+                "achievement_pct": round((ak / sk * 100) if sk > 0 else 0, 2),
+            }
+        )
+    return rows
+
+
+async def _km_summary_payload(
+    *,
+    date_from: str = "",
+    date_to: str = "",
+    depot: str = "",
+    bus_id: str = "",
+    trip_id: str = "",
+    duty_id: str = "",
+    route_name: str = "",
+) -> dict:
+    tq = await _trip_scope_query(
+        date_from=date_from,
+        date_to=date_to,
+        depot=depot,
+        bus_id=bus_id,
+        trip_id=trip_id,
+        duty_id=duty_id,
+        route_name=route_name,
+    )
+    trips = await db.trip_data.find(tq, {"_id": 0}).to_list(20000)
+    totals = _km_totals_from_trips(trips)
+    today_s = datetime.now(timezone.utc).date().isoformat()
+    today_rows = [t for t in trips if str(t.get("date", "") or "") == today_s]
+    today_totals = _km_totals_from_trips(today_rows)
+    by_day = _km_rows_day_wise(trips)
+    return {
+        "scope": {
+            "date_from": date_from or "",
+            "date_to": date_to or "",
+            "depot": _norm_q(depot),
+            "bus_id": _norm_q(bus_id),
+            "trip_id": trip_id or "",
+            "duty_id": duty_id or "",
+            "route_name": route_name or "",
+        },
+        "totals": totals,
+        "today": {
+            "actual_km": today_totals["actual_km"],
+            "scheduled_km": today_totals["scheduled_km"],
+        },
+        "series": {
+            "day_wise": by_day[-30:],
+        },
+    }
+
 # ══════════════════════════════════════════════════════════
 # AUTH ROUTES
 # ══════════════════════════════════════════════════════════
@@ -603,22 +771,16 @@ async def get_dashboard(
     else:
         total_drivers = await db.drivers.count_documents({})
         active_drivers = await db.drivers.count_documents({"status": "active"})
-    trip_match: dict = {}
     dm = _trip_energy_date_match(date_from, date_to)
-    if dm:
-        trip_match["date"] = dm
-    if bus_query:
-        trip_match["bus_id"] = {"$in": filter_bus_ids}
-    trip_agg = await db.trip_data.aggregate([
-        {"$match": trip_match},
-        {"$group": {"_id": "$date", "actual_km": {"$sum": "$actual_km"}, "scheduled_km": {"$sum": "$scheduled_km"}}},
-    ]).to_list(500)
-    total_km = sum(d["actual_km"] for d in trip_agg)
-    scheduled_km = sum(d["scheduled_km"] for d in trip_agg)
-    km_chart = sorted(
-        [{"date": d["_id"], "actual_km": d["actual_km"], "scheduled_km": d["scheduled_km"]} for d in trip_agg],
-        key=lambda x: x["date"],
-    )[-30:]
+    km_summary = await _km_summary_payload(
+        date_from=date_from,
+        date_to=date_to,
+        depot=depot_f,
+        bus_id=bus_f,
+    )
+    total_km = float(km_summary.get("totals", {}).get("actual_km", 0) or 0)
+    scheduled_km = float(km_summary.get("totals", {}).get("scheduled_km", 0) or 0)
+    km_chart = list(km_summary.get("series", {}).get("day_wise", []) or [])
     energy_match: dict = {}
     if dm:
         energy_match["date"] = dm
@@ -683,13 +845,8 @@ async def get_dashboard(
     avg_soc = round(72.0 + (total_buses % 23) + (active_buses % 7) * 0.5, 1)
     avg_soc = min(96.0, max(45.0, avg_soc))
     on_time_pct = round(min(99.2, availability_pct + (1.5 if scheduled_km > 0 else 0)), 1)
-    today_s = datetime.now(timezone.utc).date().isoformat()
-    trip_today = await db.trip_data.aggregate([
-        {"$match": {**( {"bus_id": {"$in": filter_bus_ids}} if bus_query else {}), "date": today_s}},
-        {"$group": {"_id": None, "a": {"$sum": "$actual_km"}, "s": {"$sum": "$scheduled_km"}}},
-    ]).to_list(1)
-    total_km_today = round(trip_today[0]["a"], 2) if trip_today else 0.0
-    scheduled_km_today = round(trip_today[0]["s"], 2) if trip_today else 0.0
+    total_km_today = float(km_summary.get("today", {}).get("actual_km", 0) or 0)
+    scheduled_km_today = float(km_summary.get("today", {}).get("scheduled_km", 0) or 0)
     return {
         "total_buses": total_buses,
         "active_buses": active_buses,
@@ -799,16 +956,24 @@ async def _cascade_depot_field(old: str, new: str) -> None:
 @router.get("/depots")
 async def list_depots(
     active: str = "",
+    search: str = "",
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     user: dict = Depends(get_current_user),
 ):
-    q: dict = {}
+    base: dict = {}
     a = (active or "").strip().lower()
     if a in ("true", "1", "yes"):
-        q["active"] = True
+        base["active"] = True
     elif a in ("false", "0", "no"):
-        q["active"] = False
+        base["active"] = False
+    s = (search or "").strip()
+    if s:
+        pat = {"$regex": re.escape(s), "$options": "i"}
+        or_search = {"$or": [{"name": pat}, {"code": pat}, {"address": pat}]}
+        q: dict = {"$and": [base, or_search]} if base else or_search
+    else:
+        q = base
     p, lim = normalize_page_limit(page, limit)
     total = await db.depots.count_documents(q)
     rows = (
@@ -1235,29 +1400,86 @@ async def delete_route(route_id: str, _: dict = Depends(require_permission("mast
 # BUSES
 # ══════════════════════════════════════════════════════════
 
+async def _monthly_energy_metrics_by_bus_ids(bus_ids: list[str]) -> dict[str, dict[str, float]]:
+    uniq = sorted({str(x or "").strip() for x in bus_ids if str(x or "").strip()})
+    if not uniq:
+        return {}
+    today = datetime.now(timezone.utc).date()
+    # Month-to-date view; at month-end this naturally becomes full-month comparison.
+    start = today.replace(day=1).isoformat()
+    end = today.isoformat()
+    km_rows = await db.trip_data.aggregate(
+        [
+            {"$match": {"bus_id": {"$in": uniq}, "date": {"$gte": start, "$lte": end}}},
+            {"$group": {"_id": "$bus_id", "km": {"$sum": {"$ifNull": ["$actual_km", 0]}}}},
+        ]
+    ).to_list(len(uniq) + 20)
+    km_by_bus = {str(r.get("_id", "") or ""): float(r.get("km", 0) or 0) for r in km_rows}
+    energy_rows = await db.energy_data.aggregate(
+        [
+            {"$match": {"bus_id": {"$in": uniq}, "date": {"$gte": start, "$lte": end}}},
+            {"$group": {"_id": "$bus_id", "actual_kwh": {"$sum": {"$ifNull": ["$units_charged", 0]}}}},
+        ]
+    ).to_list(len(uniq) + 20)
+    actual_by_bus = {str(r.get("_id", "") or ""): float(r.get("actual_kwh", 0) or 0) for r in energy_rows}
+    buses = await db.buses.find({"bus_id": {"$in": uniq}}, {"_id": 0, "bus_id": 1, "kwh_per_km": 1}).to_list(len(uniq) + 20)
+    out: dict[str, dict[str, float]] = {}
+    for b in buses:
+        bid = str(b.get("bus_id", "") or "")
+        kpm = float(b.get("kwh_per_km", 1.0) or 1.0)
+        allowed = round(km_by_bus.get(bid, 0.0) * kpm, 2)
+        actual = round(actual_by_bus.get(bid, 0.0), 2)
+        out[bid] = {
+            "allowed_monthly_energy": allowed,
+            "actual_monthly_energy": actual,
+            "monthly_energy_variance": round(actual - allowed, 2),
+        }
+    for bid in uniq:
+        out.setdefault(
+            bid,
+            {"allowed_monthly_energy": 0.0, "actual_monthly_energy": 0.0, "monthly_energy_variance": 0.0},
+        )
+    return out
+
+
 @router.get("/buses")
 async def list_buses(
     depot: str = "",
     status: str = "",
     bus_id: str = "",
+    search: str = "",
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     user: dict = Depends(get_current_user),
 ):
-    q: dict = {}
+    base: dict = {}
     d = _norm_q(depot)
     st = _norm_q(status)
     bid = _norm_q(bus_id)
     if d:
-        q["depot"] = d
+        base["depot"] = d
     if st:
-        q["status"] = st
+        base["status"] = st
     if bid:
-        q["bus_id"] = bid
+        base["bus_id"] = bid
+    s = (search or "").strip()
+    if s:
+        pat = {"$regex": re.escape(s), "$options": "i"}
+        or_search = {"$or": [{"bus_id": pat}, {"tender_id": pat}, {"depot": pat}, {"bus_type": pat}]}
+        q: dict = {"$and": [base, or_search]} if base else or_search
+    else:
+        q = base
     p, lim = normalize_page_limit(page, limit)
     total = await db.buses.count_documents(q)
     cur = db.buses.find(q, {"_id": 0}).sort("bus_id", 1).skip((p - 1) * lim).limit(lim)
     items = await cur.to_list(lim)
+    monthly_map = await _monthly_energy_metrics_by_bus_ids([x.get("bus_id", "") for x in items])
+    for item in items:
+        bid = str(item.get("bus_id", "") or "")
+        m = monthly_map.get(bid, {})
+        item["allowed_monthly_energy"] = float(m.get("allowed_monthly_energy", 0.0) or 0.0)
+        item["actual_monthly_energy"] = float(m.get("actual_monthly_energy", 0.0) or 0.0)
+        item["monthly_energy_variance"] = float(m.get("monthly_energy_variance", 0.0) or 0.0)
     return paged_payload(items, total=total, page=page, limit=limit)
 
 @router.post("/buses")
@@ -1266,8 +1488,7 @@ async def create_bus(req: BusReq, _: dict = Depends(require_permission("masters.
     if existing:
         raise HTTPException(status_code=400, detail="Bus ID already exists")
     doc = req.model_dump()
-    kwh_map = {"12m_ac": 1.3, "9m_ac": 1.0, "12m_non_ac": 1.1, "9m_non_ac": 0.8}
-    doc["kwh_per_km"] = kwh_map.get(req.bus_type, 1.0)
+    doc["kwh_per_km"] = kwh_per_km_for_bus_type(req.bus_type)
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
     await db.buses.insert_one(doc)
     doc.pop("_id", None)
@@ -1277,8 +1498,7 @@ async def create_bus(req: BusReq, _: dict = Depends(require_permission("masters.
 async def update_bus(bus_id: str, req: BusReq, _: dict = Depends(require_permission("masters.buses.update"))):
     update = req.model_dump()
     update.pop("bus_id", None)
-    kwh_map = {"12m_ac": 1.3, "9m_ac": 1.0, "12m_non_ac": 1.1, "9m_non_ac": 0.8}
-    update["kwh_per_km"] = kwh_map.get(req.bus_type, 1.0)
+    update["kwh_per_km"] = kwh_per_km_for_bus_type(req.bus_type)
     result = await db.buses.update_one({"bus_id": bus_id}, {"$set": update})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Bus not found")
@@ -1308,7 +1528,16 @@ async def get_bus(bus_id: str, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Bus not found")
     trips = await db.trip_data.find({"bus_id": bus_id}, {"_id": 0}).to_list(100)
     energy = await db.energy_data.find({"bus_id": bus_id}, {"_id": 0}).to_list(100)
-    return {**bus, "trips": trips, "energy": energy}
+    monthly_map = await _monthly_energy_metrics_by_bus_ids([bus_id])
+    mm = monthly_map.get(bus_id, {})
+    return {
+        **bus,
+        "allowed_monthly_energy": float(mm.get("allowed_monthly_energy", 0.0) or 0.0),
+        "actual_monthly_energy": float(mm.get("actual_monthly_energy", 0.0) or 0.0),
+        "monthly_energy_variance": float(mm.get("monthly_energy_variance", 0.0) or 0.0),
+        "trips": trips,
+        "energy": energy,
+    }
 
 # ══════════════════════════════════════════════════════════
 # DRIVERS
@@ -1319,21 +1548,29 @@ async def list_drivers(
     depot: str = "",
     bus_id: str = "",
     status: str = "",
+    search: str = "",
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     user: dict = Depends(get_current_user),
 ):
-    q: dict = {}
+    base: dict = {}
     bid = _norm_q(bus_id)
     dep = _norm_q(depot)
     st = _norm_q(status)
     if bid:
-        q["bus_id"] = bid
+        base["bus_id"] = bid
     elif dep:
         ids = await _bus_ids_in_depot(depot)
-        q["bus_id"] = {"$in": ids} if ids else {"$in": []}
+        base["bus_id"] = {"$in": ids} if ids else {"$in": []}
     if st:
-        q["status"] = st
+        base["status"] = st
+    s = (search or "").strip()
+    if s:
+        pat = {"$regex": re.escape(s), "$options": "i"}
+        or_search = {"$or": [{"name": pat}, {"license_number": pat}, {"phone": pat}, {"bus_id": pat}]}
+        q: dict = {"$and": [base, or_search]} if base else or_search
+    else:
+        q = base
     p, lim = normalize_page_limit(page, limit)
     total = await db.drivers.count_documents(q)
     cur = db.drivers.find(q, {"_id": 0}).sort("license_number", 1).skip((p - 1) * lim).limit(lim)
@@ -1415,17 +1652,25 @@ def _next_conductor_id() -> str:
 async def list_conductors(
     depot: str = "",
     status: str = "",
+    search: str = "",
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     user: dict = Depends(get_current_user),
 ):
-    q: dict = {}
+    base: dict = {}
     d = _norm_q(depot)
     st = _norm_q(status)
     if d:
-        q["depot"] = d
+        base["depot"] = d
     if st:
-        q["status"] = st
+        base["status"] = st
+    s = (search or "").strip()
+    if s:
+        pat = {"$regex": re.escape(s), "$options": "i"}
+        or_search = {"$or": [{"conductor_id": pat}, {"name": pat}, {"badge_no": pat}, {"phone": pat}, {"depot": pat}]}
+        q: dict = {"$and": [base, or_search]} if base else or_search
+    else:
+        q = base
     p, lim = normalize_page_limit(page, limit)
     total = await db.conductors.count_documents(q)
     cur = db.conductors.find(q, {"_id": 0}).sort("conductor_id", 1).skip((p - 1) * lim).limit(lim)
@@ -1793,12 +2038,14 @@ async def alerts_center(
 # ENERGY MANAGEMENT
 # ══════════════════════════════════════════════════════════
 
+
 @router.get("/energy")
 async def list_energy(
     date_from: str = "",
     date_to: str = "",
     bus_id: str = "",
     depot: str = "",
+    search: str = "",
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     user: dict = Depends(get_current_user),
@@ -1816,6 +2063,11 @@ async def list_energy(
     dm = _trip_energy_date_match(date_from, date_to)
     if dm:
         query["date"] = dm
+    s = (search or "").strip()
+    if s:
+        pat = {"$regex": re.escape(s), "$options": "i"}
+        q_search = {"bus_id": pat}
+        query = {"$and": [query, q_search]} if query else q_search
     p, lim = normalize_page_limit(page, limit)
     total = await db.energy_data.count_documents(query)
     cur = db.energy_data.find(query, {"_id": 0}).sort("date", -1).skip((p - 1) * lim).limit(lim)
@@ -1836,6 +2088,7 @@ async def energy_report(
     date_to: str = "",
     depot: str = "",
     bus_id: str = "",
+    search: str = "",
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     user: dict = Depends(get_current_user),
@@ -1900,6 +2153,9 @@ async def energy_report(
             "actual_cost": round(actual * tariff, 2),
             "adjustment": round(min(actual, allowed) * tariff, 2)
         })
+    s_search = (search or "").strip().lower()
+    if s_search:
+        report = [r for r in report if s_search in (r.get("bus_id") or "").lower()]
     total_allowed = sum(r["allowed_kwh"] for r in report)
     total_actual = sum(r["actual_kwh"] for r in report)
     rep_slice, meta = slice_rows(report, page, limit)
@@ -2056,7 +2312,8 @@ async def apply_deductions(
         bus_query["bus_id"] = {"$in": trip_bus_ids}
     buses = await db.buses.find(bus_query, {"_id": 0}).to_list(1000)
     bus_map = {b["bus_id"]: b for b in buses}
-    total_scheduled = sum(t.get("scheduled_km", 0) for t in trips)
+    km_totals = _km_totals_from_trips(trips)
+    total_scheduled = km_totals["scheduled_km"]
     total_actual, weighted_pk, avg_pk_rate = _weighted_pk_metrics(trips, bus_map, tender_map)
     missed_km = max(0, total_scheduled - total_actual)
     base_payment = weighted_pk
@@ -2167,7 +2424,8 @@ async def generate_invoice(req: BillingGenerateReq, _: dict = Depends(require_pe
         revenue_query["trip_id"] = trip_id
     revenue_rows = await db.revenue_data.find(revenue_query, {"_id": 0}).to_list(5000)
     # Step 1: Total KM
-    scheduled_km = sum(t.get("scheduled_km", 0) for t in trips)
+    km_totals = _km_totals_from_trips(trips)
+    scheduled_km = km_totals["scheduled_km"]
     # Step 2: PK Rate (weighted average by bus tender)
     bus_km: dict[str, float] = {}
     for t in trips:
@@ -2370,13 +2628,72 @@ async def generate_invoice(req: BillingGenerateReq, _: dict = Depends(require_pe
     return invoice
 
 
+# Canonical billing lifecycle (UI + reports). Legacy multi-step states map to "submitted".
+_BILLING_LEGACY_SUBMITTED = frozenset(
+    {
+        "submitted",
+        "processing",
+        "proposed",
+        "depot_approved",
+        "regional_approved",
+        "rm_sanctioned",
+        "voucher_raised",
+        "hq_approved",
+    }
+)
+
+
+def _normalize_billing_workflow_state(raw: object) -> str:
+    s = str(raw or "").strip().lower()
+    if s == "draft":
+        return "draft"
+    if s == "paid":
+        return "paid"
+    if s in _BILLING_LEGACY_SUBMITTED:
+        return "submitted"
+    return "draft"
+
+
+def _billing_db_values_for_canonical_filter(canon: str) -> list[str]:
+    c = _normalize_billing_workflow_state(canon)
+    if c == "draft":
+        return ["draft"]
+    if c == "paid":
+        return ["paid"]
+    return sorted(_BILLING_LEGACY_SUBMITTED | {"submitted"})
+
+
+def _approval_date_iso_from_day_field(val: str | None) -> str:
+    """Store milestone as start-of-day UTC ISO from YYYY-MM-DD; empty clears."""
+    raw = (val or "").strip()
+    if not raw:
+        return ""
+    dt = _parse_ymd(raw)
+    if not dt:
+        return ""
+    return datetime(dt.year, dt.month, dt.day, tzinfo=timezone.utc).isoformat()
+
+
+def _apply_billing_canonical_fields(inv: dict) -> dict:
+    canon = _normalize_billing_workflow_state(inv.get("workflow_state") or inv.get("status"))
+    inv["workflow_state"] = canon
+    inv["status"] = canon
+    return inv
+
+
 async def _enrich_billing_invoice_tender_fields(items: list[dict]) -> list[dict]:
-    """Backfill concessionaire/tender relation fields for legacy invoices at read-time."""
+    """Normalize billing status to draft/submitted/paid; backfill concessionaire/tender fields for legacy rows."""
     if not items:
         return items
+    out: list[dict] = []
+    for inv in items:
+        if isinstance(inv, dict):
+            out.append(_apply_billing_canonical_fields(dict(inv)))
+        else:
+            out.append(inv)  # type: ignore[arg-type]
     idxs: list[int] = []
     all_bus_ids: set[str] = set()
-    for i, inv in enumerate(items):
+    for i, inv in enumerate(out):
         if not isinstance(inv, dict):
             continue
         has_conc = str(inv.get("concessionaire", "") or "").strip()
@@ -2391,7 +2708,7 @@ async def _enrich_billing_invoice_tender_fields(items: list[dict]) -> list[dict]
         idxs.append(i)
         all_bus_ids.update(b_ids)
     if not idxs or not all_bus_ids:
-        return items
+        return out
 
     buses = await db.buses.find({"bus_id": {"$in": sorted(all_bus_ids)}}, {"_id": 0, "bus_id": 1, "tender_id": 1}).to_list(len(all_bus_ids) + 20)
     bus_tender = {str(b.get("bus_id", "") or ""): str(b.get("tender_id", "") or "") for b in buses}
@@ -2399,7 +2716,6 @@ async def _enrich_billing_invoice_tender_fields(items: list[dict]) -> list[dict]
     tenders = await db.tenders.find({"tender_id": {"$in": tender_ids}}, {"_id": 0, "tender_id": 1, "concessionaire": 1}).to_list(len(tender_ids) + 10)
     tender_con = {str(t.get("tender_id", "") or ""): str(t.get("concessionaire", "") or "") for t in tenders}
 
-    out = list(items)
     for i in idxs:
         inv = dict(out[i])
         b_ids = [str(x or "").strip() for x in (inv.get("bus_ids") or []) if str(x or "").strip()]
@@ -2417,7 +2733,7 @@ async def _enrich_billing_invoice_tender_fields(items: list[dict]) -> list[dict]
         inv["tender_ids"] = tids
         inv["concessionaires"] = cons
         inv["concessionaire"] = label
-        out[i] = inv
+        out[i] = _apply_billing_canonical_fields(inv)
     return out
 
 @router.get("/billing/trip-ids")
@@ -2470,9 +2786,9 @@ async def list_invoices(
     if d:
         q["depot"] = d
     if st:
-        q["status"] = st
+        q["status"] = {"$in": _billing_db_values_for_canonical_filter(st)}
     if wf:
-        q["workflow_state"] = wf
+        q["workflow_state"] = {"$in": _billing_db_values_for_canonical_filter(wf)}
     if iid:
         q["invoice_id"] = {"$regex": re.escape(iid), "$options": "i"}
     if bid:
@@ -2503,6 +2819,54 @@ async def get_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Invoice not found")
     enriched = await _enrich_billing_invoice_tender_fields([inv])
     return enriched[0] if enriched else inv
+
+
+@router.patch("/billing/{invoice_id}")
+async def patch_billing_invoice(
+    invoice_id: str,
+    req: BillingInvoicePatchReq,
+    user: dict = Depends(require_permission("finance.billing.update")),
+):
+    inv = await db.billing.find_one({"invoice_id": invoice_id}, {"_id": 0})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    patch: dict = {}
+    if req.status is not None:
+        st = str(req.status).strip().lower()
+        if st not in ("draft", "submitted", "paid"):
+            raise HTTPException(status_code=400, detail="status must be draft, submitted, or paid")
+        patch["workflow_state"] = st
+        patch["status"] = st
+    ad = dict(inv.get("approval_dates") or {})
+    dates_touched = False
+    if req.submitted_at is not None:
+        ad["submitted_at"] = _approval_date_iso_from_day_field(req.submitted_at)
+        dates_touched = True
+    if req.paid_at is not None:
+        ad["paid_at"] = _approval_date_iso_from_day_field(req.paid_at)
+        dates_touched = True
+    if dates_touched:
+        patch["approval_dates"] = ad
+    if not patch:
+        enriched = await _enrich_billing_invoice_tender_fields([inv])
+        return enriched[0] if enriched else inv
+    log_entry = {
+        "action": "patch",
+        "by": user.get("name", "") or user.get("email", ""),
+        "role": user.get("role", ""),
+        "at": datetime.now(timezone.utc).isoformat(),
+        "detail": {k: v for k, v in patch.items() if k != "approval_dates"},
+    }
+    if "approval_dates" in patch:
+        log_entry["detail"]["approval_dates"] = patch.get("approval_dates")
+    await db.billing.update_one(
+        {"invoice_id": invoice_id},
+        {"$set": patch, "$push": {"workflow_log": log_entry}},
+    )
+    out = await db.billing.find_one({"invoice_id": invoice_id}, {"_id": 0})
+    enriched = await _enrich_billing_invoice_tender_fields([out or inv])
+    return enriched[0] if enriched else out
+
 
 @router.get("/billing/{invoice_id}/export-pdf")
 async def export_invoice_pdf(invoice_id: str, user: dict = Depends(get_current_user)):
@@ -3116,10 +3480,10 @@ async def _collect_report_rows(
             bq["bus_ids"] = bid
         st = _norm_q(status)
         if st:
-            bq["status"] = st
+            bq["status"] = {"$in": _billing_db_values_for_canonical_filter(st)}
         wf = _norm_q(workflow_state)
         if wf:
-            bq["workflow_state"] = wf
+            bq["workflow_state"] = {"$in": _billing_db_values_for_canonical_filter(wf)}
         iid = _norm_q(invoice_id)
         if iid:
             bq["invoice_id"] = {"$regex": re.escape(iid), "$options": "i"}
@@ -3133,91 +3497,22 @@ async def _collect_report_rows(
         return "billing", data
 
     if report_type in ("billing_trip_wise_km", "billing_day_wise_km", "billing_bus_wise_km", "assured_km_reconciliation"):
-        tq: dict = {}
-        dm = _trip_energy_date_match(date_from, date_to)
-        if dm:
-            tq["date"] = dm
-        if bid:
-            tq["bus_id"] = bid
-        elif dep:
-            ids = await _bus_ids_in_depot(depot)
-            if ids:
-                tq["bus_id"] = {"$in": ids}
-            else:
-                return report_type, []
-        if route:
-            tq["route_name"] = {"$regex": route, "$options": "i"}
-        if trip_id:
-            tq["trip_id"] = {"$regex": re.escape(trip_id), "$options": "i"}
-        if duty_id:
-            tq["duty_id"] = {"$regex": re.escape(duty_id), "$options": "i"}
+        tq = await _trip_scope_query(
+            date_from=date_from,
+            date_to=date_to,
+            depot=depot,
+            bus_id=bus_id,
+            route_name=route,
+            trip_id=trip_id,
+            duty_id=duty_id,
+        )
         trips = await db.trip_data.find(tq, {"_id": 0}).to_list(10000)
         if report_type == "billing_trip_wise_km":
-            rows = []
-            for t in trips:
-                sk = float(t.get("scheduled_km", 0) or 0)
-                ak = float(t.get("actual_km", 0) or 0)
-                rows.append(
-                    {
-                        "date": t.get("date", ""),
-                        "bus_id": t.get("bus_id", ""),
-                        "route_name": t.get("route_name", ""),
-                        "trip_id": t.get("trip_id", ""),
-                        "duty_id": t.get("duty_id", ""),
-                        "scheduled_km": round(sk, 2),
-                        "actual_km": round(ak, 2),
-                        "variance_km": round(ak - sk, 2),
-                    }
-                )
-            return "billing_trip_wise_km", rows
+            return "billing_trip_wise_km", _km_rows_trip_wise(trips)
         if report_type == "billing_day_wise_km":
-            by_day: dict[str, dict] = {}
-            for t in trips:
-                dkey = str(t.get("date", "") or "")
-                cur = by_day.setdefault(dkey, {"date": dkey, "scheduled_km": 0.0, "actual_km": 0.0})
-                cur["scheduled_km"] += float(t.get("scheduled_km", 0) or 0)
-                cur["actual_km"] += float(t.get("actual_km", 0) or 0)
-            rows = []
-            for dkey in sorted(by_day.keys()):
-                cur = by_day[dkey]
-                sk = cur["scheduled_km"]
-                ak = cur["actual_km"]
-                rows.append(
-                    {
-                        "date": dkey,
-                        "scheduled_km": round(sk, 2),
-                        "actual_km": round(ak, 2),
-                        "variance_km": round(ak - sk, 2),
-                        "achievement_pct": round((ak / sk * 100) if sk > 0 else 0, 2),
-                    }
-                )
-            return "billing_day_wise_km", rows
+            return "billing_day_wise_km", _km_rows_day_wise(trips)
         # bus-wise + assured reconciliation (same rollup shape)
-        by_bus: dict[str, dict] = {}
-        for t in trips:
-            bkey = str(t.get("bus_id", "") or "")
-            cur = by_bus.setdefault(
-                bkey,
-                {"bus_id": bkey, "scheduled_km": 0.0, "actual_km": 0.0, "trip_count": 0},
-            )
-            cur["scheduled_km"] += float(t.get("scheduled_km", 0) or 0)
-            cur["actual_km"] += float(t.get("actual_km", 0) or 0)
-            cur["trip_count"] += 1
-        rows = []
-        for bkey in sorted(by_bus.keys()):
-            cur = by_bus[bkey]
-            sk = cur["scheduled_km"]
-            ak = cur["actual_km"]
-            rows.append(
-                {
-                    "bus_id": bkey,
-                    "trip_count": cur["trip_count"],
-                    "scheduled_km": round(sk, 2),
-                    "actual_km": round(ak, 2),
-                    "variance_km": round(ak - sk, 2),
-                    "achievement_pct": round((ak / sk * 100) if sk > 0 else 0, 2),
-                }
-            )
+        rows = _km_rows_bus_wise(trips)
         if report_type == "billing_bus_wise_km":
             return "billing_bus_wise_km", rows
         return "assured_km_reconciliation", rows
@@ -4955,26 +5250,17 @@ async def get_km_details(
     d = _norm_q(depot)
     bid = _norm_q(bus_id)
     bus_ids_list = sorted(b["bus_id"] for b in buses if not d or b.get("depot") == d)
-    query: dict = {}
-    if bid:
-        query["bus_id"] = bid
-    elif d:
-        depot_buses = [b["bus_id"] for b in buses if b.get("depot") == d]
-        if depot_buses:
-            query["bus_id"] = {"$in": depot_buses}
-    dm = _trip_energy_date_match(date_from, date_to)
-    if dm:
-        query["date"] = dm
+    query = await _trip_scope_query(date_from=date_from, date_to=date_to, depot=depot, bus_id=bus_id)
     trips = await db.trip_data.find(query, {"_id": 0}).to_list(5000)
     for t in trips:
         t["depot"] = bus_map.get(t.get("bus_id"), {}).get("depot", "")
         t["source"] = "GPS API"
     if period == "daily":
-        total_km = sum(t.get("actual_km", 0) for t in trips)
+        totals = _km_totals_from_trips(trips)
         sl, meta = slice_rows(trips, page, limit)
         return {
             "data": sl,
-            "total_km": round(total_km, 2),
+            "total_km": totals["actual_km"],
             "depots": depots_list,
             "bus_ids": bus_ids_list,
             "period": "daily",
@@ -5046,6 +5332,28 @@ async def get_km_details(
         "limit": meta["limit"],
         "pages": meta["pages"],
     }
+
+
+@router.get("/km/summary")
+async def get_km_summary(
+    date_from: str = "",
+    date_to: str = "",
+    depot: str = "",
+    bus_id: str = "",
+    trip_id: str = "",
+    duty_id: str = "",
+    route: str = "",
+    user: dict = Depends(get_current_user),
+):
+    return await _km_summary_payload(
+        date_from=date_from,
+        date_to=date_to,
+        depot=depot,
+        bus_id=bus_id,
+        trip_id=trip_id,
+        duty_id=duty_id,
+        route_name=route,
+    )
 
 # ══════════════════════════════════════════════════════════
 # DUTY ASSIGNMENTS
@@ -5169,23 +5477,56 @@ def _merge_duty_trip_runtime_fields(existing_trips: list[dict], new_trips: list[
     return merged
 
 
+async def _incident_for_duty_trip(duty_id: str, trip_id: str) -> dict | None:
+    """Return an existing incident for this duty leg (dedupe), if any."""
+    did = str(duty_id or "").strip()
+    tid = str(trip_id or "").strip()
+    if not did or not tid:
+        return None
+    return await db.incidents.find_one({"duty_id": did, "trip_id": tid}, {"_id": 0})
+
+
+def _linked_incident_matches_duty_trip(linked: dict | None, duty_id: str, trip_id: str) -> bool:
+    if not linked:
+        return False
+    did = str(duty_id or "").strip()
+    tid = str(trip_id or "").strip()
+    return str(linked.get("duty_id") or "").strip() == did and str(linked.get("trip_id") or "").strip() == tid
+
+
 async def _ensure_duty_trip_incidents(
     *,
     duty_doc: dict,
     trips: list[dict],
     actor_name: str,
 ) -> list[dict]:
-    """Create one incident per cancelled/not-operated trip when not already linked."""
+    """Create one incident per cancelled/not-operated trip when no valid link exists.
+
+    We no longer skip whenever ``linked_incident_id`` is set: that id may belong to another
+    trip or an unrelated incident. We only skip (or normalize the link) when the database
+    already has an incident for this ``duty_id`` + ``trip_id``, or the linked id matches that pair.
+    """
     now_iso = _incident_now_iso()
+    duty_id = str(duty_doc.get("id") or "").strip()
     out: list[dict] = []
     for i, t in enumerate(trips or [], start=1):
         trip = dict(t or {})
         if not _duty_trip_needs_incident(trip):
             out.append(trip)
             continue
-        if str(trip.get("linked_incident_id") or "").strip():
+        trip_tid = str(trip.get("trip_id") or "").strip()
+        existing = await _incident_for_duty_trip(duty_id, trip_tid)
+        if existing and str(existing.get("id") or "").strip():
+            trip["linked_incident_id"] = str(existing["id"]).strip()
             out.append(trip)
             continue
+        lid = str(trip.get("linked_incident_id") or "").strip()
+        if lid:
+            linked_doc = await db.incidents.find_one({"id": lid}, {"_id": 0, "duty_id": 1, "trip_id": 1, "id": 1})
+            if _linked_incident_matches_duty_trip(linked_doc, duty_id, trip_tid):
+                out.append(trip)
+                continue
+            # Stale or wrong link (different trip/duty/incident) — create a new incident below.
 
         inf_code = normalize_catalog_infraction_code(_duty_trip_infraction_code(trip))
         occ_date = str(duty_doc.get("date") or "").strip()
@@ -5724,32 +6065,68 @@ async def create_duty(req: DutyReq, user: dict = Depends(require_permission("ope
     return doc
 
 @router.put("/duties/{duty_id}")
-async def update_duty(duty_id: str, req: DutyReq, user: dict = Depends(require_permission("operations.duties.update"))):
-    update = req.model_dump()
-    update["trips"] = _apply_duty_trip_ids(duty_id, update.get("trips", []))
+async def update_duty(duty_id: str, req: DutyUpdateReq, user: dict = Depends(require_permission("operations.duties.update"))):
     existing = await db.duty_assignments.find_one({"id": duty_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Duty not found")
-    update["trips"] = _merge_duty_trip_runtime_fields(existing.get("trips") or [], update.get("trips") or [])
-    rid = (req.route_id or "").strip()
-    route = await db.routes.find_one({"route_id": rid}, {"_id": 0})
-    if not route:
-        raise HTTPException(status_code=404, detail="Route not found")
-    update["route_id"] = rid
-    update["route_name"] = (route.get("name") or "").strip()
-    update["start_point"] = (route.get("origin") or "").strip()
-    update["end_point"] = (route.get("destination") or "").strip()
-    driver = await db.drivers.find_one({"license_number": req.driver_license}, {"_id": 0})
-    if driver:
+    patch = req.model_dump(exclude_unset=True)
+    if not patch:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    update: dict = {}
+    if "driver_license" in patch:
+        lic = (patch.get("driver_license") or "").strip()
+        if not lic:
+            raise HTTPException(status_code=400, detail="driver_license cannot be empty")
+        driver = await db.drivers.find_one({"license_number": lic}, {"_id": 0})
+        if not driver:
+            raise HTTPException(status_code=404, detail="Driver not found")
+        update["driver_license"] = lic
         update["driver_name"] = driver.get("name", "")
         update["driver_phone"] = driver.get("phone", "")
-    update_with_id = {"id": duty_id, **existing, **update}
-    update["trips"] = await _ensure_duty_trip_incidents(
-        duty_doc=update_with_id,
-        trips=update.get("trips", []),
-        actor_name=str(user.get("name") or user.get("email") or "user"),
-    )
-    result = await db.duty_assignments.update_one({"id": duty_id}, {"$set": update})
+    if "bus_id" in patch:
+        bid = (patch.get("bus_id") or "").strip()
+        if not bid:
+            raise HTTPException(status_code=400, detail="bus_id cannot be empty")
+        bus = await db.buses.find_one({"bus_id": bid}, {"_id": 0})
+        if not bus:
+            raise HTTPException(status_code=404, detail="Bus not found")
+        update["bus_id"] = bid
+        update["depot"] = bus.get("depot", "")
+    if "route_id" in patch:
+        rid = (patch.get("route_id") or "").strip()
+        if not rid:
+            raise HTTPException(status_code=400, detail="route_id cannot be empty")
+        route = await db.routes.find_one({"route_id": rid}, {"_id": 0})
+        if not route:
+            raise HTTPException(status_code=404, detail="Route not found")
+        update["route_id"] = rid
+        update["route_name"] = (route.get("name") or "").strip()
+        update["start_point"] = (route.get("origin") or "").strip()
+        update["end_point"] = (route.get("destination") or "").strip()
+    if "date" in patch:
+        d = (patch.get("date") or "").strip()
+        if not d:
+            raise HTTPException(status_code=400, detail="date cannot be empty")
+        update["date"] = d
+
+    new_trips: list | None = None
+    if "trips" in patch and patch.get("trips") is not None:
+        new_trips = _apply_duty_trip_ids(duty_id, patch["trips"])
+        new_trips = _merge_duty_trip_runtime_fields(existing.get("trips") or [], new_trips)
+        update["trips"] = new_trips
+
+    if not update:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    merged_for_incidents = {**existing, **update}
+    if new_trips is not None:
+        update["trips"] = await _ensure_duty_trip_incidents(
+            duty_doc=merged_for_incidents,
+            trips=update["trips"],
+            actor_name=str(user.get("name") or user.get("email") or "user"),
+        )
+    await db.duty_assignments.update_one({"id": duty_id}, {"$set": update})
     return {"message": "Duty updated"}
 
 @router.delete("/duties/{duty_id}")
@@ -5888,19 +6265,9 @@ async def list_trip_km_approvals(
     limit: int = Query(20, ge=1, le=100),
     _: dict = Depends(require_permission("operations.trip_km.read")),
 ):
-    tq: dict = {}
-    dm = _trip_energy_date_match(date_from, date_to)
-    if dm:
-        tq["date"] = dm
-    bid = _norm_q(bus_id)
-    if bid:
-        tq["bus_id"] = bid
-    elif _norm_q(depot):
-        ids = await _bus_ids_in_depot(depot)
-        if ids:
-            tq["bus_id"] = {"$in": ids}
-        else:
-            return paged_payload([], total=0, page=page, limit=limit)
+    tq = await _trip_scope_query(date_from=date_from, date_to=date_to, depot=depot, bus_id=bus_id)
+    if tq.get("bus_id") == {"$in": []}:
+        return paged_payload([], total=0, page=page, limit=limit)
 
     qn = (queue or "all").strip().lower()
     if qn == "traffic_pending":
@@ -6703,28 +7070,16 @@ async def close_infraction(log_id: str, req: InfractionCloseReq, user: dict = De
     return {"message": f"Updated to {new_status}", "id": log_id}
 
 # ══════════════════════════════════════════════════════════
-# CONCESSIONAIRE BILLING WORKFLOW (§12) — State Machine
+# CONCESSIONAIRE BILLING — canonical workflow (draft → submitted → paid)
 # ══════════════════════════════════════════════════════════
 
-WORKFLOW_STATES = [
-    "draft", "submitted", "processing", "proposed",
-    "depot_approved", "regional_approved", "rm_sanctioned",
-    "voucher_raised", "hq_approved", "paid"
-]
+WORKFLOW_STATES = ["draft", "submitted", "paid"]
 WORKFLOW_TRANSITIONS = {
     "submit": ("draft", "submitted"),
-    "process": ("submitted", "processing"),
-    "propose": ("processing", "proposed"),
-    "depot_approve": ("proposed", "depot_approved"),
-    "regional_approve": ("depot_approved", "regional_approved"),
-    "rm_sanction": ("regional_approved", "rm_sanctioned"),
-    "voucher": ("rm_sanctioned", "voucher_raised"),
-    "hq_approve": ("voucher_raised", "hq_approved"),
-    "pay": ("hq_approved", "paid"),
+    "pay": ("submitted", "paid"),
 }
 WORKFLOW_TIMESTAMP_KEYS = {
     "submitted": "submitted_at",
-    "regional_approved": "approved_at",
     "paid": "paid_at",
 }
 
@@ -6733,7 +7088,7 @@ async def advance_billing_workflow(req: BillingWorkflowReq, user: dict = Depends
     inv = await db.billing.find_one({"invoice_id": req.invoice_id}, {"_id": 0})
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
-    current = inv.get("workflow_state", "draft")
+    current = _normalize_billing_workflow_state(inv.get("workflow_state", "draft"))
     transition = WORKFLOW_TRANSITIONS.get(req.action)
     if not transition:
         raise HTTPException(status_code=400, detail=f"Unknown action: {req.action}")
@@ -6777,12 +7132,13 @@ async def get_billing_workflow(invoice_id: str, user: dict = Depends(get_current
     inv = await db.billing.find_one({"invoice_id": invoice_id}, {"_id": 0})
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    cur = _normalize_billing_workflow_state(inv.get("workflow_state", "draft"))
     return {
         "invoice_id": invoice_id,
-        "current_state": inv.get("workflow_state", "draft"),
+        "current_state": cur,
         "workflow_log": inv.get("workflow_log", []),
         "states": WORKFLOW_STATES,
-        "available_actions": [a for a, (fr, to) in WORKFLOW_TRANSITIONS.items() if fr == inv.get("workflow_state", "draft")]
+        "available_actions": [a for a, (fr, _to) in WORKFLOW_TRANSITIONS.items() if fr == cur],
     }
 
 # ══════════════════════════════════════════════════════════

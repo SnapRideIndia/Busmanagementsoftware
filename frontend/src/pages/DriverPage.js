@@ -29,6 +29,7 @@ export default function DriverPage() {
   const [assignBus, setAssignBus] = useState("");
   const [filterDepot, setFilterDepot] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
+  const [filterSearch, setFilterSearch] = useState("");
   const [page, setPage] = useState(1);
   const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 30 });
   const [depotNames, setDepotNames] = useState([]);
@@ -63,7 +64,7 @@ export default function DriverPage() {
     setFetchError(null);
     try {
       const [d, busItems] = await Promise.all([
-        API.get(Endpoints.masters.drivers.list(), { params: buildQuery({ depot: filterDepot, status: filterStatus, page, limit: meta.limit }) }),
+        API.get(Endpoints.masters.drivers.list(), { params: buildQuery({ depot: filterDepot, status: filterStatus, search: filterSearch, page, limit: meta.limit }) }),
         fetchAllPaginated(Endpoints.masters.buses.list(), {}),
       ]);
       const du = unwrapListResponse(d.data);
@@ -76,7 +77,10 @@ export default function DriverPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterDepot, filterStatus, page, meta.limit]);
+  }, [filterDepot, filterStatus, filterSearch, page, meta.limit]);
+  useEffect(() => {
+    setPage(1);
+  }, [filterSearch]);
   useEffect(() => {
     load();
   }, [load]);
@@ -120,6 +124,16 @@ export default function DriverPage() {
       </div>
 
       <div className="flex flex-wrap gap-3 mb-4 items-end">
+        <div className="space-y-1">
+          <label className="text-xs font-medium uppercase text-gray-500">Search</label>
+          <Input
+            value={filterSearch}
+            onChange={(e) => setFilterSearch(e.target.value)}
+            placeholder="Name, license, phone, bus…"
+            className="w-[min(100%,280px)]"
+            data-testid="driver-filter-search"
+          />
+        </div>
         <div className="space-y-1">
           <label className="text-xs font-medium uppercase text-gray-500">Depot (by assigned bus)</label>
           <Select value={filterDepot || "all"} onValueChange={(v) => { setFilterDepot(v === "all" ? "" : v); setPage(1); }}>

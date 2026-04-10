@@ -12,7 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { Plus, Zap, TrendingUp } from "lucide-react";
+import { Plus } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { toast } from "sonner";
 
@@ -22,8 +22,11 @@ export default function EnergyPage() {
   const [buses, setBuses] = useState([]);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  /** When set, API uses this day for both bounds (single-day filter). Cleared when From/To range is edited. */
+  const [filterDay, setFilterDay] = useState("");
   const [depotFilter, setDepotFilter] = useState("");
   const [busFilter, setBusFilter] = useState("");
+  const [filterSearch, setFilterSearch] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [form, setForm] = useState({ bus_id: "", date: "", units_charged: "", tariff_rate: "8.5" });
   const [tab, setTab] = useState("data");
@@ -40,11 +43,14 @@ export default function EnergyPage() {
     setListLoading(true);
     setListError(null);
     try {
+      const df = filterDay || dateFrom;
+      const dt = filterDay || dateTo;
       const params = buildQuery({
-        date_from: dateFrom,
-        date_to: dateTo,
+        date_from: df,
+        date_to: dt,
         bus_id: busFilter,
         depot: depotFilter,
+        search: filterSearch,
         page: dataPage,
         limit: 20,
       });
@@ -62,17 +68,20 @@ export default function EnergyPage() {
     } finally {
       setListLoading(false);
     }
-  }, [dateFrom, dateTo, busFilter, depotFilter, dataPage]);
+  }, [filterDay, dateFrom, dateTo, busFilter, depotFilter, filterSearch, dataPage]);
 
   const loadReport = useCallback(async () => {
     setReportLoading(true);
     setReportError(null);
     try {
+      const df = filterDay || dateFrom;
+      const dt = filterDay || dateTo;
       const params = buildQuery({
-        date_from: dateFrom,
-        date_to: dateTo,
+        date_from: df,
+        date_to: dt,
         depot: depotFilter,
         bus_id: busFilter,
+        search: filterSearch,
         page: reportPage,
         limit: 20,
       });
@@ -89,18 +98,40 @@ export default function EnergyPage() {
     } finally {
       setReportLoading(false);
     }
-  }, [reportPage, dateFrom, dateTo, depotFilter, busFilter]);
+  }, [reportPage, filterDay, dateFrom, dateTo, depotFilter, busFilter, filterSearch]);
 
   useEffect(() => {
     load();
   }, [load]);
   useEffect(() => {
+    setDataPage(1);
+    setReportPage(1);
+  }, [filterSearch]);
+  useEffect(() => {
     if (tab === "report") loadReport();
   }, [tab, loadReport]);
 
   const handleAdd = async () => {
+    if (!form.bus_id?.trim()) {
+      toast.error("Select a bus");
+      return;
+    }
+    if (!form.date?.trim()) {
+      toast.error("Select a date");
+      return;
+    }
+    const units = Number(form.units_charged);
+    if (form.units_charged === "" || Number.isNaN(units) || units <= 0) {
+      toast.error("Enter units (kWh) greater than 0");
+      return;
+    }
+    const tariff = Number(form.tariff_rate);
+    if (form.tariff_rate === "" || Number.isNaN(tariff) || tariff <= 0) {
+      toast.error("Enter tariff (Rs/kWh) greater than 0");
+      return;
+    }
     try {
-      await API.post(Endpoints.energy.root(), { ...form, units_charged: Number(form.units_charged), tariff_rate: Number(form.tariff_rate) });
+      await API.post(Endpoints.energy.root(), { ...form, units_charged: units, tariff_rate: tariff });
       toast.success("Charging data added"); setAddOpen(false); setForm({ bus_id: "", date: "", units_charged: "", tariff_rate: "8.5" }); load();
     } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
   };
@@ -116,8 +147,71 @@ export default function EnergyPage() {
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 mb-6 items-end">
-        <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-40" data-testid="energy-date-from" />
-        <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-40" data-testid="energy-date-to" />
+        <div className="space-y-1">
+          <label className="text-xs font-medium uppercase text-gray-500">From</label>
+          <Input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => {
+              setFilterDay("");
+              setDateFrom(e.target.value);
+              setDataPage(1);
+              setReportPage(1);
+            }}
+            className="w-40 h-9"
+            data-testid="energy-date-from"
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium uppercase text-gray-500">To</label>
+          <Input
+            type="date"
+            value={dateTo}
+            onChange={(e) => {
+              setFilterDay("");
+              setDateTo(e.target.value);
+              setDataPage(1);
+              setReportPage(1);
+            }}
+            className="w-40 h-9"
+            data-testid="energy-date-to"
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium uppercase text-gray-500" title="Overrides From/To with one calendar day">
+            Specific day
+          </label>
+          <div className="flex items-center gap-1">
+            <Input
+              type="date"
+              value={filterDay}
+              onChange={(e) => {
+                const v = e.target.value;
+                setFilterDay(v);
+                if (v) {
+                  setDateFrom(v);
+                  setDateTo(v);
+                  setDataPage(1);
+                  setReportPage(1);
+                }
+              }}
+              className="w-40 h-9"
+              data-testid="energy-filter-day"
+            />
+            {filterDay ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-9 px-2 text-xs shrink-0"
+                onClick={() => setFilterDay("")}
+                data-testid="energy-filter-day-clear"
+              >
+                Clear day
+              </Button>
+            ) : null}
+          </div>
+        </div>
         <div className="space-y-1">
           <label className="text-xs font-medium uppercase text-gray-500">Depot</label>
           <Select value={depotFilter || "all"} onValueChange={(v) => { setDepotFilter(v === "all" ? "" : v); setBusFilter(""); setDataPage(1); setReportPage(1); }}>
@@ -142,11 +236,18 @@ export default function EnergyPage() {
             </SelectContent>
           </Select>
         </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium uppercase text-gray-500">Search bus ID</label>
+          <Input
+            value={filterSearch}
+            onChange={(e) => setFilterSearch(e.target.value)}
+            placeholder="Filter by bus ID"
+            className="w-[min(100%,280px)] h-9"
+            data-testid="energy-filter-search"
+          />
+        </div>
         <Button onClick={() => load()} variant="outline" data-testid="energy-filter-btn">
           Refresh
-        </Button>
-        <Button onClick={() => { setReportPage(1); setTab("report"); }} className="bg-[#C8102E] hover:bg-[#A50E25] text-white" data-testid="view-energy-report-btn">
-          <TrendingUp size={14} className="mr-1.5" /> View Report
         </Button>
       </div>
 
@@ -161,7 +262,9 @@ export default function EnergyPage() {
           <CardContent className="p-0">
             <Table>
               <TableHeader><TableRow className="table-header">
-                <TableHead>Bus ID</TableHead><TableHead>Date</TableHead><TableHead className="text-right">Units (kWh)</TableHead><TableHead className="text-right">Tariff (Rs/kWh)</TableHead><TableHead className="text-right">Cost (Rs)</TableHead>
+                <TableHead>Bus ID</TableHead>
+                <TableHead>Date</TableHead>
+                <TableHead className="text-right">Units (kWh)</TableHead><TableHead className="text-right">Tariff (Rs/kWh)</TableHead><TableHead className="text-right">Cost (Rs)</TableHead>
               </TableRow></TableHeader>
               <TableBody>
                 <TableLoadRows

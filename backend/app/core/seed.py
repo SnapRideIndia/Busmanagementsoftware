@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.core.config import settings as app_settings
 from app.core.database import db
+from app.core.energy_norms import KWH_PER_KM_BY_BUS_TYPE, kwh_per_km_for_bus_type
 from app.core.security import hash_password, verify_password
 from app.domain.permissions import ALL_PERMISSION_IDS, default_permission_ids_for_role
 from app.domain.infractions_master import build_master_rows, normalize_catalog_infraction_code
@@ -174,9 +175,10 @@ async def run_seed_data():
     )
     await db.buses.delete_many({})
     buses = []
+    _bus_types = list(KWH_PER_KM_BY_BUS_TYPE.keys())
     for i in range(1, 11):
-        bt = random.choice(["12m_ac", "9m_ac", "12m_non_ac"])
-        kwh = {"12m_ac": 1.3, "9m_ac": 1.0, "12m_non_ac": 1.1}.get(bt, 1.0)
+        bt = random.choice(_bus_types)
+        kwh = kwh_per_km_for_bus_type(bt)
         tid = random.choice(["TND-001", "TND-002", "TND-003"])
         buses.append({
             "bus_id": f"TS-{str(i).zfill(3)}", "bus_type": bt, "capacity": random.choice([32, 40, 50]),
@@ -199,8 +201,8 @@ async def run_seed_data():
                 except ValueError:
                     pass
         ni = max(nums) + 1 if nums else 1
-        bt = random.choice(["12m_ac", "9m_ac", "12m_non_ac"])
-        kwh = {"12m_ac": 1.3, "9m_ac": 1.0, "12m_non_ac": 1.1}.get(bt, 1.0)
+        bt = random.choice(_bus_types)
+        kwh = kwh_per_km_for_bus_type(bt)
         tid = random.choice(["TND-001", "TND-002", "TND-003"])
         await db.buses.insert_one(
             {
@@ -281,6 +283,8 @@ async def run_seed_data():
     await db.billing.delete_many({})
 
     active_buses = await db.buses.find({"status": "active"}, {"_id": 0}).to_list(500)
+    # Maintenance buses are still part of month-end energy accounting (short downtime windows).
+    operational_buses = await db.buses.find({"status": {"$in": ["active", "maintenance"]}}, {"_id": 0}).to_list(500)
     all_routes = await db.routes.find({"active": True}, {"_id": 0, "route_id": 1, "name": 1, "origin": 1, "destination": 1, "depot": 1, "distance_km": 1}).to_list(200)
     if not all_routes:
         all_routes = [
@@ -302,7 +306,10 @@ async def run_seed_data():
     for day_offset in range(30):
         day_dt = base_now - timedelta(days=day_offset)
         day = day_dt.strftime("%Y-%m-%d")
-        for bi, bus in enumerate(active_buses):
+        for bi, bus in enumerate(operational_buses):
+            # Simulate maintenance buses being unavailable for 2 recent days only.
+            if str(bus.get("status", "")).lower() == "maintenance" and day_offset in (0, 1):
+                continue
             bus_id = bus["bus_id"]
             drv = driver_by_bus.get(bus_id) or (fallback_drivers[bi % len(fallback_drivers)] if fallback_drivers else {})
             route = all_routes[route_ptr % len(all_routes)]
@@ -515,12 +522,12 @@ async def run_seed_data():
     today = base_now.date()
     p_start = (today - timedelta(days=29)).isoformat()
     p_end = today.isoformat()
-    depot_values = sorted({b.get("depot", "") for b in active_buses if b.get("depot")}) + ["All"]
+    depot_values = sorted({b.get("depot", "") for b in operational_buses if b.get("depot")}) + ["All"]
     billing_seed_docs = []
     tender_by_id = {str(t.get("tender_id", "") or ""): t for t in tenders}
     for dep in depot_values:
-        dep_buses = [b["bus_id"] for b in active_buses if dep == "All" or b.get("depot") == dep]
-        dep_bus_rows = [b for b in active_buses if b.get("bus_id") in dep_buses]
+        dep_buses = [b["bus_id"] for b in operational_buses if dep == "All" or b.get("depot") == dep]
+        dep_bus_rows = [b for b in operational_buses if b.get("bus_id") in dep_buses]
         dep_tender_ids = sorted({str(b.get("tender_id", "") or "").strip() for b in dep_bus_rows if str(b.get("tender_id", "") or "").strip()})
         dep_concessionaires = sorted(
             {
@@ -556,7 +563,7 @@ async def run_seed_data():
         avg_pk = (weighted_pk / tkm) if tkm > 0 else 0.0
         dep_energy = [e for e in energy_docs if e.get("bus_id") in dep_buses]
         actual_kwh = sum(float(e.get("units_charged", 0) or 0) for e in dep_energy)
-        kwh_by_bus = {b["bus_id"]: float(b.get("kwh_per_km", 1.0) or 1.0) for b in active_buses}
+        kwh_by_bus = {b["bus_id"]: float(b.get("kwh_per_km", 1.0) or 1.0) for b in operational_buses}
         allowed_kwh = sum(
             float(t.get("actual_km", 0) or 0) * kwh_by_bus.get(str(t.get("bus_id", "") or ""), 1.0)
             for t in dep_trips
@@ -615,6 +622,13 @@ async def run_seed_data():
             if bid in bw_map:
                 bw_map[bid]["energy_kwh"] += float(e.get("units_charged", 0) or 0)
         final_payable = round(base_payment + energy_adj + km_inc - total_ded, 2)
+        wf = random.choice(["draft", "submitted", "paid"])
+        appr = {"submitted_at": "", "approved_at": "", "paid_at": ""}
+        if wf == "submitted":
+            appr["submitted_at"] = base_now.isoformat()
+        elif wf == "paid":
+            appr["submitted_at"] = (base_now - timedelta(days=5)).isoformat()
+            appr["paid_at"] = base_now.isoformat()
         billing_seed_docs.append(
             {
                 "invoice_id": f"INV-SEED-{dep.replace(' ', '')[:8].upper()}",
@@ -677,9 +691,9 @@ async def run_seed_data():
                     "gst_proof_ref": "",
                     "tax_withholding_ref": "",
                 },
-                "approval_dates": {"submitted_at": "", "approved_at": "", "paid_at": ""},
-                "status": random.choice(["draft", "submitted", "proposed", "paid"]),
-                "workflow_state": random.choice(["draft", "submitted", "proposed", "paid"]),
+                "approval_dates": appr,
+                "status": wf,
+                "workflow_state": wf,
                 "workflow_log": [],
                 "created_at": base_now.isoformat(),
             }
@@ -934,8 +948,13 @@ async def run_seed_data():
                 "system_deduction": 12000.0,
                 "total_deduction": 117296.9,
                 "final_payable": 1774293.8,
-                "status": "proposed",
-                "workflow_state": "proposed",
+                "approval_dates": {
+                    "submitted_at": datetime.now(timezone.utc).isoformat(),
+                    "approved_at": "",
+                    "paid_at": "",
+                },
+                "status": "submitted",
+                "workflow_state": "submitted",
                 "workflow_log": [
                     {"action": "submit", "from": "draft", "to": "submitted", "by": "System", "role": "admin", "remarks": "Seed", "at": datetime.now(timezone.utc).isoformat()},
                 ],
@@ -966,6 +985,7 @@ async def run_seed_data():
                 "system_deduction": 9500.0,
                 "total_deduction": 97900.0,
                 "final_payable": 1518910.0,
+                "approval_dates": {"submitted_at": "", "approved_at": "", "paid_at": ""},
                 "status": "draft",
                 "workflow_state": "draft",
                 "workflow_log": [],
@@ -996,6 +1016,11 @@ async def run_seed_data():
                 "system_deduction": 22000.0,
                 "total_deduction": 244500.0,
                 "final_payable": 4983300.0,
+                "approval_dates": {
+                    "submitted_at": (datetime.now(timezone.utc) - timedelta(days=50)).isoformat(),
+                    "approved_at": "",
+                    "paid_at": (datetime.now(timezone.utc) - timedelta(days=10)).isoformat(),
+                },
                 "status": "paid",
                 "workflow_state": "paid",
                 "workflow_log": [],
@@ -1074,6 +1099,7 @@ async def run_seed_data():
             {"key": "12m_ac_kwh_per_km", "value": "1.3", "updated_at": datetime.now(timezone.utc).isoformat()},
             {"key": "9m_ac_kwh_per_km", "value": "1.0", "updated_at": datetime.now(timezone.utc).isoformat()},
             {"key": "12m_non_ac_kwh_per_km", "value": "1.1", "updated_at": datetime.now(timezone.utc).isoformat()},
+            {"key": "9m_non_ac_kwh_per_km", "value": "0.8", "updated_at": datetime.now(timezone.utc).isoformat()},
             {"key": "max_deduction_cap_pct", "value": "20", "updated_at": datetime.now(timezone.utc).isoformat()},
             {"key": "default_subsidy_rate", "value": "5", "updated_at": datetime.now(timezone.utc).isoformat()},
         ]

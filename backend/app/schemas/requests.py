@@ -150,6 +150,44 @@ class EnergyReq(BaseModel):
     units_charged: float
     tariff_rate: float = 10.0
 
+    @field_validator("bus_id")
+    @classmethod
+    def bus_id_non_empty(cls, v: str) -> str:
+        s = (v or "").strip()
+        if not s:
+            raise ValueError("Bus is required")
+        return s
+
+    @field_validator("date")
+    @classmethod
+    def date_non_empty(cls, v: str) -> str:
+        s = (v or "").strip()
+        if len(s) < 10:
+            raise ValueError("Date is required (YYYY-MM-DD)")
+        return s[:10]
+
+    @field_validator("units_charged")
+    @classmethod
+    def units_positive(cls, v: float) -> float:
+        try:
+            x = float(v)
+        except (TypeError, ValueError):
+            raise ValueError("Units (kWh) must be a number")
+        if x <= 0:
+            raise ValueError("Units (kWh) must be greater than 0")
+        return x
+
+    @field_validator("tariff_rate")
+    @classmethod
+    def tariff_non_negative(cls, v: float) -> float:
+        try:
+            x = float(v)
+        except (TypeError, ValueError):
+            raise ValueError("Tariff must be a number")
+        if x <= 0:
+            raise ValueError("Tariff (Rs/kWh) must be greater than 0")
+        return x
+
 
 class InfractionEntryReq(BaseModel):
     """One infraction code to embed in an incident."""
@@ -386,6 +424,16 @@ class DutyReq(BaseModel):
     trips: list[DutyTripReq] = Field(default_factory=list)
 
 
+class DutyUpdateReq(BaseModel):
+    """Partial update for PUT /duties/{id}. Only fields present in the JSON body are applied."""
+
+    driver_license: str | None = None
+    bus_id: str | None = None
+    route_id: str | None = None
+    date: str | None = None
+    trips: list[DutyTripReq] | None = None
+
+
 class TripKmKeysReq(BaseModel):
     """Keys are ``bus_id|YYYY-MM-DD`` (daily trip row) or optional ``trip_id`` if stored on the document."""
 
@@ -439,6 +487,14 @@ class BillingWorkflowReq(BaseModel):
     invoice_id: str
     action: str
     remarks: str = ""
+
+
+class BillingInvoicePatchReq(BaseModel):
+    """Manual billing status and milestone dates (canonical workflow: draft → submitted → paid)."""
+
+    status: str | None = None
+    submitted_at: str | None = None  # YYYY-MM-DD or empty to clear
+    paid_at: str | None = None
 
 
 class BusinessRuleReq(BaseModel):
