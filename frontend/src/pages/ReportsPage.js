@@ -2,11 +2,10 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import API, { buildQuery, formatApiError, fetchAllPaginated, getBackendOrigin } from "../lib/api";
 import { Endpoints } from "../lib/endpoints";
-import { SIMPLE_REPORT_NAMES, columnsForPreview, headerLabel } from "../lib/reportPreview";
+import { SIMPLE_REPORT_NAMES, columnsForPreview, formatReportCellValue, headerLabel } from "../lib/reportPreview";
 import TablePaginationBar from "../components/TablePaginationBar";
 import AsyncPanel from "../components/AsyncPanel";
 import RingLoader from "../components/RingLoader";
-import { formatDateIN, formatDateTimeIN } from "../lib/dates";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -181,12 +180,7 @@ export default function ReportsPage() {
   }, [filteredCatalog]);
 
   const formatReportCell = useCallback((col, val) => {
-    if (val == null || val === "") return "-";
-    if (typeof val === "boolean") return val ? "Yes" : "No";
-    if (typeof val === "number") return val.toLocaleString("en-IN");
-    if (["date", "period_start", "period_end"].includes(col) && typeof val === "string") return formatDateIN(val);
-    if (["created_at", "occurred_at", "updated_at"].includes(col) && typeof val === "string") return formatDateTimeIN(val);
-    return String(val);
+    return formatReportCellValue(col, val);
   }, []);
 
   const buildParamsForEntry = useCallback(

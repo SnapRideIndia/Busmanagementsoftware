@@ -496,6 +496,12 @@ async def run_seed_data():
             day_dt = base_now - timedelta(days=i + 1)
             occurred_at = day_dt.replace(hour=10, minute=15, second=0, microsecond=0).isoformat()
             inf_st = "closed" if i in (1, 3, 8) else "open"
+            # Keep incident trip/duty linkage consistent with seeded trip_data rows.
+            linked_trip = trips_docs[i % len(trips_docs)] if trips_docs else {}
+            linked_trip_id = str(linked_trip.get("trip_id", "") or "")
+            linked_duty_id = str(linked_trip.get("duty_id", "") or "")
+            linked_route_id = str(linked_trip.get("route_id", "") or route.get("route_id", ""))
+            linked_route_name = str(linked_trip.get("route_name", "") or route.get("name", ""))
             incidents_docs.append(
                 {
                     "id": iid,
@@ -509,10 +515,10 @@ async def run_seed_data():
                     "bus_id": bus_id,
                     "driver_id": lic,
                     "depot": bus.get("depot", ""),
-                    "route_name": route.get("name", ""),
-                    "route_id": route.get("route_id", ""),
-                    "trip_id": f"TRP-SEED-{i + 1:02d}",
-                    "duty_id": f"DTY-SEED-{i + 1:02d}",
+                    "route_name": linked_route_name,
+                    "route_id": linked_route_id,
+                    "trip_id": linked_trip_id,
+                    "duty_id": linked_duty_id,
                     "related_infraction_id": "",
                     "location_text": route.get("origin", ""),
                     "severity": sev,

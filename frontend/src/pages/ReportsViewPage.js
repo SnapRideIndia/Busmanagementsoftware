@@ -2,27 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import API, { formatApiError, getBackendOrigin } from "../lib/api";
 import { Endpoints } from "../lib/endpoints";
-import { SIMPLE_REPORT_NAMES, columnsForPreview, headerLabel } from "../lib/reportPreview";
+import { SIMPLE_REPORT_NAMES, columnsForPreview, formatReportCellValue, headerLabel } from "../lib/reportPreview";
 import TablePaginationBar from "../components/TablePaginationBar";
 import RingLoader from "../components/RingLoader";
-import { formatDateIN, formatDateTimeIN } from "../lib/dates";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { ArrowLeft, Download } from "lucide-react";
 import { toast } from "sonner";
-
-function toAmPm(hhmm) {
-  if (typeof hhmm !== "string") return hhmm;
-  const m = hhmm.trim().match(/^(\d{1,2}):(\d{2})$/);
-  if (!m) return hhmm;
-  let h = Number(m[1]);
-  const mm = m[2];
-  if (Number.isNaN(h) || h < 0 || h > 23) return hhmm;
-  const suffix = h >= 12 ? "PM" : "AM";
-  h = h % 12 || 12;
-  return `${String(h).padStart(2, "0")}:${mm} ${suffix}`;
-}
 
 export default function ReportsViewPage() {
   const navigate = useNavigate();
@@ -50,15 +37,7 @@ export default function ReportsViewPage() {
   }, [searchParams, reportType]);
 
   const formatReportCell = useCallback((col, val) => {
-    if (val == null || val === "") return "-";
-    if (typeof val === "boolean") return val ? "Yes" : "No";
-    if (typeof val === "number") return val.toLocaleString("en-IN");
-    if (["scheduled_bus_out", "actual_bus_out", "scheduled_bus_in", "actual_bus_in", "start_time", "end_time", "plan_start_time", "plan_end_time"].includes(col) && typeof val === "string") {
-      return toAmPm(val);
-    }
-    if (["date", "period_start", "period_end"].includes(col) && typeof val === "string") return formatDateIN(val);
-    if (["created_at", "occurred_at", "updated_at"].includes(col) && typeof val === "string") return formatDateTimeIN(val);
-    return String(val).replace(/\s*\n+\s*/g, " ").replace(/\s{2,}/g, " ").trim();
+    return formatReportCellValue(col, val, { time12h: true });
   }, []);
 
   const load = useCallback(async (page = 1) => {

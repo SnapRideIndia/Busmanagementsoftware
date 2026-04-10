@@ -141,7 +141,7 @@ export default function Layout({ children }) {
                   <button
                     type="button"
                     onClick={() => toggleGroup(group.label)}
-                    className="w-full flex items-center justify-between px-2.5 py-1 text-[9px] uppercase tracking-[0.06em] font-bold text-gray-500 hover:text-gray-300"
+                    className="w-full flex items-center justify-between px-2.5 py-1 text-[11px] uppercase tracking-[0.06em] font-bold text-gray-500 hover:text-gray-300"
                   >
                     {group.label}
                     {expandedGroups.includes(group.label) ? (
