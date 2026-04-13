@@ -442,7 +442,7 @@ export default function BillingPage() {
             <TableHeader><TableRow className="table-header">
               <TableHead>Invoice ID</TableHead><TableHead>Period</TableHead><TableHead>Depot</TableHead><TableHead>Concessionaire</TableHead>
               <TableHead className="text-right">Base (Rs)</TableHead><TableHead className="text-right">Energy Adj.</TableHead>
-              <TableHead className="text-right">Infractions</TableHead><TableHead className="text-right">KPI Damages</TableHead><TableHead className="text-right text-green-700">KPI Incentives</TableHead>
+              <TableHead className="text-right">Infraction Ded.</TableHead><TableHead className="text-right">KPI Damages</TableHead><TableHead className="text-right text-green-700">KPI Incentives</TableHead>
               <TableHead className="text-right">Total Ded.</TableHead><TableHead className="text-right">Final (Rs)</TableHead>
               <TableHead>Status</TableHead><TableHead>Submitted</TableHead><TableHead>Paid</TableHead><TableHead className="text-right">Actions</TableHead>
             </TableRow></TableHeader>
@@ -665,11 +665,10 @@ export default function BillingPage() {
                     <tr className="border-b bg-blue-50"><td className="p-3 font-medium">Energy Adjustment</td><td className="p-3 text-right font-mono font-semibold text-blue-700">Rs. {selected.energy_adjustment?.toLocaleString()}</td></tr>
                     <tr className="border-b bg-emerald-50"><td className="p-3 font-medium">KM Incentive</td><td className="p-3 text-right font-mono font-semibold text-emerald-700">Rs. {selected.km_incentive?.toLocaleString() || "0"}</td></tr>
                     <tr className="border-b bg-green-50"><td className="p-3 font-medium text-green-800">GCC KPI Incentives (§18)</td><td className="p-3 text-right font-mono font-semibold text-green-700">+ Rs. {(selected.kpi_incentives || 0).toLocaleString()}</td></tr>
-                    <tr className="border-b"><td className="p-3 text-gray-600">Missed KM</td><td className="p-3 text-right font-mono text-red-600">{selected.missed_km?.toLocaleString()} km</td></tr>
-                    <tr className="border-b"><td className="p-3 text-gray-600">Availability Deduction</td><td className="p-3 text-right font-mono text-red-600">- Rs. {selected.availability_deduction?.toLocaleString()}</td></tr>
-                    <tr className="border-b"><td className="p-3 text-gray-600">Performance Deduction</td><td className="p-3 text-right font-mono text-red-600">- Rs. {selected.performance_deduction?.toLocaleString()}</td></tr>
+                    <tr className="border-b"><td className="p-3 text-gray-600">Missed KM</td><td className="p-3 text-right font-mono text-gray-500">{selected.missed_km?.toLocaleString()} km <span className="text-[10px] text-gray-400">(informational)</span></td></tr>
+                    <tr className="border-b bg-amber-50"><td className="p-3 font-medium text-amber-900">Infraction Deduction (Rules)</td><td className="p-3 text-right font-mono font-semibold text-amber-700">- Rs. {(selected.rule_based_infraction_deduction ?? selected.performance_deduction ?? 0).toLocaleString()}</td></tr>
                     <tr className="border-b"><td className="p-3 text-gray-600">System Deduction</td><td className="p-3 text-right font-mono text-red-600">- Rs. {selected.system_deduction?.toLocaleString()}</td></tr>
-                    <tr className="border-b bg-amber-50"><td className="p-3 font-medium text-amber-900">Infractions Deduction (Schedule-S)</td><td className="p-3 text-right font-mono font-semibold text-amber-700">- Rs. {(selected.infractions_deduction || 0).toLocaleString()}</td></tr>
+                    <tr className="border-b bg-amber-50"><td className="p-3 font-medium text-amber-900">Infraction Deduction (Schedule-S)</td><td className="p-3 text-right font-mono font-semibold text-amber-700">- Rs. {(selected.schedule_s_deduction ?? selected.infractions_deduction ?? 0).toLocaleString()}</td></tr>
                     <tr className="border-b bg-red-50"><td className="p-3 font-medium text-red-900">GCC KPI Damages (§18)</td><td className="p-3 text-right font-mono font-semibold text-red-600">- Rs. {(selected.kpi_damages || 0).toLocaleString()}</td></tr>
                     <tr className="border-b bg-red-100"><td className="p-3 font-bold">Total Deductions</td><td className="p-3 text-right font-mono font-bold text-red-700">- Rs. {selected.total_deduction?.toLocaleString()}</td></tr>
                   </tbody>
