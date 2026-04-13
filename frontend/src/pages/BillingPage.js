@@ -304,12 +304,13 @@ export default function BillingPage() {
             <TableHeader><TableRow className="table-header">
               <TableHead>Invoice ID</TableHead><TableHead>Period</TableHead><TableHead>Depot</TableHead><TableHead>Concessionaire</TableHead>
               <TableHead className="text-right">Base (Rs)</TableHead><TableHead className="text-right">Energy Adj.</TableHead>
-              <TableHead className="text-right">Deductions</TableHead><TableHead className="text-right">Final (Rs)</TableHead>
+              <TableHead className="text-right">Infractions</TableHead><TableHead className="text-right">KPI Damages</TableHead><TableHead className="text-right text-green-700">KPI Incentives</TableHead>
+              <TableHead className="text-right">Total Ded.</TableHead><TableHead className="text-right">Final (Rs)</TableHead>
               <TableHead>Status</TableHead><TableHead>Submitted</TableHead><TableHead>Paid</TableHead><TableHead className="text-right">Actions</TableHead>
             </TableRow></TableHeader>
             <TableBody>
               <TableLoadRows
-                colSpan={12}
+                colSpan={15}
                 loading={loading}
                 error={fetchError}
                 onRetry={load}
@@ -345,7 +346,10 @@ export default function BillingPage() {
                   <TableCell>{inv.concessionaire || "—"}</TableCell>
                   <TableCell className="text-right font-mono">{inv.base_payment?.toLocaleString()}</TableCell>
                   <TableCell className="text-right font-mono text-blue-600">{inv.energy_adjustment?.toLocaleString()}</TableCell>
-                  <TableCell className="text-right font-mono text-red-600">{inv.total_deduction?.toLocaleString()}</TableCell>
+                  <TableCell className="text-right font-mono text-amber-600">{(inv.infractions_deduction || 0).toLocaleString()}</TableCell>
+                  <TableCell className="text-right font-mono text-red-600">{(inv.kpi_damages || 0).toLocaleString()}</TableCell>
+                  <TableCell className="text-right font-mono text-green-600">+{(inv.kpi_incentives || 0).toLocaleString()}</TableCell>
+                  <TableCell className="text-right font-mono text-red-700 font-medium">{inv.total_deduction?.toLocaleString()}</TableCell>
                   <TableCell className="text-right font-mono font-semibold text-[#C8102E]">{inv.final_payable?.toLocaleString()}</TableCell>
                   <TableCell>
                     <Badge className={STATUS_BADGE_CLASS[inv.status] || STATUS_BADGE_CLASS.draft}>
@@ -520,11 +524,14 @@ export default function BillingPage() {
                     <tr className="border-b"><td className="p-3 text-gray-600">Tariff Rate</td><td className="p-3 text-right font-mono">Rs. {selected.tariff_rate}/kWh</td></tr>
                     <tr className="border-b bg-blue-50"><td className="p-3 font-medium">Energy Adjustment</td><td className="p-3 text-right font-mono font-semibold text-blue-700">Rs. {selected.energy_adjustment?.toLocaleString()}</td></tr>
                     <tr className="border-b bg-emerald-50"><td className="p-3 font-medium">KM Incentive</td><td className="p-3 text-right font-mono font-semibold text-emerald-700">Rs. {selected.km_incentive?.toLocaleString() || "0"}</td></tr>
+                    <tr className="border-b bg-green-50"><td className="p-3 font-medium text-green-800">GCC KPI Incentives (§18)</td><td className="p-3 text-right font-mono font-semibold text-green-700">+ Rs. {(selected.kpi_incentives || 0).toLocaleString()}</td></tr>
                     <tr className="border-b"><td className="p-3 text-gray-600">Missed KM</td><td className="p-3 text-right font-mono text-red-600">{selected.missed_km?.toLocaleString()} km</td></tr>
-                    <tr className="border-b"><td className="p-3 text-gray-600">Availability Deduction</td><td className="p-3 text-right font-mono text-red-600">Rs. {selected.availability_deduction?.toLocaleString()}</td></tr>
-                    <tr className="border-b"><td className="p-3 text-gray-600">Performance Deduction</td><td className="p-3 text-right font-mono text-red-600">Rs. {selected.performance_deduction?.toLocaleString()}</td></tr>
-                    <tr className="border-b"><td className="p-3 text-gray-600">System Deduction</td><td className="p-3 text-right font-mono text-red-600">Rs. {selected.system_deduction?.toLocaleString()}</td></tr>
-                    <tr className="border-b bg-red-50"><td className="p-3 font-medium">Total Deductions</td><td className="p-3 text-right font-mono font-semibold text-red-600">Rs. {selected.total_deduction?.toLocaleString()}</td></tr>
+                    <tr className="border-b"><td className="p-3 text-gray-600">Availability Deduction</td><td className="p-3 text-right font-mono text-red-600">- Rs. {selected.availability_deduction?.toLocaleString()}</td></tr>
+                    <tr className="border-b"><td className="p-3 text-gray-600">Performance Deduction</td><td className="p-3 text-right font-mono text-red-600">- Rs. {selected.performance_deduction?.toLocaleString()}</td></tr>
+                    <tr className="border-b"><td className="p-3 text-gray-600">System Deduction</td><td className="p-3 text-right font-mono text-red-600">- Rs. {selected.system_deduction?.toLocaleString()}</td></tr>
+                    <tr className="border-b bg-amber-50"><td className="p-3 font-medium text-amber-900">Infractions Deduction (Schedule-S)</td><td className="p-3 text-right font-mono font-semibold text-amber-700">- Rs. {(selected.infractions_deduction || 0).toLocaleString()}</td></tr>
+                    <tr className="border-b bg-red-50"><td className="p-3 font-medium text-red-900">GCC KPI Damages (§18)</td><td className="p-3 text-right font-mono font-semibold text-red-600">- Rs. {(selected.kpi_damages || 0).toLocaleString()}</td></tr>
+                    <tr className="border-b bg-red-100"><td className="p-3 font-bold">Total Deductions</td><td className="p-3 text-right font-mono font-bold text-red-700">- Rs. {selected.total_deduction?.toLocaleString()}</td></tr>
                   </tbody>
                   <tfoot>
                     <tr className="bg-[#C8102E] text-white"><td className="p-4 font-bold text-base">FINAL PAYABLE</td><td className="p-4 text-right font-mono font-bold text-lg">Rs. {selected.final_payable?.toLocaleString()}</td></tr>

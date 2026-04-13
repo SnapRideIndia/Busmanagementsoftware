@@ -2502,6 +2502,22 @@ async def generate_invoice(req: BillingGenerateReq, _: dict = Depends(require_pe
     total_deduction = availability_deduction + performance_deduction + system_deduction + infractions_deduction
     excess_km = max(0, total_km - scheduled_km)
     km_incentive = excess_km * avg_pk_rate * max(excess_km_factor, 0)
+    # Step 5b: GCC KPI Damages & Incentives (§18)
+    monthly_fee_base = base_payment
+    incidents_for_kpi = await db.incidents.find(
+        {"occurred_at": {"$gte": f"{period_start}T00:00:00", "$lte": f"{period_end}T23:59:59"}},
+        {"_id": 0, "incident_type": 1, "severity": 1}
+    ).to_list(2000)
+    kpi_rules_docs = await db.business_rules.find({"category": "kpi"}, {"_id": 0}).to_list(50)
+    kpi_rules = {r["rule_key"]: r["rule_value"] for r in kpi_rules_docs}
+    kpi_rules["avg_pk_rate"] = str(avg_pk_rate)
+    from app.services.gcc_engine import compute_kpi_damages
+    kpi_result = compute_kpi_damages(monthly_fee_base, trips, buses, incidents_for_kpi, total_km, kpi_rules)
+    kpi_damages = kpi_result.get("total_damages_capped", 0)
+    kpi_incentives = kpi_result.get("total_incentive_capped", 0)
+    total_deduction_with_kpi = total_deduction + kpi_damages
+    # Recalculate final with KPI
+    final_payable = base_payment + energy_adjustment + km_incentive + kpi_incentives - total_deduction_with_kpi
     revenue_by_bus: dict[str, dict] = {}
     revenue_key_trip: dict[tuple[str, str, str], dict] = {}
     revenue_key_route: dict[tuple[str, str, str], dict] = {}
@@ -2566,8 +2582,7 @@ async def generate_invoice(req: BillingGenerateReq, _: dict = Depends(require_pe
                 "energy_kwh": round(float(be.get("actual", 0) or 0), 2),
             }
         )
-    # Step 6: Final
-    final_payable = base_payment + energy_adjustment + km_incentive - total_deduction
+    # Step 6: Final (calculated above with KPI)
     now_iso = datetime.now(timezone.utc).isoformat()
     invoice = {
         "invoice_id": f"INV-{str(uuid.uuid4())[:8].upper()}",
@@ -2598,7 +2613,10 @@ async def generate_invoice(req: BillingGenerateReq, _: dict = Depends(require_pe
         "system_deduction": round(system_deduction, 2),
         "infractions_deduction": round(infractions_deduction, 2),
         "infractions_breakdown": infraction_rollup,
-        "total_deduction": round(total_deduction, 2),
+        "kpi_damages": round(kpi_damages, 2),
+        "kpi_incentives": round(kpi_incentives, 2),
+        "kpi_breakdown": kpi_result.get("categories", {}),
+        "total_deduction": round(total_deduction_with_kpi, 2),
         "final_payable": round(final_payable, 2),
         "bus_wise_summary": bus_wise_summary,
         "trip_wise_details": trip_wise_details,
@@ -2608,7 +2626,10 @@ async def generate_invoice(req: BillingGenerateReq, _: dict = Depends(require_pe
             "subsidy_included": False,
             "subsidy": 0.0,
             "km_incentive": round(km_incentive, 2),
-            "total_deduction": round(total_deduction, 2),
+            "kpi_incentives": round(kpi_incentives, 2),
+            "kpi_damages": round(kpi_damages, 2),
+            "infractions_deduction": round(infractions_deduction, 2),
+            "total_deduction": round(total_deduction_with_kpi, 2),
         },
         "artifact_refs": {
             "payment_processing_note": "",
