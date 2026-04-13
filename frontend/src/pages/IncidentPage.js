@@ -60,6 +60,8 @@ import {
   User,
   Clock,
   Copy,
+  AlertTriangle,
+  Timer,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -182,6 +184,7 @@ export default function IncidentPage() {
   const [penaltyCodePick, setPenaltyCodePick] = useState("none");
   const [editPenaltyCategory, setEditPenaltyCategory] = useState("");
   const [editPenaltyCodePick, setEditPenaltyCodePick] = useState("none");
+  const [escalationData, setEscalationData] = useState(null);
 
   const typeLabels = useMemo(() => {
     const m = {};
@@ -205,6 +208,11 @@ export default function IncidentPage() {
     } finally {
       setCatLoading(false);
     }
+    // Load escalation data
+    try {
+      const { data: escData } = await API.get("/escalation-check");
+      setEscalationData(escData);
+    } catch {}
   }, []);
 
   const load = useCallback(async () => {
@@ -558,6 +566,37 @@ export default function IncidentPage() {
       <p className="text-sm text-gray-600 mb-4 max-w-4xl">Log, assign, and track incident cases.</p>
 
       <div className="space-y-4">
+        {/* Auto-Escalation Alert Banner */}
+        {escalationData && escalationData.total_overdue > 0 && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-4" data-testid="escalation-banner">
+            <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0 mt-0.5">
+              <AlertTriangle size={20} className="text-[#DC2626]" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-[#DC2626] mb-1">
+                {escalationData.total_overdue} Overdue Infraction{escalationData.total_overdue !== 1 ? "s" : ""} — Auto-Escalation Active
+              </p>
+              <p className="text-xs text-red-700 mb-2">
+                Total escalated penalty: <span className="font-bold font-mono">Rs.{escalationData.total_escalated_amount?.toLocaleString()}</span>
+                {" "}— Penalties increase automatically for each resolve period that elapses without closure.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {escalationData.items.slice(0, 6).map((e, i) => (
+                  <Badge key={i} className="bg-red-100 text-red-800 text-[10px] px-2 py-0.5 gap-1 border border-red-200 hover:bg-red-100">
+                    <span className="font-mono font-bold">{e.infraction_code}</span>
+                    <span className="text-red-500">{e.category}&rarr;{e.escalated_category}</span>
+                    <span className="font-bold">Rs.{e.escalated_amount.toLocaleString()}</span>
+                    <span className="text-red-400">({e.overdue_days}d overdue)</span>
+                  </Badge>
+                ))}
+                {escalationData.items.length > 6 && (
+                  <Badge variant="outline" className="text-[10px] text-red-500 border-red-200">+{escalationData.items.length - 6} more</Badge>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="flex items-center justify-between mb-2">
           <div className="text-xs text-gray-500">
             Total incidents: <span className="font-semibold text-gray-800">{listMeta.total}</span>
@@ -1232,19 +1271,48 @@ export default function IncidentPage() {
                                 <Badge className="bg-gray-100 text-gray-500 text-[8px]">NON-DEDUCTIBLE</Badge>
                               )}
                            </div>
-                           {/* {(inf.resolve_days != null && inf.resolve_days !== "") || inf.resolve_by ? (
-                             <p className="text-[10px] text-gray-600 leading-relaxed">
-                               {inf.resolve_days != null && inf.resolve_days !== "" ? (
-                                 <span><strong>{inf.resolve_days}</strong> day resolve period</span>
-                               ) : null}
-                               {inf.resolve_by ? (
-                                 <span>
-                                   {inf.resolve_days != null && inf.resolve_days !== "" ? " · " : null}
-                                   Resolve by <strong>{formatDateIN(inf.resolve_by)}</strong>
-                                 </span>
-                               ) : null}
-                             </p>
-                           ) : null} */}
+                           {/* Resolve-day Countdown Timer */}
+                           {inf.status !== "closed" && inf.resolve_by && (() => {
+                             const today = new Date();
+                             today.setHours(0,0,0,0);
+                             const deadline = new Date(inf.resolve_by + "T23:59:59");
+                             deadline.setHours(0,0,0,0);
+                             const diffMs = deadline - today;
+                             const daysLeft = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+                             const isOverdue = daysLeft < 0;
+                             const overdueDays = Math.abs(daysLeft);
+                             const resolveDays = inf.resolve_days || 1;
+                             const escalationSteps = isOverdue ? Math.floor(overdueDays / resolveDays) : 0;
+                             const escChain = {"A":"B","B":"C","C":"D","D":"E","E":"E"};
+                             let escCat = String(inf.category || "").toUpperCase();
+                             for (let s = 0; s < escalationSteps; s++) { escCat = escChain[escCat] || escCat; }
+                             const slabAmounts = {"A":100,"B":500,"C":1000,"D":1500,"E":3000,"F":10000,"G":200000};
+                             const escalatedAmt = Math.min(slabAmounts[escCat] || 0, 3000);
+                             const originalAmt = Number(inf.amount_snapshot || inf.amount || 0);
+                             return (
+                               <div className={`mt-2 rounded-lg px-3 py-2 border ${isOverdue ? "bg-red-50 border-red-200" : daysLeft <= 1 ? "bg-amber-50 border-amber-200" : "bg-blue-50 border-blue-200"}`}>
+                                 <div className="flex items-center gap-2 mb-1">
+                                   <Timer size={12} className={isOverdue ? "text-red-500" : daysLeft <= 1 ? "text-amber-500" : "text-blue-500"} />
+                                   <span className={`text-[10px] font-black uppercase tracking-wider ${isOverdue ? "text-red-600" : daysLeft <= 1 ? "text-amber-600" : "text-blue-600"}`}>
+                                     {isOverdue ? `OVERDUE by ${overdueDays} day${overdueDays !== 1 ? "s" : ""}` : daysLeft === 0 ? "DUE TODAY" : `${daysLeft} day${daysLeft !== 1 ? "s" : ""} remaining`}
+                                   </span>
+                                 </div>
+                                 <p className="text-[10px] text-gray-600">
+                                   Resolve by: <strong>{inf.resolve_by}</strong>
+                                   {inf.resolve_days && <span className="text-gray-400"> ({inf.resolve_days}-day period)</span>}
+                                 </p>
+                                 {isOverdue && escalationSteps > 0 && (
+                                   <div className="mt-1.5 flex items-center gap-2 text-[10px]">
+                                     <Badge className="bg-red-200 text-red-900 text-[9px] px-1.5 py-0">AUTO-ESCALATED</Badge>
+                                     <span className="text-red-700 font-bold">
+                                       Cat {inf.category} &rarr; Cat {escCat} | Rs.{originalAmt.toLocaleString()} &rarr; Rs.{escalatedAmt.toLocaleString()}
+                                     </span>
+                                     <span className="text-red-400">({escalationSteps} step{escalationSteps !== 1 ? "s" : ""})</span>
+                                   </div>
+                                 )}
+                               </div>
+                             );
+                           })()}
                            {inf.closed_at && (
                              <div className="mt-3 pt-3 border-t border-dashed border-gray-100">
                                 <div className="flex items-center gap-2 text-green-700">

@@ -4712,6 +4712,23 @@ async def _collect_report_rows(
                 row["damage_summary"] = ""
             if "engineer_action" not in row:
                 row["engineer_action"] = ""
+            # Enrich with deduction amounts from linked infractions
+            infractions = row.get("infractions") or []
+            codes = []
+            amounts = []
+            total_ded = 0.0
+            today_ymd = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            for inf in infractions:
+                if inf.get("deductible") is False:
+                    continue
+                code = str(inf.get("infraction_code") or "")
+                amt = float(inf.get("amount_current") or inf.get("amount_snapshot") or inf.get("amount") or 0)
+                codes.append(code)
+                amounts.append(f"Rs.{amt:,.0f}")
+                total_ded += amt
+            row["infraction_codes"] = ", ".join(codes) if codes else ""
+            row["infraction_amounts"] = ", ".join(amounts) if amounts else ""
+            row["total_deduction"] = round(total_ded, 2) if total_ded > 0 else ""
             data.append(row)
         return "incidents", data
 
@@ -5514,6 +5531,9 @@ async def download_report(
             "severity",
             "status",
             "occurred_at",
+            "infraction_codes",
+            "infraction_amounts",
+            "total_deduction",
             "vehicles_affected",
             "vehicles_affected_count",
             "damage_summary",
@@ -6437,6 +6457,66 @@ async def add_incident_note(
     set_updates["activity_log"] = log
     await db.incidents.update_one({"id": incident_id}, {"$set": set_updates})
     return {"message": "Note added", "id": incident_id}
+
+
+@router.get("/escalation-check")
+async def check_escalation(user: dict = Depends(get_current_user)):
+    """Check all open incidents for overdue infractions and return escalation status."""
+    from datetime import date as _date
+    today = _date.today()
+    today_ymd = today.isoformat()
+    open_incidents = await db.incidents.find(
+        {"status": {"$nin": ["closed", "resolved"]}},
+        {"_id": 0, "id": 1, "bus_id": 1, "depot": 1, "incident_type": 1, "infractions": 1, "severity": 1}
+    ).to_list(2000)
+    escalated = []
+    for inc in open_incidents:
+        for inf in (inc.get("infractions") or []):
+            if inf.get("status") == "closed" or inf.get("deductible") is False:
+                continue
+            resolve_by = str(inf.get("resolve_by") or "").strip()
+            if not resolve_by:
+                continue
+            try:
+                rb = _date.fromisoformat(resolve_by[:10])
+            except (ValueError, TypeError):
+                continue
+            if today <= rb:
+                continue
+            overdue_days = (today - rb).days
+            resolve_days_val = int(inf.get("resolve_days") or 1) or 1
+            steps = max(0, overdue_days // resolve_days_val)
+            category = str(inf.get("category") or "").upper()
+            original_amount = float(inf.get("amount_snapshot") or inf.get("amount") or 0)
+            escalated_cat = category
+            for _ in range(steps):
+                nxt = ESCALATION_CHAIN.get(escalated_cat)
+                if not nxt:
+                    break
+                escalated_cat = nxt
+            escalated_amount = INFRACTION_SLABS.get(escalated_cat, INFRACTION_SLABS.get(category, INFRACTION_SLABS["A"])).amount
+            escalated_amount = min(float(escalated_amount), ESCALATION_CEILING_RS)
+            escalated.append({
+                "incident_id": inc["id"],
+                "bus_id": inc.get("bus_id", ""),
+                "depot": inc.get("depot", ""),
+                "infraction_code": inf.get("infraction_code", ""),
+                "category": category,
+                "escalated_category": escalated_cat,
+                "original_amount": original_amount,
+                "escalated_amount": escalated_amount,
+                "resolve_by": resolve_by,
+                "overdue_days": overdue_days,
+                "escalation_steps": steps,
+                "severity": inc.get("severity", ""),
+            })
+    escalated.sort(key=lambda x: -x["overdue_days"])
+    return {
+        "total_overdue": len(escalated),
+        "total_escalated_amount": round(sum(e["escalated_amount"] for e in escalated), 2),
+        "items": escalated,
+        "checked_at": today_ymd,
+    }
 
 
 @router.post("/incidents/{incident_id}/attachments")
