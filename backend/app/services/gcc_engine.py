@@ -268,16 +268,6 @@ def compute_kpi_damages(
     capped_dam = min(total_kpi_dam, kpi_cap)
     capped_inc = min(total_inc, incentive_cap)
 
-    # First-30-day relaxation (if applicable)
-    first_30_relax = float(rules.get("first_30_day_kpi_relaxation_pct", "0"))
-    if first_30_relax > 0:
-        # Apply relaxation to non-safety damages only
-        non_safety_dam = sum(r["damages"] for k, r in results.items() if k != "safety")
-        safety_dam = results["safety"]["damages"]
-        relaxed_non_safety = non_safety_dam * (1 - first_30_relax / 100)
-        total_kpi_dam_relaxed = relaxed_non_safety + safety_dam
-        capped_dam = min(total_kpi_dam_relaxed, kpi_cap)
-
     return {
         "categories": results,
         "total_damages_raw": round(total_kpi_dam, 2),

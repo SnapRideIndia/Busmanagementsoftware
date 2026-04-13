@@ -2477,11 +2477,8 @@ async def generate_invoice(req: BillingGenerateReq, _: dict = Depends(require_pe
     subsidy = 0
     # Step 5: Deductions
     missed_km = max(0, scheduled_km - total_km)
-    # Availability deduction removed — missed KM is informational only (not penalized separately)
-    availability_deduction = 0
     rules = await db.deduction_rules.find({"active": True}, {"_id": 0}).to_list(100)
-    # Rule-based infraction deductions (from deduction_rules: performance + system types)
-    rule_based_infraction_deduction = 0
+    infraction_deduction = 0
     system_deduction = 0
     for rule in rules:
         rt = rule.get("rule_type", "")
@@ -2490,20 +2487,10 @@ async def generate_invoice(req: BillingGenerateReq, _: dict = Depends(require_pe
         if rule.get("is_capped") and rule.get("cap_limit", 0) > 0:
             amount = min(amount, rule["cap_limit"])
         if rt == "performance":
-            rule_based_infraction_deduction += amount
+            infraction_deduction += amount
         elif rt == "system":
             system_deduction += amount
-    infraction_rows = await _get_flattened_infractions(period_start, period_end, bus_ids)
-    infraction_rollup = _infraction_deduction_rollup(
-        infraction_rows,
-        base_payment,
-        as_of_ymd=period_end,
-        km20_pk_rate=avg_pk_rate,
-    )
-    schedule_s_deduction = infraction_rollup["total_applied"]
-    # Combined infraction deduction = rule-based + Schedule-S incidents
-    infractions_deduction = rule_based_infraction_deduction + schedule_s_deduction
-    total_deduction = infractions_deduction + system_deduction
+    total_deduction = infraction_deduction + system_deduction
     excess_km = max(0, total_km - scheduled_km)
     km_incentive = excess_km * avg_pk_rate * max(excess_km_factor, 0)
     # Step 5b: GCC KPI Damages & Incentives (§18)
@@ -2612,13 +2599,8 @@ async def generate_invoice(req: BillingGenerateReq, _: dict = Depends(require_pe
         "km_incentive_factor": round(excess_km_factor, 4),
         "km_incentive": round(km_incentive, 2),
         "missed_km": round(missed_km, 2),
-        "availability_deduction": 0,
-        "performance_deduction": round(rule_based_infraction_deduction, 2),
-        "rule_based_infraction_deduction": round(rule_based_infraction_deduction, 2),
+        "infraction_deduction": round(infraction_deduction, 2),
         "system_deduction": round(system_deduction, 2),
-        "schedule_s_deduction": round(schedule_s_deduction, 2),
-        "infractions_deduction": round(infractions_deduction, 2),
-        "infractions_breakdown": infraction_rollup,
         "kpi_damages": round(kpi_damages, 2),
         "kpi_incentives": round(kpi_incentives, 2),
         "kpi_breakdown": kpi_result.get("categories", {}),
@@ -2629,12 +2611,11 @@ async def generate_invoice(req: BillingGenerateReq, _: dict = Depends(require_pe
         "invoice_components": {
             "base_payment": round(base_payment, 2),
             "energy_adjustment": round(energy_adjustment, 2),
-            "subsidy_included": False,
-            "subsidy": 0.0,
             "km_incentive": round(km_incentive, 2),
             "kpi_incentives": round(kpi_incentives, 2),
+            "infraction_deduction": round(infraction_deduction, 2),
+            "system_deduction": round(system_deduction, 2),
             "kpi_damages": round(kpi_damages, 2),
-            "infractions_deduction": round(infractions_deduction, 2),
             "total_deduction": round(total_deduction_with_kpi, 2),
         },
         "artifact_refs": {
@@ -2988,9 +2969,8 @@ async def export_invoice_pdf(invoice_id: str, user: dict = Depends(get_current_u
         ("(+) GCC KPI Incentives (S18)", f"Rs. {inv.get('kpi_incentives', 0):,.2f}"),
         ("", ""),
         ("Missed KM", f"{inv['missed_km']:,.2f} km"),
-        ("(-) Infraction Deduction (Rules)", f"Rs. {inv.get('rule_based_infraction_deduction', inv.get('performance_deduction', 0)):,.2f}"),
+        ("(-) Infraction Deduction", f"Rs. {inv.get('infraction_deduction', inv.get('performance_deduction', 0)):,.2f}"),
         ("(-) System Deduction", f"Rs. {inv['system_deduction']:,.2f}"),
-        ("(-) Infraction Deduction (Schedule-S)", f"Rs. {inv.get('schedule_s_deduction', inv.get('infractions_deduction', 0)):,.2f}"),
         ("(-) GCC KPI Damages (S18)", f"Rs. {inv.get('kpi_damages', 0):,.2f}"),
         ("Total Deductions", f"Rs. {inv['total_deduction']:,.2f}"),
     ]
@@ -3139,9 +3119,8 @@ async def export_invoice_excel(invoice_id: str, user: dict = Depends(get_current
         ("KM Incentive", inv.get("km_incentive", 0)),
         ("(+) GCC KPI Incentives (S18)", inv.get("kpi_incentives", 0)),
         ("Missed KM", inv["missed_km"]),
-        ("(-) Infraction Deduction (Rules)", inv.get("rule_based_infraction_deduction", inv.get("performance_deduction", 0))),
+        ("(-) Infraction Deduction", inv.get("infraction_deduction", inv.get("performance_deduction", 0))),
         ("(-) System Deduction", inv["system_deduction"]),
-        ("(-) Infraction Deduction (Schedule-S)", inv.get("schedule_s_deduction", inv.get("infractions_deduction", 0))),
         ("(-) GCC KPI Damages (S18)", inv.get("kpi_damages", 0)),
         ("Total Deductions", inv["total_deduction"]),
         ("FINAL PAYABLE", inv["final_payable"])
