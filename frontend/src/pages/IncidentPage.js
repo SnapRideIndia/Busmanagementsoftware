@@ -481,12 +481,20 @@ export default function IncidentPage() {
   }, [buses]);
 
   const finalizedDeduction = (inc) => {
-    if ((inc?.status || "") !== "closed") return "—";
-    const total = (inc?.infractions || []).reduce((sum, inf) => {
+    const rows = inc?.infractions || [];
+    if (!rows.length) return "—";
+    const total = rows.reduce((sum, inf) => {
       if (inf?.deductible === false) return sum;
       return sum + Number(inf?.amount_current ?? inf?.amount_snapshot ?? inf?.amount ?? 0);
     }, 0);
-    return `Rs.${total.toLocaleString()}`;
+    if (total === 0) return "—";
+    const isClosed = inc?.status === "closed";
+    return (
+      <span className={isClosed ? "text-[#DC2626] font-bold" : "text-amber-700 font-medium"}>
+        Rs.{total.toLocaleString()}
+        {!isClosed && <span className="text-[9px] text-gray-400 ml-1">(est)</span>}
+      </span>
+    );
   };
 
   const reportParams = useMemo(
@@ -698,11 +706,20 @@ export default function IncidentPage() {
                         <TableCell>{inc.depot || "—"}</TableCell>
                         <TableCell>
                           <div className="flex flex-wrap gap-1">
-                            {(inc.infractions || []).map((inf, ixf) => (
-                              <Badge key={`${displayInfractionCode(inf.infraction_code)}-${ixf}`} variant="outline" className="text-[10px] py-0 border-amber-200 bg-amber-50 text-amber-800">
-                                {displayInfractionCode(inf.infraction_code)}
-                              </Badge>
-                            ))}
+                            {(inc.infractions || []).map((inf, ixf) => {
+                              const amt = Number(inf?.amount_current ?? inf?.amount_snapshot ?? inf?.amount ?? 0);
+                              return (
+                                <Badge
+                                  key={`${displayInfractionCode(inf.infraction_code)}-${ixf}`}
+                                  variant="outline"
+                                  className="text-[10px] py-0.5 px-1.5 border-amber-200 bg-amber-50 text-amber-800 gap-1"
+                                  title={`${inf.description || displayInfractionCode(inf.infraction_code)} — Rs.${amt.toLocaleString()}`}
+                                >
+                                  {displayInfractionCode(inf.infraction_code)}
+                                  {amt > 0 && <span className="text-[9px] font-bold text-[#DC2626]">Rs.{amt.toLocaleString()}</span>}
+                                </Badge>
+                              );
+                            })}
                             {(!inc.infractions || inc.infractions.length === 0) && <span className="text-gray-300">—</span>}
                           </div>
                         </TableCell>
@@ -1140,6 +1157,40 @@ export default function IncidentPage() {
                </div>
 
                <div className="space-y-5">
+                  {/* Deduction Summary Card */}
+                  {(selected?.infractions || []).length > 0 && (() => {
+                    const infRows = selected?.infractions || [];
+                    const deductibleRows = infRows.filter(inf => inf?.deductible !== false);
+                    const totalDeduction = deductibleRows.reduce((sum, inf) =>
+                      sum + Number(inf?.amount_current ?? inf?.amount_snapshot ?? inf?.amount ?? 0), 0);
+                    const nonDeductible = infRows.length - deductibleRows.length;
+                    return (
+                      <div className="bg-gradient-to-r from-red-50 to-amber-50 border border-red-200 rounded-xl p-5 mb-2" data-testid="deduction-summary-card">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-[10px] text-red-400 uppercase tracking-widest font-black mb-1">Total Deduction for this Incident</p>
+                            <p className="text-3xl font-black text-[#DC2626] tracking-tight" style={{ fontFamily: 'Inter' }}>
+                              Rs.{totalDeduction.toLocaleString()}
+                            </p>
+                            <p className="text-[11px] text-gray-500 mt-1">
+                              {deductibleRows.length} infraction{deductibleRows.length !== 1 ? "s" : ""} applied
+                              {nonDeductible > 0 && <span className="text-gray-400"> · {nonDeductible} non-deductible</span>}
+                              {selected?.status !== "closed" && <span className="text-amber-600 font-bold ml-2">(estimated — pending closure)</span>}
+                            </p>
+                          </div>
+                          <div className="text-right space-y-1">
+                            {deductibleRows.map((inf, idx) => (
+                              <div key={idx} className="text-[10px] flex items-center justify-end gap-2">
+                                <span className="font-mono text-gray-500">{displayInfractionCode(inf.infraction_code)}</span>
+                                <span className="font-bold text-[#DC2626]">Rs.{Number(inf?.amount_current ?? inf?.amount_snapshot ?? inf?.amount ?? 0).toLocaleString()}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   <div className="flex items-center justify-between border-b border-gray-100 pb-3">
                     <h4 className="text-sm font-black text-amber-900 flex items-center gap-2"> <ClipboardList className="h-4 w-4" /> Linked Penalties</h4>
                     <span className="text-[10px] text-amber-600 font-bold bg-amber-50 px-3 py-1 rounded-full border border-amber-100">Flattened Deductions</span>
@@ -1152,19 +1203,34 @@ export default function IncidentPage() {
                          <div className="space-y-2 flex-1 pr-6">
                            <div className="flex items-center gap-2 flex-wrap">
                              <Badge className="font-mono text-[10px] bg-amber-600 text-white border-none px-2">{displayInfractionCode(inf.infraction_code)}</Badge>
+                             {inf.category && (
+                               <Badge variant="outline" className="text-[9px] font-bold uppercase text-gray-600 border-gray-200 bg-gray-50 px-1.5 py-0">
+                                 Cat {inf.category}
+                               </Badge>
+                             )}
                              {groupLbl ? (
                                <Badge variant="outline" className="text-[8px] font-bold uppercase text-gray-700 border-gray-200 bg-gray-50 px-1.5 py-0">
                                  {groupLbl}
                                </Badge>
                              ) : null}
+                             {inf.safety_flag && (
+                               <Badge className="text-[8px] font-bold uppercase bg-red-100 text-red-700 border-red-200 px-1.5 py-0">
+                                 Safety
+                               </Badge>
+                             )}
                              <Badge variant="outline" className={cn("text-[9px] font-black h-5 px-2 tracking-tight", inf.status === 'closed' ? "text-green-700 border-green-200 bg-green-50" : "text-amber-700 border-amber-200 bg-amber-50")}>
                                 {inf.status?.toUpperCase() || 'OPEN'}
                              </Badge>
                            </div>
                            <p className="text-xs text-gray-800 font-bold leading-snug">{inf.description}</p>
-                           <div className="flex items-center gap-3">
-                              <span className="text-[10px] text-gray-400 font-bold uppercase tracking-tighter">Fine Amount:</span>
-                              <span className="text-sm font-black text-gray-900 font-mono">₹{(inf.amount_current || inf.amount).toLocaleString()}</span>
+                           <div className="flex items-center gap-4 mt-1 bg-red-50/50 rounded-lg px-3 py-2 border border-red-100">
+                              <div>
+                                <span className="text-[9px] text-gray-400 font-bold uppercase tracking-tighter block">Deduction Amount</span>
+                                <span className="text-lg font-black text-[#DC2626] font-mono">Rs.{(inf.amount_current || inf.amount_snapshot || inf.amount || 0).toLocaleString()}</span>
+                              </div>
+                              {inf.deductible === false && (
+                                <Badge className="bg-gray-100 text-gray-500 text-[8px]">NON-DEDUCTIBLE</Badge>
+                              )}
                            </div>
                            {/* {(inf.resolve_days != null && inf.resolve_days !== "") || inf.resolve_by ? (
                              <p className="text-[10px] text-gray-600 leading-relaxed">
