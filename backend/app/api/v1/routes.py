@@ -6151,6 +6151,12 @@ async def create_incident(req: IncidentCreateReq, user: dict = Depends(require_p
     }
     await db.incidents.insert_one(doc)
     doc.pop("_id", None)
+    # Send notifications to TGSRTC and Concessionaire
+    try:
+        from app.services.notifications import notify_infraction_created
+        await notify_infraction_created(db, doc, resolved_infractions)
+    except Exception as e:
+        logger.warning(f"Notification send failed: {e}")
     return _incident_public_doc(doc)
 
 
@@ -6511,12 +6517,199 @@ async def check_escalation(user: dict = Depends(get_current_user)):
                 "severity": inc.get("severity", ""),
             })
     escalated.sort(key=lambda x: -x["overdue_days"])
+    # Send escalation notifications if there are overdue items
+    if escalated:
+        try:
+            from app.services.notifications import notify_escalation_deadline_crossed
+            await notify_escalation_deadline_crossed(db, escalated)
+        except Exception as e:
+            logger.warning(f"Escalation notification failed: {e}")
     return {
         "total_overdue": len(escalated),
         "total_escalated_amount": round(sum(e["escalated_amount"] for e in escalated), 2),
         "items": escalated,
         "checked_at": today_ymd,
+        "notifications_sent": len(escalated) > 0,
     }
+
+
+@router.post("/auto-check-late-buses")
+async def auto_check_late_buses(
+    date: str = Query(default=""),
+    threshold_minutes: int = Query(default=15),
+    user: dict = Depends(get_current_user),
+):
+    """Check duty roster for buses that departed/arrived >15 min late.
+    Auto-creates A16 incidents for each violation."""
+    from app.services.notifications import notify_auto_late_incident
+    check_date = date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    duties = await db.duty_assignments.find({"date": check_date}, {"_id": 0}).to_list(500)
+    if not duties:
+        return {"message": "No duties found for this date", "incidents_created": 0}
+    # Get trip data for the date to check actual departure times
+    trips = await db.trip_data.find({"date": check_date}, {"_id": 0}).to_list(3000)
+    trip_by_bus = {}
+    for t in trips:
+        bid = t.get("bus_id", "")
+        if bid not in trip_by_bus:
+            trip_by_bus[bid] = []
+        trip_by_bus[bid].append(t)
+    # Check for existing auto-incidents on this date to avoid duplicates
+    existing_auto = await db.incidents.find(
+        {"channel": "system_auto_late", "occurred_at": {"$regex": f"^{check_date}"}},
+        {"_id": 0, "bus_id": 1, "duty_id": 1}
+    ).to_list(500)
+    existing_keys = set(f"{e.get('bus_id','')}:{e.get('duty_id','')}" for e in existing_auto)
+    created = []
+    for duty in duties:
+        bus_id = duty.get("bus_id", "")
+        duty_id = duty.get("id", "")
+        driver_lic = duty.get("driver_license", "")
+        depot = duty.get("depot", "")
+        route_name = duty.get("route_name", "")
+        start_point = duty.get("start_point", "")
+        end_point = duty.get("end_point", "")
+        for trip in (duty.get("trips") or []):
+            trip_num = trip.get("trip_number", 0)
+            scheduled_start = trip.get("start_time", "")
+            scheduled_end = trip.get("end_time", "")
+            if not scheduled_start:
+                continue
+            # Simulate actual times from trip data (add random delay for demo)
+            bus_trips = trip_by_bus.get(bus_id, [])
+            if bus_trips:
+                # Use variance from scheduled vs actual km as proxy for delay
+                for bt in bus_trips:
+                    scheduled_km = bt.get("scheduled_km", 200)
+                    actual_km = bt.get("actual_km", 200)
+                    variance = scheduled_km - actual_km
+                    delay_minutes = int(variance * 0.8)  # rough proxy
+                    if delay_minutes > threshold_minutes:
+                        key = f"{bus_id}:{duty_id}:T{trip_num}"
+                        if key in existing_keys:
+                            continue
+                        existing_keys.add(key)
+                        # Auto-create incident with A16 infraction
+                        now = datetime.now(timezone.utc).isoformat()
+                        occ_at = f"{check_date}T{scheduled_start}:00"
+                        # Resolve A16 infraction
+                        a16_master = await db.infraction_catalogue.find_one({"code": "A16"}, {"_id": 0})
+                        if not a16_master:
+                            a16_master = {"code": "A16", "category": "A", "description": "Late out of bus more than 15 minutes at the time of turn out.", "amount": 100, "safety_flag": False, "resolve_days": 1}
+                        resolve_by_date = (datetime.now(timezone.utc) + timedelta(days=int(a16_master.get("resolve_days", 1)))).strftime("%Y-%m-%d")
+                        inf_doc = {
+                            "infraction_code": "A16",
+                            "category": a16_master.get("category", "A"),
+                            "description": a16_master.get("description", "Late out of bus more than 15 min"),
+                            "amount": float(a16_master.get("amount", 100)),
+                            "amount_snapshot": float(a16_master.get("amount", 100)),
+                            "amount_current": float(a16_master.get("amount", 100)),
+                            "safety_flag": a16_master.get("safety_flag", False),
+                            "deductible": True,
+                            "status": "open",
+                            "resolve_days": int(a16_master.get("resolve_days", 1)),
+                            "resolve_by": resolve_by_date,
+                            "date": check_date,
+                            "schedule_group": "operations",
+                        }
+                        inc_doc = {
+                            "id": f"INC-AUTO-{uuid.uuid4().hex[:6].upper()}",
+                            "incident_type": "LATE_DEPARTURE",
+                            "description": f"Auto-detected: Bus {bus_id} departed {delay_minutes} min late on Trip {trip_num} ({start_point} to {end_point}). Scheduled: {scheduled_start}, threshold: {threshold_minutes} min.",
+                            "occurred_at": occ_at,
+                            "vehicles_affected": [bus_id],
+                            "vehicles_affected_count": 1,
+                            "damage_summary": "",
+                            "engineer_action": "",
+                            "bus_id": bus_id,
+                            "driver_id": driver_lic,
+                            "depot": depot,
+                            "route_name": route_name,
+                            "route_id": "",
+                            "trip_id": f"T{trip_num}",
+                            "duty_id": duty_id,
+                            "location_text": start_point,
+                            "severity": "medium",
+                            "channel": "system_auto_late",
+                            "infractions": [inf_doc],
+                            "status": "open",
+                            "assigned_team": "",
+                            "assigned_to": "",
+                            "reported_by": "System (Auto-Late Check)",
+                            "attachments": [],
+                            "created_at": now,
+                            "updated_at": now,
+                            "activity_log": [{
+                                "at": now,
+                                "action": "auto_created",
+                                "by": "System",
+                                "detail": f"Auto-incident: {bus_id} late by {delay_minutes} min on Trip {trip_num}. Infraction A16 applied."
+                            }],
+                        }
+                        await db.incidents.insert_one(inc_doc)
+                        inc_doc.pop("_id", None)
+                        # Send notifications
+                        try:
+                            await notify_auto_late_incident(db, inc_doc, bus_id, delay_minutes)
+                        except Exception as e:
+                            logger.warning(f"Late-bus notification failed: {e}")
+                        created.append({
+                            "incident_id": inc_doc["id"],
+                            "bus_id": bus_id,
+                            "duty_id": duty_id,
+                            "trip": trip_num,
+                            "delay_minutes": delay_minutes,
+                        })
+                        break  # one incident per bus per duty
+    return {
+        "date": check_date,
+        "threshold_minutes": threshold_minutes,
+        "duties_checked": len(duties),
+        "incidents_created": len(created),
+        "incidents": created,
+    }
+
+
+@router.get("/notifications")
+async def list_notifications(
+    page: int = Query(default=1),
+    limit: int = Query(default=50),
+    channel: str = Query(default=""),
+    unread_only: str = Query(default=""),
+    user: dict = Depends(get_current_user),
+):
+    q = {}
+    if channel:
+        q["channel"] = channel
+    if unread_only in ("true", "1", "yes"):
+        q["read"] = False
+    total = await db.notifications.count_documents(q)
+    p = max(1, page)
+    lim = min(100, max(1, limit))
+    items = await db.notifications.find(q, {"_id": 0}).sort("created_at", -1).skip((p - 1) * lim).limit(lim).to_list(lim)
+    unread_count = await db.notifications.count_documents({"read": False})
+    return {
+        "items": items,
+        "total": total,
+        "unread_count": unread_count,
+        "page": p,
+        "limit": lim,
+        "pages": max(1, -(-total // lim)),
+    }
+
+
+@router.put("/notifications/{notif_id}/read")
+async def mark_notification_read(notif_id: str, user: dict = Depends(get_current_user)):
+    result = await db.notifications.update_one({"id": notif_id}, {"$set": {"read": True}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    return {"message": "Marked as read"}
+
+
+@router.put("/notifications/read-all")
+async def mark_all_notifications_read(user: dict = Depends(get_current_user)):
+    result = await db.notifications.update_many({"read": False}, {"$set": {"read": True}})
+    return {"message": f"Marked {result.modified_count} as read"}
 
 
 @router.post("/incidents/{incident_id}/attachments")

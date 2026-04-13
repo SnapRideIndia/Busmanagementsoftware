@@ -29,9 +29,11 @@ import {
   Milestone,
   UserCog,
   Ticket,
+  Bell,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { ScrollArea } from "../components/ui/scroll-area";
+import API from "../lib/api";
 
 /** Grouped like BusmanagementsoftwareNewVersion; routes match App.js */
 const navGroups = [
@@ -98,6 +100,27 @@ export default function Layout({ children }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState(() => navGroups.map((g) => g.label));
+  const [notifCount, setNotifCount] = useState(0);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifs, setNotifs] = useState([]);
+
+  const loadNotifCount = useCallback(async () => {
+    try {
+      const { data } = await API.get("/notifications", { params: { limit: 8, unread_only: "true" } });
+      setNotifCount(data.unread_count || 0);
+      setNotifs(data.items || []);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    loadNotifCount();
+    const iv = setInterval(loadNotifCount, 30000);
+    return () => clearInterval(iv);
+  }, [loadNotifCount]);
+
+  const markAllRead = async () => {
+    try { await API.put("/notifications/read-all"); setNotifCount(0); setNotifs(n => n.map(x => ({ ...x, read: true }))); } catch {}
+  };
 
   const toggleGroup = (label) => {
     setExpandedGroups((prev) =>
@@ -200,7 +223,54 @@ export default function Layout({ children }) {
               <Menu size={20} />
             </button>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
+            {/* Notification Bell */}
+            <div className="relative">
+              <button
+                onClick={() => { setNotifOpen(!notifOpen); if (!notifOpen) loadNotifCount(); }}
+                className="relative p-2 hover:bg-gray-100 rounded-lg text-gray-500 transition-colors"
+                data-testid="notification-bell"
+                type="button"
+              >
+                <Bell size={18} />
+                {notifCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 w-5 h-5 bg-[#DC2626] text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+                    {notifCount > 99 ? "99+" : notifCount}
+                  </span>
+                )}
+              </button>
+              {notifOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setNotifOpen(false)} />
+                  <div className="absolute right-0 top-full mt-1 w-96 bg-white border border-gray-200 rounded-xl shadow-2xl z-50 overflow-hidden" data-testid="notification-panel">
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
+                      <span className="text-sm font-bold text-gray-900">Notifications</span>
+                      {notifCount > 0 && (
+                        <button onClick={markAllRead} className="text-[10px] text-[#C8102E] font-bold hover:underline" type="button">Mark all read</button>
+                      )}
+                    </div>
+                    <div className="max-h-80 overflow-y-auto">
+                      {notifs.length === 0 && <p className="text-center text-gray-400 text-xs py-8">No notifications</p>}
+                      {notifs.map((n) => (
+                        <div key={n.id} className={`px-4 py-3 border-b border-gray-50 hover:bg-gray-50 ${!n.read ? "bg-red-50/30" : ""}`}>
+                          <div className="flex items-start gap-2">
+                            <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${!n.read ? "bg-[#DC2626]" : "bg-gray-300"}`} />
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[11px] font-bold text-gray-900 truncate">{n.subject}</p>
+                              <p className="text-[10px] text-gray-500 mt-0.5 line-clamp-2">{n.body?.slice(0, 120)}</p>
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className="text-[9px] text-gray-400">{n.type === "email" ? "Email" : "SMS"} to {n.recipient_role}</span>
+                                <span className="text-[9px] text-gray-300">{n.created_at?.slice(0, 16).replace("T", " ")}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
             <div className="text-right">
               <p className="text-sm font-medium text-[#1A1A1A]">{user?.name || "User"}</p>
               <p className="text-xs text-gray-500 capitalize">{user?.role?.replace("_", " ") || ""}</p>
