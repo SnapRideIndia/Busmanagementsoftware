@@ -22,8 +22,9 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
-import { Receipt, FileText, Download, Eye, IndianRupee, MoreVertical, Pencil, Copy } from "lucide-react";
+import { Receipt, FileText, Download, Eye, IndianRupee, MoreVertical, Pencil, Copy, BarChart3, TrendingUp, TrendingDown } from "lucide-react";
 import { toast } from "sonner";
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
 const WORKFLOW_STATES = ["draft", "submitted", "paid"];
 
@@ -214,6 +215,11 @@ export default function BillingPage() {
 
   const busesForFilter = filterDepot ? allBuses.filter((b) => b.depot === filterDepot) : allBuses;
   const busesForGenerate = form.depot ? allBuses.filter((b) => b.depot === form.depot) : allBuses;
+  const [billingTab, setBillingTab] = useState("invoices");
+  const [qData, setQData] = useState(null);
+  const loadQuarterly = useCallback(async () => {
+    try { const { data } = await API.get("/billing-quarterly-summary"); setQData(data); } catch {}
+  }, []);
 
   return (
     <div data-testid="billing-page" className="text-[12px] [&_*]:text-[12px]">
@@ -224,6 +230,138 @@ export default function BillingPage() {
         </Button>
       </div>
 
+      {/* Tabs */}
+      <div className="flex gap-2 mb-4">
+        <Button variant={billingTab === "invoices" ? "default" : "outline"} size="sm" onClick={() => setBillingTab("invoices")} className={billingTab === "invoices" ? "bg-[#C8102E] hover:bg-[#A50E25]" : ""} data-testid="billing-tab-invoices">
+          Invoices
+        </Button>
+        <Button variant={billingTab === "quarterly" ? "default" : "outline"} size="sm" onClick={() => { setBillingTab("quarterly"); loadQuarterly(); }} className={billingTab === "quarterly" ? "bg-[#C8102E] hover:bg-[#A50E25]" : ""} data-testid="billing-tab-quarterly">
+          <BarChart3 size={14} className="mr-1" /> Quarterly Summary
+        </Button>
+      </div>
+
+      {billingTab === "quarterly" && qData && (
+        <div className="space-y-6 mb-6">
+          {/* Totals */}
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+            {[
+              { label: "Total Invoices", value: qData.totals.invoice_count, color: "#1A1A1A" },
+              { label: "Base Payment", value: `Rs.${(qData.totals.base_payment / 100000).toFixed(1)}L`, color: "#1A1A1A" },
+              { label: "Final Payable", value: `Rs.${(qData.totals.final_payable / 100000).toFixed(1)}L`, color: "#C8102E" },
+              { label: "Total Deductions", value: `Rs.${(qData.totals.total_deduction / 100000).toFixed(1)}L`, color: "#DC2626" },
+              { label: "KPI Damages", value: `Rs.${(qData.totals.kpi_damages / 100000).toFixed(1)}L`, color: "#DC2626" },
+              { label: "KPI Incentives", value: `Rs.${(qData.totals.kpi_incentives / 100000).toFixed(1)}L`, color: "#16A34A" },
+              { label: "Infractions", value: `Rs.${(qData.totals.infractions_deduction / 100000).toFixed(1)}L`, color: "#F59E0B" },
+            ].map((kpi) => (
+              <Card key={kpi.label} className="kpi-card border-gray-200">
+                <CardContent className="p-4">
+                  <p className="text-[10px] font-medium uppercase tracking-wider text-gray-500 mb-1">{kpi.label}</p>
+                  <p className="text-lg font-bold" style={{ color: kpi.color, fontFamily: "Inter" }}>{kpi.value}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {/* Revenue vs Deductions Chart */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card className="border-gray-200 shadow-sm">
+              <CardContent className="p-4">
+                <p className="text-sm font-semibold mb-3">Base Payment vs Final Payable (Quarterly)</p>
+                <div className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={qData.quarters}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                      <XAxis dataKey="quarter" tick={{ fontSize: 10 }} />
+                      <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => `${(v / 100000).toFixed(0)}L`} />
+                      <Tooltip formatter={(v) => `Rs.${v.toLocaleString()}`} />
+                      <Legend wrapperStyle={{ fontSize: 10 }} />
+                      <Bar dataKey="base_payment" fill="#1F2937" name="Base Payment" radius={[3, 3, 0, 0]} />
+                      <Bar dataKey="final_payable" fill="#C8102E" name="Final Payable" radius={[3, 3, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="border-gray-200 shadow-sm">
+              <CardContent className="p-4">
+                <p className="text-sm font-semibold mb-3">Deduction Breakdown (Quarterly)</p>
+                <div className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={qData.quarters}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                      <XAxis dataKey="quarter" tick={{ fontSize: 10 }} />
+                      <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => `${(v / 100000).toFixed(0)}L`} />
+                      <Tooltip formatter={(v) => `Rs.${v.toLocaleString()}`} />
+                      <Legend wrapperStyle={{ fontSize: 10 }} />
+                      <Bar dataKey="availability_deduction" fill="#6B7280" name="Availability" stackId="ded" />
+                      <Bar dataKey="performance_deduction" fill="#F59E0B" name="Performance" stackId="ded" />
+                      <Bar dataKey="system_deduction" fill="#2563EB" name="System" stackId="ded" />
+                      <Bar dataKey="infractions_deduction" fill="#D97706" name="Infractions" stackId="ded" />
+                      <Bar dataKey="kpi_damages" fill="#DC2626" name="KPI Damages" stackId="ded" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* KPI Damages vs Incentives Trend */}
+          <Card className="border-gray-200 shadow-sm">
+            <CardContent className="p-4">
+              <p className="text-sm font-semibold mb-3">KPI Damages vs Incentives Trend</p>
+              <div className="h-56">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={qData.quarters}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                    <XAxis dataKey="quarter" tick={{ fontSize: 10 }} />
+                    <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`} />
+                    <Tooltip formatter={(v) => `Rs.${v.toLocaleString()}`} />
+                    <Legend wrapperStyle={{ fontSize: 10 }} />
+                    <Line type="monotone" dataKey="kpi_damages" stroke="#DC2626" strokeWidth={2} dot name="KPI Damages" />
+                    <Line type="monotone" dataKey="kpi_incentives" stroke="#16A34A" strokeWidth={2} dot name="KPI Incentives" />
+                    <Line type="monotone" dataKey="infractions_deduction" stroke="#F59E0B" strokeWidth={2} dot name="Infractions" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Quarterly Table */}
+          <Card className="border-gray-200 shadow-sm">
+            <CardContent className="p-0 overflow-x-auto">
+              <Table className="text-[11px]">
+                <TableHeader><TableRow className="table-header">
+                  <TableHead>Quarter</TableHead><TableHead className="text-right">Invoices</TableHead>
+                  <TableHead className="text-right">Base (Rs)</TableHead><TableHead className="text-right">Energy</TableHead>
+                  <TableHead className="text-right">Infr. Ded.</TableHead><TableHead className="text-right">KPI Dam.</TableHead>
+                  <TableHead className="text-right text-green-700">KPI Inc.</TableHead><TableHead className="text-right">Total Ded.</TableHead>
+                  <TableHead className="text-right font-bold">Final (Rs)</TableHead>
+                  <TableHead className="text-right">KM Operated</TableHead>
+                </TableRow></TableHeader>
+                <TableBody>
+                  {qData.quarters.map((q) => (
+                    <TableRow key={q.quarter} className="hover:bg-gray-50">
+                      <TableCell className="font-bold">{q.quarter}</TableCell>
+                      <TableCell className="text-right font-mono">{q.invoice_count}</TableCell>
+                      <TableCell className="text-right font-mono">{q.base_payment.toLocaleString()}</TableCell>
+                      <TableCell className="text-right font-mono text-blue-600">{q.energy_adjustment.toLocaleString()}</TableCell>
+                      <TableCell className="text-right font-mono text-amber-600">{q.infractions_deduction.toLocaleString()}</TableCell>
+                      <TableCell className="text-right font-mono text-red-600">{q.kpi_damages.toLocaleString()}</TableCell>
+                      <TableCell className="text-right font-mono text-green-600">+{q.kpi_incentives.toLocaleString()}</TableCell>
+                      <TableCell className="text-right font-mono text-red-700 font-bold">{q.total_deduction.toLocaleString()}</TableCell>
+                      <TableCell className="text-right font-mono font-bold text-[#C8102E]">{q.final_payable.toLocaleString()}</TableCell>
+                      <TableCell className="text-right font-mono">{q.total_km.toLocaleString()}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {billingTab === "invoices" && (
+      <>
       <Card className="border-gray-200 shadow-sm mb-4">
         <CardContent className="p-4 flex flex-wrap gap-3 items-end">
           <div className="space-y-1">
@@ -421,6 +559,8 @@ export default function BillingPage() {
           <TablePaginationBar page={page} pages={meta.pages} total={meta.total} limit={meta.limit} onPageChange={setPage} />
         </CardContent>
       </Card>
+      </>
+      )}
 
       {/* Generate Dialog */}
       <Dialog open={genOpen} onOpenChange={setGenOpen}>
@@ -538,6 +678,52 @@ export default function BillingPage() {
                   </tfoot>
                 </table>
               </div>
+
+              {/* KPI Breakdown Sub-table */}
+              {selected.kpi_breakdown && Object.keys(selected.kpi_breakdown).length > 0 && (
+                <div className="border rounded-md overflow-hidden" data-testid="kpi-breakdown-table">
+                  <div className="p-3 bg-red-50 border-b">
+                    <p className="font-semibold text-sm text-red-900">GCC KPI Breakdown (§18)</p>
+                  </div>
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="p-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Category</th>
+                        <th className="p-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Value</th>
+                        <th className="p-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Target</th>
+                        <th className="p-2.5 text-right text-xs font-semibold text-red-500 uppercase">Damages (Rs)</th>
+                        <th className="p-2.5 text-right text-xs font-semibold text-green-500 uppercase">Incentive (Rs)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        { key: "reliability", label: "Reliability (BF)", getVal: (c) => c?.bf, getTarget: (c) => c?.target },
+                        { key: "availability", label: "Availability", getVal: (c) => `${c?.pct}%`, getTarget: (c) => `${c?.target}%` },
+                        { key: "punctuality", label: "Punctuality", getVal: (c) => `S:${c?.start_pct}% A:${c?.arrival_pct}%`, getTarget: () => "S:90% A:80%" },
+                        { key: "frequency", label: "Frequency", getVal: (c) => `${c?.trip_freq_pct}%`, getTarget: (c) => `${c?.target}%` },
+                        { key: "safety", label: "Safety (MAF)", getVal: (c) => c?.maf, getTarget: (c) => c?.target || "0.01" },
+                      ].map(({ key, label, getVal, getTarget }) => {
+                        const cat = selected.kpi_breakdown[key];
+                        if (!cat) return null;
+                        return (
+                          <tr key={key} className="border-t hover:bg-gray-50">
+                            <td className="p-2.5 font-medium">{label}</td>
+                            <td className="p-2.5 text-right font-mono">{getVal(cat)}</td>
+                            <td className="p-2.5 text-right font-mono text-gray-500">{getTarget(cat)}</td>
+                            <td className="p-2.5 text-right font-mono text-red-600 font-medium">{cat.damages > 0 ? `- ${cat.damages.toLocaleString()}` : "0"}</td>
+                            <td className="p-2.5 text-right font-mono text-green-600 font-medium">{cat.incentive > 0 ? `+ ${cat.incentive.toLocaleString()}` : "0"}</td>
+                          </tr>
+                        );
+                      })}
+                      <tr className="border-t-2 border-gray-300 bg-gray-50 font-bold">
+                        <td className="p-2.5" colSpan={3}>Totals (capped at 10% / 5%)</td>
+                        <td className="p-2.5 text-right font-mono text-red-700">- Rs.{(selected.kpi_damages || 0).toLocaleString()}</td>
+                        <td className="p-2.5 text-right font-mono text-green-700">+ Rs.{(selected.kpi_incentives || 0).toLocaleString()}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
               <div className="border rounded-md p-3 text-xs space-y-1 bg-gray-50">
                 <p className="font-semibold text-gray-700">Billing Artifacts</p>

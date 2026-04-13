@@ -2833,6 +2833,58 @@ async def list_invoices(
     items = await _enrich_billing_invoice_tender_fields(items)
     return paged_payload(items, total=total, page=page, limit=limit)
 
+
+@router.get("/billing-quarterly-summary")
+async def quarterly_billing_summary(user: dict = Depends(get_current_user)):
+    """Aggregate billing data by quarter for trend dashboard."""
+    all_invoices = await db.billing.find({}, {
+        "_id": 0, "invoice_id": 1, "period_start": 1, "period_end": 1, "depot": 1,
+        "base_payment": 1, "energy_adjustment": 1, "km_incentive": 1,
+        "kpi_damages": 1, "kpi_incentives": 1,
+        "availability_deduction": 1, "performance_deduction": 1, "system_deduction": 1,
+        "infractions_deduction": 1, "total_deduction": 1, "final_payable": 1,
+        "total_km": 1, "scheduled_km": 1, "status": 1, "workflow_state": 1,
+    }).sort("period_start", 1).to_list(500)
+    quarterly = {}
+    for inv in all_invoices:
+        ps = str(inv.get("period_start", "") or "")
+        if len(ps) >= 7:
+            year = ps[:4]
+            month = int(ps[5:7])
+            q = (month - 1) // 3 + 1
+            qk = f"{year}-Q{q}"
+        else:
+            qk = "Unknown"
+        rec = quarterly.setdefault(qk, {
+            "quarter": qk, "invoice_count": 0,
+            "base_payment": 0, "energy_adjustment": 0, "km_incentive": 0,
+            "kpi_damages": 0, "kpi_incentives": 0,
+            "availability_deduction": 0, "performance_deduction": 0,
+            "system_deduction": 0, "infractions_deduction": 0,
+            "total_deduction": 0, "final_payable": 0,
+            "total_km": 0, "scheduled_km": 0,
+        })
+        rec["invoice_count"] += 1
+        for f in ["base_payment", "energy_adjustment", "km_incentive", "kpi_damages", "kpi_incentives",
+                   "availability_deduction", "performance_deduction", "system_deduction",
+                   "infractions_deduction", "total_deduction", "final_payable", "total_km", "scheduled_km"]:
+            rec[f] += float(inv.get(f, 0) or 0)
+    result = sorted(quarterly.values(), key=lambda x: x["quarter"])
+    for r in result:
+        for f in r:
+            if isinstance(r[f], float):
+                r[f] = round(r[f], 2)
+    totals = {
+        "invoice_count": sum(r["invoice_count"] for r in result),
+        "base_payment": round(sum(r["base_payment"] for r in result), 2),
+        "final_payable": round(sum(r["final_payable"] for r in result), 2),
+        "total_deduction": round(sum(r["total_deduction"] for r in result), 2),
+        "kpi_damages": round(sum(r["kpi_damages"] for r in result), 2),
+        "kpi_incentives": round(sum(r["kpi_incentives"] for r in result), 2),
+        "infractions_deduction": round(sum(r["infractions_deduction"] for r in result), 2),
+    }
+    return {"quarters": result, "totals": totals}
+
 @router.get("/billing/{invoice_id}")
 async def get_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
     inv = await db.billing.find_one({"invoice_id": invoice_id}, {"_id": 0})
@@ -2927,10 +2979,14 @@ async def export_invoice_pdf(invoice_id: str, user: dict = Depends(get_current_u
         ("Tariff Rate", f"Rs. {inv['tariff_rate']:,.2f}/kWh"),
         ("Energy Adjustment", f"Rs. {inv['energy_adjustment']:,.2f}"),
         ("KM Incentive", f"Rs. {inv.get('km_incentive', 0):,.2f}"),
+        ("(+) GCC KPI Incentives (S18)", f"Rs. {inv.get('kpi_incentives', 0):,.2f}"),
+        ("", ""),
         ("Missed KM", f"{inv['missed_km']:,.2f} km"),
-        ("Availability Deduction", f"Rs. {inv['availability_deduction']:,.2f}"),
-        ("Performance Deduction", f"Rs. {inv['performance_deduction']:,.2f}"),
-        ("System Deduction", f"Rs. {inv['system_deduction']:,.2f}"),
+        ("(-) Availability Deduction", f"Rs. {inv['availability_deduction']:,.2f}"),
+        ("(-) Performance Deduction", f"Rs. {inv['performance_deduction']:,.2f}"),
+        ("(-) System Deduction", f"Rs. {inv['system_deduction']:,.2f}"),
+        ("(-) Infractions (Schedule-S)", f"Rs. {inv.get('infractions_deduction', 0):,.2f}"),
+        ("(-) GCC KPI Damages (S18)", f"Rs. {inv.get('kpi_damages', 0):,.2f}"),
         ("Total Deductions", f"Rs. {inv['total_deduction']:,.2f}"),
     ]
     for label, val in rows:
@@ -2943,6 +2999,44 @@ async def export_invoice_pdf(invoice_id: str, user: dict = Depends(get_current_u
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(110, 8, "FINAL PAYABLE")
     pdf.cell(80, 8, f"Rs. {inv['final_payable']:,.2f}", ln=True, align="R")
+
+    # KPI Breakdown Table
+    kpi_bd = inv.get("kpi_breakdown") or {}
+    if kpi_bd:
+        pdf.ln(6)
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.cell(190, 8, "GCC KPI Breakdown (S18)", ln=True)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.cell(40, 7, "Category", border=1)
+        pdf.cell(30, 7, "Value", border=1, align="R")
+        pdf.cell(30, 7, "Target", border=1, align="R")
+        pdf.cell(40, 7, "Damages (Rs)", border=1, align="R")
+        pdf.cell(40, 7, "Incentive (Rs)", border=1, align="R", ln=True)
+        pdf.set_font("Helvetica", "", 8)
+        kpi_labels = {"reliability": "Reliability (BF)", "availability": "Availability", "punctuality": "Punctuality", "frequency": "Frequency", "safety": "Safety (MAF)"}
+        for key, label in kpi_labels.items():
+            cat = kpi_bd.get(key, {})
+            if not cat:
+                continue
+            val = cat.get("bf", cat.get("pct", cat.get("trip_freq_pct", cat.get("maf", ""))))
+            if key == "punctuality":
+                val = f"S:{cat.get('start_pct', '')}% A:{cat.get('arrival_pct', '')}%"
+            elif key in ("availability", "frequency"):
+                val = f"{val}%"
+            target = cat.get("target", "")
+            if key in ("availability", "frequency"):
+                target = f"{target}%"
+            elif key == "punctuality":
+                target = "S:90% A:80%"
+            pdf.cell(40, 6, label, border=1)
+            pdf.cell(30, 6, str(val), border=1, align="R")
+            pdf.cell(30, 6, str(target), border=1, align="R")
+            pdf.cell(40, 6, f"{cat.get('damages', 0):,.2f}", border=1, align="R")
+            pdf.cell(40, 6, f"{cat.get('incentive', 0):,.2f}", border=1, align="R", ln=True)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.cell(100, 7, "TOTALS (capped)", border=1)
+        pdf.cell(40, 7, f"{inv.get('kpi_damages', 0):,.2f}", border=1, align="R")
+        pdf.cell(40, 7, f"{inv.get('kpi_incentives', 0):,.2f}", border=1, align="R", ln=True)
 
     pdf.ln(6)
     pdf.set_font("Helvetica", "B", 11)
@@ -3038,13 +3132,36 @@ async def export_invoice_excel(invoice_id: str, user: dict = Depends(get_current
         ("Allowed Energy (kWh)", inv["allowed_energy_kwh"]), ("Actual Energy (kWh)", inv["actual_energy_kwh"]),
         ("Tariff (Rs/kWh)", inv["tariff_rate"]), ("Energy Adjustment", inv["energy_adjustment"]),
         ("KM Incentive", inv.get("km_incentive", 0)),
-        ("Missed KM", inv["missed_km"]), ("Availability Deduction", inv["availability_deduction"]),
-        ("Performance Deduction", inv["performance_deduction"]), ("System Deduction", inv["system_deduction"]),
+        ("(+) GCC KPI Incentives (S18)", inv.get("kpi_incentives", 0)),
+        ("Missed KM", inv["missed_km"]), ("(-) Availability Deduction", inv["availability_deduction"]),
+        ("(-) Performance Deduction", inv["performance_deduction"]), ("(-) System Deduction", inv["system_deduction"]),
+        ("(-) Infractions (Schedule-S)", inv.get("infractions_deduction", 0)),
+        ("(-) GCC KPI Damages (S18)", inv.get("kpi_damages", 0)),
         ("Total Deductions", inv["total_deduction"]),
         ("FINAL PAYABLE", inv["final_payable"])
     ]
     for label, val in fields:
         ws.append([label, val])
+    # KPI Breakdown sheet
+    ws_kpi = wb.create_sheet("KPI Breakdown")
+    ws_kpi.append(["GCC KPI Breakdown (S18)"])
+    ws_kpi.append([])
+    ws_kpi.append(["Category", "Value", "Target", "Damages (Rs)", "Incentive (Rs)"])
+    kpi_bd = inv.get("kpi_breakdown") or {}
+    kpi_labels = {"reliability": "Reliability (BF)", "availability": "Availability", "punctuality": "Punctuality", "frequency": "Frequency", "safety": "Safety (MAF)"}
+    for key, label in kpi_labels.items():
+        cat = kpi_bd.get(key, {})
+        if not cat:
+            continue
+        val = cat.get("bf", cat.get("pct", cat.get("trip_freq_pct", cat.get("maf", ""))))
+        if key == "punctuality":
+            val = f"S:{cat.get('start_pct', '')}% A:{cat.get('arrival_pct', '')}%"
+        target = cat.get("target", "")
+        if key == "punctuality":
+            target = "S:90% A:80%"
+        ws_kpi.append([label, str(val), str(target), cat.get("damages", 0), cat.get("incentive", 0)])
+    ws_kpi.append([])
+    ws_kpi.append(["TOTALS (capped)", "", "", inv.get("kpi_damages", 0), inv.get("kpi_incentives", 0)])
 
     ws_bus = wb.create_sheet("Bus Wise")
     ws_bus.append(["Bus ID", "Trips", "Passengers", "Revenue", "Actual KM", "Scheduled KM"])
