@@ -1,5 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
-import API, { formatApiError, buildQuery, unwrapListResponse, fetchAllPaginated } from "../lib/api";
+import { useState, useEffect, useMemo } from "react";
+import { useEnergyLogs, useEnergyReport, useEnergyMutations } from "../features/energy/api/useEnergy";
+import { useAllBuses } from "../features/buses/api/useBuses";
+import API, { messageFromAxiosError } from "../lib/api";
 import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import TableLoadRows from "../components/TableLoadRows";
@@ -17,123 +19,53 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { toast } from "sonner";
 
 export default function EnergyPage() {
-  const [data, setData] = useState([]);
-  const [report, setReport] = useState(null);
-  const [buses, setBuses] = useState([]);
+  const [dataPage, setDataPage] = useState(1);
+  const [reportPage, setReportPage] = useState(1);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  /** When set, API uses this day for both bounds (single-day filter). Cleared when From/To range is edited. */
   const [filterDay, setFilterDay] = useState("");
   const [depotFilter, setDepotFilter] = useState("");
   const [busFilter, setBusFilter] = useState("");
   const [filterSearch, setFilterSearch] = useState("");
   const [addOpen, setAddOpen] = useState(false);
-  const [form, setForm] = useState({ bus_id: "", date: "", units_charged: "", tariff_rate: "8.5" });
+  const [form, setForm] = useState({ date: new Date().toISOString().slice(0, 10), bus_id: "", units_charged: "", tariff_rate: "" });
   const [tab, setTab] = useState("data");
-  const [dataPage, setDataPage] = useState(1);
-  const [dataMeta, setDataMeta] = useState({ total: 0, pages: 1, limit: 20 });
-  const [reportPage, setReportPage] = useState(1);
-  const [reportMeta, setReportMeta] = useState({ row_total: 0, pages: 1, limit: 20 });
-  const [listLoading, setListLoading] = useState(true);
-  const [listError, setListError] = useState(null);
-  const [reportLoading, setReportLoading] = useState(false);
-  const [reportError, setReportError] = useState(null);
 
-  const load = useCallback(async () => {
-    setListLoading(true);
-    setListError(null);
-    try {
-      const df = filterDay || dateFrom;
-      const dt = filterDay || dateTo;
-      const params = buildQuery({
-        date_from: df,
-        date_to: dt,
-        bus_id: busFilter,
-        depot: depotFilter,
-        search: filterSearch,
-        page: dataPage,
-        limit: 20,
-      });
-      const [e, busItems] = await Promise.all([
-        API.get(Endpoints.energy.root(), { params }),
-        fetchAllPaginated(Endpoints.masters.buses.list(), {}),
-      ]);
-      const eu = unwrapListResponse(e.data);
-      setData(eu.items);
-      setDataMeta({ total: eu.total, pages: eu.pages, limit: eu.limit });
-      setBuses(busItems);
-    } catch (err) {
-      setListError(formatApiError(err.response?.data?.detail) || err.message || "Failed to load energy data");
-      setData([]);
-    } finally {
-      setListLoading(false);
-    }
-  }, [filterDay, dateFrom, dateTo, busFilter, depotFilter, filterSearch, dataPage]);
+  const { data: buses = [] } = useAllBuses();
 
-  const loadReport = useCallback(async () => {
-    setReportLoading(true);
-    setReportError(null);
-    try {
-      const df = filterDay || dateFrom;
-      const dt = filterDay || dateTo;
-      const params = buildQuery({
-        date_from: df,
-        date_to: dt,
-        depot: depotFilter,
-        bus_id: busFilter,
-        search: filterSearch,
-        page: reportPage,
-        limit: 20,
-      });
-      const { data: r } = await API.get(Endpoints.energy.report(), { params });
-      setReport(r);
-      setReportMeta({
-        row_total: r.row_total ?? (r.report || []).length,
-        pages: r.pages ?? 1,
-        limit: r.limit ?? 20,
-      });
-    } catch (err) {
-      setReportError(formatApiError(err.response?.data?.detail) || err.message || "Failed to load report");
-      setReport(null);
-    } finally {
-      setReportLoading(false);
-    }
-  }, [reportPage, filterDay, dateFrom, dateTo, depotFilter, busFilter, filterSearch]);
+  const filters = {
+    date_from: dateFrom,
+    date_to: dateTo,
+    bus_id: busFilter || filterSearch,
+    depot: depotFilter,
+    page: tab === "data" ? dataPage : reportPage,
+    limit: 20,
+  };
 
-  useEffect(() => {
-    load();
-  }, [load]);
-  useEffect(() => {
-    setDataPage(1);
-    setReportPage(1);
-  }, [filterSearch]);
-  useEffect(() => {
-    if (tab === "report") loadReport();
-  }, [tab, loadReport]);
+  const { data: logsData, isLoading: logsLoading, error: logsError, refetch: load } = useEnergyLogs(filters);
+  const { data: report, isLoading: reportLoading, error: reportError, refetch: loadReport } = useEnergyReport(filters);
+  const { addLog, isSubmitting: submitting } = useEnergyMutations();
+
+  const data = logsData?.items || [];
+  const dataMeta = {
+    total: logsData?.total || 0,
+    pages: logsData?.pages || 1,
+    limit: logsData?.limit || 20,
+  };
+
+  const reportMeta = report?.meta || { pages: 1, row_total: 0, limit: 20 };
+
+  const listLoading = logsLoading;
+  const listError = logsError ? messageFromAxiosError(logsError, "Failed to load energy data") : null;
 
   const handleAdd = async () => {
-    if (!form.bus_id?.trim()) {
-      toast.error("Select a bus");
-      return;
-    }
-    if (!form.date?.trim()) {
-      toast.error("Select a date");
-      return;
-    }
-    const units = Number(form.units_charged);
-    if (form.units_charged === "" || Number.isNaN(units) || units <= 0) {
-      toast.error("Enter units (kWh) greater than 0");
-      return;
-    }
-    const tariff = Number(form.tariff_rate);
-    if (form.tariff_rate === "" || Number.isNaN(tariff) || tariff <= 0) {
-      toast.error("Enter tariff (Rs/kWh) greater than 0");
-      return;
-    }
     try {
-      await API.post(Endpoints.energy.root(), { ...form, units_charged: units, tariff_rate: tariff });
-      toast.success("Charging data added"); setAddOpen(false); setForm({ bus_id: "", date: "", units_charged: "", tariff_rate: "8.5" }); load();
-    } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
+      await addLog(form);
+      setAddOpen(false);
+      setForm({ date: new Date().toISOString().slice(0, 10), bus_id: "", units_charged: "", tariff_rate: "" });
+    } catch (err) {
+      // Error handled in hook
+    }
   };
 
   return (
@@ -264,11 +196,11 @@ export default function EnergyPage() {
               <TableHeader><TableRow className="table-header">
                 <TableHead>Bus ID</TableHead>
                 <TableHead>Date</TableHead>
-                <TableHead className="text-right">Units (kWh)</TableHead><TableHead className="text-right">Tariff (Rs/kWh)</TableHead><TableHead className="text-right">Cost (Rs)</TableHead>
+                <TableHead className="text-right">Units (kWh)</TableHead>
               </TableRow></TableHeader>
               <TableBody>
                 <TableLoadRows
-                  colSpan={5}
+                  colSpan={3}
                   loading={listLoading}
                   error={listError}
                   onRetry={load}
@@ -280,8 +212,6 @@ export default function EnergyPage() {
                       <TableCell className="font-mono">{e.bus_id}</TableCell>
                       <TableCell>{formatDateIN(e.date)}</TableCell>
                       <TableCell className="text-right font-mono">{e.units_charged?.toFixed(2)}</TableCell>
-                      <TableCell className="text-right font-mono">{e.tariff_rate}</TableCell>
-                      <TableCell className="text-right font-mono">{(e.units_charged * e.tariff_rate).toFixed(2)}</TableCell>
                     </TableRow>
                   ))}
                 </TableLoadRows>
@@ -336,7 +266,8 @@ export default function EnergyPage() {
               <Table>
                 <TableHeader><TableRow className="table-header">
                   <TableHead>Bus</TableHead><TableHead>Type</TableHead><TableHead className="text-right">KM</TableHead><TableHead className="text-right">kWh/km</TableHead>
-                  <TableHead className="text-right">Allowed</TableHead><TableHead className="text-right">Actual</TableHead><TableHead className="text-right">Efficiency</TableHead><TableHead className="text-right">Adjustment</TableHead>
+                  <TableHead className="text-right">Allowed</TableHead><TableHead className="text-right">Actual</TableHead><TableHead className="text-right">Efficiency</TableHead>
+                  <TableHead className="text-right">Base tariff</TableHead><TableHead className="text-right">Actual tariff</TableHead><TableHead className="text-right">Adjustment (Rs)</TableHead>
                 </TableRow></TableHeader>
                 <TableBody>
                   {(report.report || []).map((r) => (
@@ -348,6 +279,8 @@ export default function EnergyPage() {
                       <TableCell className="text-right font-mono">{r.allowed_kwh?.toLocaleString()}</TableCell>
                       <TableCell className="text-right font-mono">{r.actual_kwh?.toLocaleString()}</TableCell>
                       <TableCell className={`text-right font-mono font-medium ${r.efficiency <= 100 ? "text-green-600" : "text-red-600"}`}>{r.efficiency}%</TableCell>
+                      <TableCell className="text-right font-mono">{r.base_electricity_tariff != null ? Number(r.base_electricity_tariff).toFixed(2) : "—"}</TableCell>
+                      <TableCell className="text-right font-mono">{r.actual_electricity_tariff != null ? Number(r.actual_electricity_tariff).toFixed(2) : "—"}</TableCell>
                       <TableCell className="text-right font-mono">Rs.{r.adjustment?.toLocaleString()}</TableCell>
                     </TableRow>
                   ))}
@@ -382,9 +315,11 @@ export default function EnergyPage() {
             <div className="space-y-2"><Label>Date</Label><Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} data-testid="energy-date" /></div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2"><Label>Units (kWh)</Label><Input type="number" value={form.units_charged} onChange={(e) => setForm({ ...form, units_charged: e.target.value })} data-testid="energy-units" /></div>
-              <div className="space-y-2"><Label>Tariff (Rs/kWh)</Label><Input type="number" value={form.tariff_rate} onChange={(e) => setForm({ ...form, tariff_rate: e.target.value })} data-testid="energy-tariff" /></div>
+              <div className="space-y-2"><Label>Actual tariff (Rs/kWh)</Label><Input type="number" value={form.tariff_rate} onChange={(e) => setForm({ ...form, tariff_rate: e.target.value })} data-testid="energy-tariff" /></div>
             </div>
-            <Button onClick={handleAdd} className="w-full bg-[#C8102E] hover:bg-[#A50E25]" data-testid="energy-save-btn">Save</Button>
+            <Button onClick={handleAdd} disabled={submitting} className="w-full bg-[#C8102E] hover:bg-[#A50E25]" data-testid="energy-save-btn">
+              {submitting ? "Saving..." : "Save"}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

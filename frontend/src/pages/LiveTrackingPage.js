@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import API, { buildQuery, formatApiError, fetchAllPaginated } from "../lib/api";
+import API, { buildQuery, unwrapListResponse, messageFromAxiosError } from "../lib/api";
 import { Endpoints } from "../lib/endpoints";
+import { useLivePositions } from "../features/tracking/api/useTracking";
 import AsyncPanel from "../components/AsyncPanel";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -11,24 +12,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Switch } from "../components/ui/switch";
 import { Label } from "../components/ui/label";
-import {
-  MapPin,
-  RefreshCw,
-  AlertTriangle,
-  Video,
-  Search,
-  Bus,
-  LayoutGrid,
-  ListFilter,
-} from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "../components/ui/dialog";
-import { GoogleMap, InfoWindowF, MarkerF, useJsApiLoader } from "@react-google-maps/api";
+import { MapPin, RefreshCw, AlertTriangle, Video, Search, Bus, LayoutGrid, ListFilter } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../components/ui/dialog";
+import { CircleF, GoogleMap, InfoWindowF, MarkerF, PolygonF, PolylineF, useJsApiLoader } from "@react-google-maps/api";
+import { getGoogleMapsApiKey } from "../lib/googleMapsConfig";
 
 const SPEED_GAUGE_MAX = 80;
 
@@ -40,6 +27,9 @@ const ALERT_FILTER_CODES = [
   { code: "route_deviation", label: "Route deviation" },
   { code: "bunching_user", label: "Bunching" },
   { code: "harness_removal", label: "Harness" },
+  { code: "geofence_entry", label: "Geofence entry" },
+  { code: "geofence_exit", label: "Geofence exit" },
+  { code: "stop_geofence_speed", label: "Stop geofence speed" },
 ];
 
 const TELEM_STATUS_FILTERS = [
@@ -52,7 +42,14 @@ const TELEM_STATUS_FILTERS = [
   { id: "panic", label: "Panic" },
 ];
 
-const GOOGLE_MAPS_API_KEY = "AIzaSyCtC_0HfLwBvG3KRI2ZAcAyQqRrkJSeKSE";
+const ROUTE_LINE_COLORS = ["#2563EB", "#0891B2", "#16A34A", "#7C3AED", "#C026D3", "#EA580C", "#0EA5E9", "#BE185D"];
+
+function colorForRouteLine(key) {
+  const s = String(key || "route");
+  let h = 0;
+  for (let i = 0; i < s.length; i += 1) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return ROUTE_LINE_COLORS[h % ROUTE_LINE_COLORS.length];
+}
 
 function telemMarkerColor(status) {
   switch (status) {
@@ -73,7 +70,6 @@ function telemMarkerColor(status) {
   }
 }
 
-
 function SpeedGauge({ speed, max = SPEED_GAUGE_MAX, size = 48 }) {
   const pct = Math.min(1, Math.max(0, speed / max));
   const r = size / 2 - 4;
@@ -84,22 +80,10 @@ function SpeedGauge({ speed, max = SPEED_GAUGE_MAX, size = 48 }) {
   const arc = `M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`;
   const gid = `spdGrad-${size}-${max}`;
   return (
-    <div
-      className="relative shrink-0"
-      style={{ width: size, height: size / 2 + 6 }}
-      title={`${speed} km/h`}
-      aria-label={`Speed ${speed} kilometers per hour`}
-    >
+    <div className="relative shrink-0" style={{ width: size, height: size / 2 + 6 }} title={`${speed} km/h`} aria-label={`Speed ${speed} kilometers per hour`}>
       <svg width={size} height={size / 2 + 8} viewBox={`0 0 ${size} ${size / 2 + 8}`} className="overflow-visible">
         <path d={arc} fill="none" stroke="#E5E7EB" strokeWidth="4" strokeLinecap="round" />
-        <path
-          d={arc}
-          fill="none"
-          stroke={`url(#${gid})`}
-          strokeWidth="4"
-          strokeLinecap="round"
-          strokeDasharray={`${dashFill} ${arcLen}`}
-        />
+        <path d={arc} fill="none" stroke={`url(#${gid})`} strokeWidth="4" strokeLinecap="round" strokeDasharray={`${dashFill} ${arcLen}`} />
         <defs>
           <linearGradient id={gid} x1="0%" y1="0%" x2="100%" y2="0%">
             <stop offset="0%" stopColor="#22C55E" />
@@ -108,9 +92,7 @@ function SpeedGauge({ speed, max = SPEED_GAUGE_MAX, size = 48 }) {
           </linearGradient>
         </defs>
       </svg>
-      <span className="absolute left-1/2 bottom-0 -translate-x-1/2 text-[10px] font-mono font-bold text-gray-600 tabular-nums">
-        {speed}
-      </span>
+      <span className="absolute left-1/2 bottom-0 -translate-x-1/2 text-[10px] font-mono font-bold text-gray-600 tabular-nums">{speed}</span>
     </div>
   );
 }
@@ -152,32 +134,31 @@ function FleetVehicleCard({ row, busAlerts, selected, onSelect, onCamera }) {
   const worstSev = active.length ? worstActiveSeverity(active) : null;
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       data-testid={`fleet-card-${row.bus_id}`}
       onClick={() => onSelect(row.bus_id === selected ? null : row.bus_id)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect(row.bus_id === selected ? null : row.bus_id);
+        }
+      }}
       className={`w-full text-left rounded-xl border border-gray-200 bg-white transition-all duration-150 ${
-        selected === row.bus_id
-          ? "ring-2 ring-[#C8102E]/30 border-[#C8102E] shadow-md"
-          : "hover:border-gray-300 hover:shadow-sm"
+        selected === row.bus_id ? "ring-2 ring-[#C8102E]/30 border-[#C8102E] shadow-md" : "hover:border-gray-300 hover:shadow-sm"
       } ${worstSev && selected !== row.bus_id ? activeAlertLeftBorder(worstSev) : ""}`}
     >
       <div className="p-3">
         <div className="flex gap-3">
-          <div
-            className="w-1 self-stretch rounded-full shrink-0 mt-0.5 mb-0.5"
-            style={{ background: telemMarkerColor(row.status) }}
-            aria-hidden
-          />
+          <div className="w-1 self-stretch rounded-full shrink-0 mt-0.5 mb-0.5" style={{ background: telemMarkerColor(row.status) }} aria-hidden />
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <p className="font-mono text-sm font-bold text-gray-900 tracking-tight">{row.bus_id}</p>
                 <p className="text-[11px] text-gray-500 truncate">{row.registration_no}</p>
               </div>
-              <Badge className={`text-[10px] shrink-0 border ${statusBadgeClass(row.status)}`}>
-                {row.status.replace(/_/g, " ")}
-              </Badge>
+              <Badge className={`text-[10px] shrink-0 border ${statusBadgeClass(row.status)}`}>{row.status.replace(/_/g, " ")}</Badge>
             </div>
             <div className="flex items-center justify-between mt-2 gap-2">
               <div className="flex items-center gap-2">
@@ -191,8 +172,9 @@ function FleetVehicleCard({ row, busAlerts, selected, onSelect, onCamera }) {
                   </p>
                 </div>
               </div>
-              <div className="text-right text-[11px] text-gray-600 truncate max-w-[130px]" title={row.route}>
-                {row.route}
+              <div className="text-right text-[11px] text-gray-600 truncate max-w-[160px]" title={row.route_id ? `${row.route} (${row.route_id})` : row.route}>
+                {row.route_id ? <span className="font-mono text-[10px] text-gray-500 block leading-tight">{row.route_id}</span> : null}
+                <span className="text-gray-700">{row.route}</span>
               </div>
             </div>
             <p className="text-[11px] text-gray-500 mt-1.5 truncate">
@@ -200,6 +182,11 @@ function FleetVehicleCard({ row, busAlerts, selected, onSelect, onCamera }) {
               {row.depot ? <span className="text-gray-300"> · </span> : null}
               {row.depot}
             </p>
+            {row.latest_geofence_event ? (
+              <p className="text-[10px] text-indigo-700 mt-1 truncate">
+                Geofence: {row.latest_geofence_event.event_type} ({row.latest_geofence_event.geofence_id})
+              </p>
+            ) : null}
           </div>
         </div>
 
@@ -212,34 +199,22 @@ function FleetVehicleCard({ row, busAlerts, selected, onSelect, onCamera }) {
             {topActive.length > 0 ? (
               <ul className="space-y-1.5" data-testid={`fleet-alerts-${row.bus_id}`}>
                 {topActive.map((a) => (
-                  <li
-                    key={a.id}
-                    className="flex items-center justify-between gap-2 rounded-lg bg-white border border-gray-100 px-2 py-1.5 text-[11px]"
-                    data-testid={`alert-${a.id}`}
-                  >
+                  <li key={a.id} className="flex items-center justify-between gap-2 rounded-lg bg-white border border-gray-100 px-2 py-1.5 text-[11px]" data-testid={`alert-${a.id}`}>
                     <span className="text-gray-800 font-medium truncate">{a.alert_type}</span>
                     <span className="flex items-center gap-1.5 shrink-0">
-                      <span
-                        className={`h-1.5 w-1.5 rounded-full ${
-                          a.severity === "high" ? "bg-red-500" : a.severity === "medium" ? "bg-amber-500" : "bg-slate-400"
-                        }`}
-                      />
+                      <span className={`h-1.5 w-1.5 rounded-full ${a.severity === "high" ? "bg-red-500" : a.severity === "medium" ? "bg-amber-500" : "bg-slate-400"}`} />
                       <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-5 border-red-200 text-red-700 bg-red-50/80">
                         Active
                       </Badge>
                     </span>
                   </li>
                 ))}
-                {moreActive > 0 ? (
-                  <li className="text-[10px] text-gray-500 pl-1">+{moreActive} more active</li>
-                ) : null}
+                {moreActive > 0 ? <li className="text-[10px] text-gray-500 pl-1">+{moreActive} more active</li> : null}
               </ul>
             ) : (
               <p className="text-[11px] text-gray-400">No active alerts</p>
             )}
-            {resolved.length > 0 && active.length === 0 ? (
-              <p className="text-[10px] text-gray-400">{resolved.length} resolved in this session</p>
-            ) : null}
+            {resolved.length > 0 && active.length === 0 ? <p className="text-[10px] text-gray-400">{resolved.length} resolved in this session</p> : null}
           </div>
         )}
 
@@ -260,21 +235,28 @@ function FleetVehicleCard({ row, busAlerts, selected, onSelect, onCamera }) {
           </Button>
         </div>
       </div>
-    </button>
+    </div>
   );
 }
 
 export default function LiveTrackingPage() {
   const { isLoaded: mapsLoaded, loadError: mapsLoadError } = useJsApiLoader({
     id: "google-maps-live-tracking",
-    googleMapsApiKey: GOOGLE_MAPS_API_KEY,
+    googleMapsApiKey: getGoogleMapsApiKey(),
   });
   const [mapRef, setMapRef] = useState(null);
   const [mapPopupBusId, setMapPopupBusId] = useState(null);
-  const [positions, setPositions] = useState([]);
+  const liveQuery = useLivePositions();
+  const positions = useMemo(() => liveQuery.data || [], [liveQuery.data]);
+  const loading = liveQuery.isLoading;
+  const fetchError = liveQuery.error;
+  const refresh = useCallback(() => liveQuery.refetch(), [liveQuery]);
   const [alerts, setAlerts] = useState([]);
-  const [loading, setLoading] = useState(false);
   const [allBuses, setAllBuses] = useState([]);
+  const [geofences, setGeofences] = useState([]);
+  const [routeMasters, setRouteMasters] = useState([]);
+  /** Smooth 0..1 for pulse animation (requestAnimationFrame, ~20fps updates). */
+  const [pulse01, setPulse01] = useState(0);
   const [depot, setDepot] = useState("");
   const [telemStatus, setTelemStatus] = useState("");
   const [alertCode, setAlertCode] = useState("");
@@ -282,15 +264,14 @@ export default function LiveTrackingPage() {
   const [alertResolved, setAlertResolved] = useState("");
   const [fleetSearch, setFleetSearch] = useState("");
   const [alertsOnly, setAlertsOnly] = useState(false);
-  const [fetchError, setFetchError] = useState(null);
   const [cameraBusId, setCameraBusId] = useState(null);
   const [selectedBusId, setSelectedBusId] = useState(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const items = await fetchAllPaginated(Endpoints.masters.buses.list(), {});
-        setAllBuses(items);
+        const { data } = await API.get(Endpoints.masters.buses.list(), { params: { page: 1, limit: 100 } });
+        setAllBuses(unwrapListResponse(data).items);
       } catch {
         setAllBuses([]);
       }
@@ -299,34 +280,88 @@ export default function LiveTrackingPage() {
 
   const depotsList = [...new Set(allBuses.map((b) => b.depot).filter(Boolean))].sort();
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setFetchError(null);
+  const loadMapOverlays = useCallback(async () => {
     try {
-      const telemParams = buildQuery({ depot, status: telemStatus });
-      const alertParams = buildQuery({
-        depot,
-        alert_code: alertCode,
-        severity: alertSeverity,
-        resolved: alertResolved,
-      });
-      const [tp, al] = await Promise.all([
-        API.get(Endpoints.operations.live.telemetryPositions(), { params: telemParams }),
-        API.get(Endpoints.operations.live.alerts(), { params: alertParams }),
+      const [{ data: gfData }, { data: rtData }] = await Promise.all([
+        API.get(Endpoints.masters.geofences.list(), { params: { active: "true", page: 1, limit: 200 } }),
+        API.get(Endpoints.masters.routes.list(), { params: { page: 1, limit: 100 } }),
       ]);
-      setPositions(Array.isArray(tp.data) ? tp.data : []);
-      setAlerts(Array.isArray(al.data) ? al.data : []);
-    } catch (err) {
-      setFetchError(formatApiError(err.response?.data?.detail) || err.message || "Failed to refresh");
-    } finally {
-      setLoading(false);
+      setGeofences(unwrapListResponse(gfData).items);
+      setRouteMasters(unwrapListResponse(rtData).items);
+    } catch {
+      /* map overlays optional */
     }
-  }, [depot, telemStatus, alertCode, alertSeverity, alertResolved]);
+  }, []);
+
+  /** Stops from hydrated /bus-routes only (not corridor vertices). */
+  const routeStops = useMemo(() => {
+    const seen = new Set();
+    const out = [];
+    for (const r of routeMasters || []) {
+      const stops = r.stops;
+      if (!Array.isArray(stops)) continue;
+      for (const s of stops) {
+        const lat = Number(s?.lat);
+        const lng = Number(s?.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+        const sid = String(s?.stop_id || "");
+        const key = sid || `${lat.toFixed(5)},${lng.toFixed(5)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({ lat, lng, key });
+      }
+    }
+    return out;
+  }, [routeMasters]);
+
+  const routeCorridorLines = useMemo(() => (geofences || []).filter((g) => g?.geometry_type === "polyline_buffer" && Array.isArray(g?.path_points) && g.path_points.length >= 2), [geofences]);
 
   useEffect(() => {
-    refresh();
-    const iv = setInterval(refresh, 30000);
-    return () => clearInterval(iv);
+    let raf = 0;
+    let last = 0;
+    let alive = true;
+    const loop = (t) => {
+      if (!alive) return;
+      if (t - last >= 48) {
+        last = t;
+        setPulse01((Math.sin(t / 420) + 1) / 2);
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => {
+      alive = false;
+      cancelAnimationFrame(raf);
+    };
+  }, []);
+
+  useEffect(() => {
+    loadMapOverlays();
+  }, [loadMapOverlays]);
+
+  useEffect(() => {
+    let iv = null;
+    const runAndSchedule = () => {
+      refresh();
+      if (iv) clearInterval(iv);
+      if (typeof document !== "undefined" && document.hidden) return;
+      iv = setInterval(refresh, 30000);
+    };
+    runAndSchedule();
+    const onVis = () => {
+      if (typeof document === "undefined") return;
+      if (document.hidden) {
+        if (iv) clearInterval(iv);
+        iv = null;
+      } else {
+        runAndSchedule();
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      if (iv) clearInterval(iv);
+    };
   }, [refresh]);
 
   const alertsByBus = useMemo(() => {
@@ -343,11 +378,7 @@ export default function LiveTrackingPage() {
     let rows = positions;
     const q = fleetSearch.trim().toLowerCase();
     if (q) {
-      rows = rows.filter((p) =>
-        [p.bus_id, p.registration_no, p.route, p.driver, p.depot]
-          .filter(Boolean)
-          .some((s) => String(s).toLowerCase().includes(q)),
-      );
+      rows = rows.filter((p) => [p.bus_id, p.registration_no, p.route, p.route_id, p.driver, p.depot].filter(Boolean).some((s) => String(s).toLowerCase().includes(q)));
     }
     if (alertsOnly) {
       rows = rows.filter((p) => {
@@ -355,11 +386,7 @@ export default function LiveTrackingPage() {
         return list.some((a) => !a.resolved);
       });
     }
-    return [...rows].sort(
-      (a, b) =>
-        alertPriorityScore(alertsByBus.get(b.bus_id)) - alertPriorityScore(alertsByBus.get(a.bus_id)) ||
-        a.bus_id.localeCompare(b.bus_id),
-    );
+    return [...rows].sort((a, b) => alertPriorityScore(alertsByBus.get(b.bus_id)) - alertPriorityScore(alertsByBus.get(a.bus_id)) || a.bus_id.localeCompare(b.bus_id));
   }, [positions, fleetSearch, alertsOnly, alertsByBus]);
 
   useEffect(() => {
@@ -404,23 +431,33 @@ export default function LiveTrackingPage() {
   }, [mapCenter, mapRef, mapsLoaded]);
 
   const busMarkerIcon = useCallback(
-    (status) => ({
-      path: window.google.maps.SymbolPath.CIRCLE,
-      scale: 10,
-      fillColor: telemMarkerColor(status),
-      fillOpacity: 1,
-      strokeColor: "#ffffff",
-      strokeWeight: 2,
-    }),
-    [],
+    (status) => {
+      if (status === "in_service") {
+        const p = pulse01;
+        return {
+          path: window.google.maps.SymbolPath.CIRCLE,
+          scale: 5 + p * 2.5,
+          fillColor: "#DC2626",
+          fillOpacity: 0.55 + p * 0.4,
+          strokeColor: "#ffffff",
+          strokeWeight: 1.5,
+        };
+      }
+      return {
+        path: window.google.maps.SymbolPath.CIRCLE,
+        scale: 8,
+        fillColor: telemMarkerColor(status),
+        fillOpacity: 1,
+        strokeColor: "#ffffff",
+        strokeWeight: 1.5,
+      };
+    },
+    [pulse01],
   );
 
   /** Fixed-height map pane: no vertical scroll; only map pan/zoom inside. */
   const renderMapBlock = (heightClassName) => (
-    <div
-      className={`relative z-0 isolate rounded-xl overflow-hidden border border-gray-200 shadow-sm ${heightClassName}`}
-      data-testid="live-map"
-    >
+    <div className={`relative z-0 isolate rounded-xl overflow-hidden border border-gray-200 shadow-sm ${heightClassName}`} data-testid="live-map">
       <div className="absolute top-3 left-3 right-3 z-[1000] flex flex-wrap gap-2 pointer-events-none">
         <div className="pointer-events-auto flex flex-wrap gap-2 rounded-lg bg-white/95 border border-gray-200 shadow-sm px-3 py-2 text-[11px] font-medium text-gray-700">
           <span className="text-emerald-700">Running {counts.running}</span>
@@ -438,9 +475,7 @@ export default function LiveTrackingPage() {
       {!mapsLoaded ? (
         <div className="h-full w-full grid place-items-center text-sm text-gray-500 bg-gray-50">Loading Google Maps…</div>
       ) : mapsLoadError ? (
-        <div className="h-full w-full grid place-items-center text-sm text-red-600 bg-red-50">
-          Failed to load Google Maps.
-        </div>
+        <div className="h-full w-full grid place-items-center text-sm text-red-600 bg-red-50">Failed to load Google Maps.</div>
       ) : (
         <GoogleMap
           center={mapCenter}
@@ -453,54 +488,111 @@ export default function LiveTrackingPage() {
             fullscreenControl: false,
           }}
         >
+          {routeCorridorLines.map((gf) => {
+            const path = (gf.path_points || []).map((p) => ({ lat: Number(p.lat), lng: Number(p.lng) })).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+            if (path.length < 2) return null;
+            const strokeColor = colorForRouteLine(gf.entity_ref || gf.geofence_id);
+            return (
+              <PolylineF
+                key={gf.geofence_id}
+                path={path}
+                options={{
+                  strokeColor,
+                  strokeOpacity: 0.95,
+                  strokeWeight: 4,
+                  zIndex: 650,
+                }}
+              />
+            );
+          })}
           {mapMarkers.map((bus) => (
             <MarkerF
               key={bus.bus_id}
               position={{ lat: Number(bus.lat), lng: Number(bus.lng) }}
               icon={busMarkerIcon(bus.status)}
+              label={{ text: String(bus.bus_id || ""), color: "#111827", fontSize: "10px", fontWeight: "700" }}
+              zIndex={2000}
               onClick={() => setMapPopupBusId(bus.bus_id)}
             />
           ))}
-          {mapPopupBusId ? (() => {
-            const bus = mapMarkers.find((b) => b.bus_id === mapPopupBusId);
-            if (!bus) return null;
-            const activeAlerts = (alertsByBus.get(bus.bus_id) || []).filter((a) => !a.resolved);
-            return (
-              <InfoWindowF
-                position={{ lat: Number(bus.lat), lng: Number(bus.lng) }}
-                onCloseClick={() => setMapPopupBusId(null)}
-              >
-                <div className="text-sm space-y-2 min-w-[200px]">
-                  <p className="font-bold font-mono">{bus.bus_id}</p>
-                  <p className="text-xs text-gray-500">{bus.registration_no}</p>
-                  <p className="text-xs">
-                    {bus.status.replace(/_/g, " ")} · {bus.speed} km/h · SOC {bus.soc}%
-                  </p>
-                  <p className="text-xs text-gray-600">{bus.route}</p>
-                  <p className="text-xs">{bus.driver}</p>
-                  {activeAlerts.length > 0 ? (
-                    <div className="pt-2 border-t border-gray-100 space-y-1">
-                      <p className="text-[10px] font-bold uppercase text-gray-400">Active alerts</p>
-                      {activeAlerts.slice(0, 4).map((a) => (
-                        <p key={a.id} className="text-xs text-red-800 bg-red-50 rounded px-2 py-1">
-                          {a.alert_type}
-                        </p>
-                      ))}
+          {routeStops.map((s) => (
+            <CircleF
+              key={`stop-${s.key}`}
+              center={{ lat: s.lat, lng: s.lng }}
+              radius={20}
+              options={{
+                strokeColor: "#1D4ED8",
+                strokeOpacity: 0.85,
+                strokeWeight: 1,
+                fillColor: "#3B82F6",
+                fillOpacity: 0.18,
+                zIndex: 900,
+              }}
+            />
+          ))}
+          {geofences.map((gf) => {
+            const gType = String(gf.geometry_type || "");
+            if (gType === "polyline_buffer") {
+              return null;
+            }
+            if (gType === "circle" && gf.center_lat != null && gf.center_lng != null && gf.radius_m != null) {
+              return (
+                <CircleF
+                  key={gf.geofence_id}
+                  center={{ lat: Number(gf.center_lat), lng: Number(gf.center_lng) }}
+                  radius={Number(gf.radius_m)}
+                  options={{ strokeColor: "#C8102E", strokeOpacity: 0.8, strokeWeight: 1, fillOpacity: 0.08 }}
+                />
+              );
+            }
+            if (gType === "polygon" && Array.isArray(gf.path_points) && gf.path_points.length >= 3) {
+              return (
+                <PolygonF
+                  key={gf.geofence_id}
+                  paths={gf.path_points.map((p) => ({ lat: Number(p.lat), lng: Number(p.lng) }))}
+                  options={{ strokeColor: "#9333EA", strokeOpacity: 0.8, strokeWeight: 1, fillOpacity: 0.08 }}
+                />
+              );
+            }
+            return null;
+          })}
+          {mapPopupBusId
+            ? (() => {
+                const bus = mapMarkers.find((b) => b.bus_id === mapPopupBusId);
+                if (!bus) return null;
+                const activeAlerts = (alertsByBus.get(bus.bus_id) || []).filter((a) => !a.resolved);
+                return (
+                  <InfoWindowF position={{ lat: Number(bus.lat), lng: Number(bus.lng) }} onCloseClick={() => setMapPopupBusId(null)}>
+                    <div className="text-sm space-y-2 min-w-[200px]">
+                      <p className="font-bold font-mono">{bus.bus_id}</p>
+                      <p className="text-xs text-gray-500">{bus.registration_no}</p>
+                      <p className="text-xs">
+                        {bus.status.replace(/_/g, " ")} · {bus.speed} km/h · SOC {bus.soc}%
+                      </p>
+                      <p className="text-xs text-gray-600">
+                        {bus.route_id ? <span className="font-mono text-gray-500 mr-1">{bus.route_id}</span> : null}
+                        {bus.route}
+                      </p>
+                      <p className="text-xs">{bus.driver}</p>
+                      {activeAlerts.length > 0 ? (
+                        <div className="pt-2 border-t border-gray-100 space-y-1">
+                          <p className="text-[10px] font-bold uppercase text-gray-400">Active alerts</p>
+                          {activeAlerts.slice(0, 4).map((a) => (
+                            <p key={a.id} className="text-xs text-red-800 bg-red-50 rounded px-2 py-1">
+                              {a.alert_type}
+                            </p>
+                          ))}
+                        </div>
+                      ) : null}
+                      <Button type="button" size="sm" className="w-full text-xs" onClick={() => setCameraBusId(bus.bus_id)}>
+                        <Video className="w-3.5 h-3.5 mr-1" />
+                        Live camera
+                      </Button>
                     </div>
-                  ) : null}
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="w-full text-xs"
-                    onClick={() => setCameraBusId(bus.bus_id)}
-                  >
-                    <Video className="w-3.5 h-3.5 mr-1" />
-                    Live camera
-                  </Button>
-                </div>
-              </InfoWindowF>
-            );
-          })() : null}
+                  </InfoWindowF>
+                );
+              })()
+            : null}
         </GoogleMap>
       )}
     </div>
@@ -522,14 +614,7 @@ export default function LiveTrackingPage() {
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
           <span className="text-gray-500">
             <span className="font-semibold text-gray-800">{filteredFleet.length}</span>
-            {filteredFleet.length !== positions.length ? (
-              <span>
-                {" "}
-                of {positions.length} shown
-              </span>
-            ) : (
-              <span> vehicles</span>
-            )}
+            {filteredFleet.length !== positions.length ? <span> of {positions.length} shown</span> : <span> vehicles</span>}
           </span>
           <div className="flex items-center gap-2">
             <Switch id="alerts-only" checked={alertsOnly} onCheckedChange={setAlertsOnly} data-testid="fleet-alerts-only" />
@@ -542,19 +627,10 @@ export default function LiveTrackingPage() {
       <ScrollArea className="flex-1 min-h-0 min-h-[200px]">
         <div className="p-3 space-y-2.5" data-testid="live-tracking-side-list">
           {filteredFleet.map((p) => (
-            <FleetVehicleCard
-              key={p.bus_id}
-              row={p}
-              busAlerts={alertsByBus.get(p.bus_id) || []}
-              selected={selectedBusId}
-              onSelect={setSelectedBusId}
-              onCamera={setCameraBusId}
-            />
+            <FleetVehicleCard key={p.bus_id} row={p} busAlerts={alertsByBus.get(p.bus_id) || []} selected={selectedBusId} onSelect={setSelectedBusId} onCamera={setCameraBusId} />
           ))}
           {filteredFleet.length === 0 && !loading ? (
-            <div className="py-16 text-center text-sm text-gray-400 px-4">
-              {positions.length === 0 ? "No vehicles match filters." : "No vehicles match search or alert filter."}
-            </div>
+            <div className="py-16 text-center text-sm text-gray-400 px-4">{positions.length === 0 ? "No vehicles match filters." : "No vehicles match search or alert filter."}</div>
           ) : null}
         </div>
       </ScrollArea>
@@ -571,9 +647,7 @@ export default function LiveTrackingPage() {
               {positions.length} on map
             </Badge>
           </div>
-          <p className="page-desc max-w-2xl">
-            Fleet positions with telemetry. Alerts are shown on each vehicle card; use search to find buses in large fleets.
-          </p>
+          <p className="page-desc max-w-2xl">Fleet positions with telemetry. Alerts are shown on each vehicle card; use search to find buses in large fleets.</p>
         </div>
         <Button onClick={refresh} variant="outline" size="sm" data-testid="live-refresh-btn" className="shrink-0 rounded-lg border-gray-200">
           <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
@@ -666,9 +740,7 @@ export default function LiveTrackingPage() {
                   type="button"
                   onClick={() => setTelemStatus(f.id)}
                   className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
-                    telemStatus === f.id
-                      ? "border-[#C8102E] bg-[#C8102E] text-white shadow-sm"
-                      : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                    telemStatus === f.id ? "border-[#C8102E] bg-[#C8102E] text-white shadow-sm" : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
                   }`}
                 >
                   {f.label}
@@ -679,18 +751,12 @@ export default function LiveTrackingPage() {
         </CardContent>
       </Card>
 
-      {fetchError && !loading ? (
-        <AsyncPanel error={fetchError} onRetry={refresh} />
-      ) : null}
+      {fetchError && !loading ? <AsyncPanel error={fetchError} onRetry={refresh} /> : null}
 
       {/* Desktop: map left (fixed height, sticky — no page scroll in map), fleet right (scrolls inside list) */}
       <div className="hidden lg:flex lg:flex-row lg:gap-4 lg:items-start">
-        <div className="flex-1 min-w-0 lg:sticky lg:top-20 lg:z-[1] self-start h-[calc(100vh-9rem)] max-h-[880px]">
-          {renderMapBlock("h-full")}
-        </div>
-        <div className="w-full max-w-[420px] shrink-0 flex flex-col min-h-0 h-[calc(100vh-9rem)] max-h-[880px]">
-          {fleetPanel}
-        </div>
+        <div className="flex-1 min-w-0 lg:sticky lg:top-20 lg:z-[1] self-start h-[calc(100vh-9rem)] max-h-[880px]">{renderMapBlock("h-full")}</div>
+        <div className="w-full max-w-[420px] shrink-0 flex flex-col min-h-0 h-[calc(100vh-9rem)] max-h-[880px]">{fleetPanel}</div>
       </div>
 
       {/* Mobile / tablet: Map first, Fleet second */}
@@ -715,13 +781,16 @@ export default function LiveTrackingPage() {
         </Tabs>
       </div>
 
-      <Dialog open={!!cameraBusId} onOpenChange={(open) => { if (!open) setCameraBusId(null); }}>
+      <Dialog
+        open={!!cameraBusId}
+        onOpenChange={(open) => {
+          if (!open) setCameraBusId(null);
+        }}
+      >
         <DialogContent className="max-w-3xl" data-testid="live-camera-dialog">
           <DialogHeader>
             <DialogTitle>Live camera — {cameraBusId}</DialogTitle>
-            <DialogDescription>
-              Video stream from the concessionaire operations system. Playback is not wired yet; this panel reserves the integration point.
-            </DialogDescription>
+            <DialogDescription>Video stream from the concessionaire operations system. Playback is not wired yet; this panel reserves the integration point.</DialogDescription>
           </DialogHeader>
           <div
             className="relative aspect-video w-full rounded-lg border border-gray-200 bg-gradient-to-br from-gray-900 to-gray-800 flex flex-col items-center justify-center gap-3 text-center px-6"
@@ -731,9 +800,7 @@ export default function LiveTrackingPage() {
             <Video className="h-14 w-14 text-white/25" strokeWidth={1} aria-hidden />
             <div className="space-y-1">
               <p className="text-sm font-medium text-white/90">Awaiting concessionaire stream</p>
-              <p className="text-xs text-white/50 max-w-md">
-                HLS / WebRTC or embedded player URL from the concessionaire would render here (bus {cameraBusId}).
-              </p>
+              <p className="text-xs text-white/50 max-w-md">HLS / WebRTC or embedded player URL from the concessionaire would render here (bus {cameraBusId}).</p>
             </div>
           </div>
         </DialogContent>

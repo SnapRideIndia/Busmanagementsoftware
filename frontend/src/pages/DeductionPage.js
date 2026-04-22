@@ -1,6 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useMemo } from "react";
 import { Link } from "react-router-dom";
-import API, { formatApiError, buildQuery, unwrapListResponse, fetchAllPaginated } from "../lib/api";
+import { useDeductionRules, useDeductionHistory, useDeductionMutations } from "../features/deductions/api/useDeductions";
+import { useAllBuses } from "../features/buses/api/useBuses";
+import { messageFromAxiosError } from "../lib/api";
 import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import TableLoadRows from "../components/TableLoadRows";
@@ -17,41 +19,36 @@ import { toast } from "sonner";
 const SHOW_DEDUCTION_UI = false;
 
 export default function DeductionPage() {
-  const [rules, setRules] = useState([]);
-  const [buses, setBuses] = useState([]);
   const [page, setPage] = useState(1);
-  const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 20 });
   const [result, setResult] = useState(null);
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
   const [filterDepot, setFilterDepot] = useState("");
   const [filterBusId, setFilterBusId] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState(null);
+  
+  const { data: allBuses = [] } = useAllBuses();
+  const depots = useMemo(() => [...new Set(allBuses.map((b) => b.depot).filter(Boolean))].sort(), [allBuses]);
+  const busesForFilter = useMemo(() => (filterDepot ? allBuses.filter((b) => b.depot === filterDepot) : allBuses), [allBuses, filterDepot]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setFetchError(null);
-    try {
-      const [rulesRes, busesRes] = await Promise.all([
-        API.get(Endpoints.deductions.rules(), { params: buildQuery({ page, limit: 20 }) }),
-        fetchAllPaginated(Endpoints.masters.buses.list(), {}),
-      ]);
-      const u = unwrapListResponse(rulesRes.data);
-      setRules(u.items);
-      setMeta({ total: u.total, pages: u.pages, limit: u.limit });
-      setBuses(busesRes);
-    } catch (err) {
-      setFetchError(formatApiError(err.response?.data?.detail) || err.message || "Failed to load deduction compliance data");
-      setRules([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [page]);
+  const filters = {
+    depot: filterDepot,
+    bus_id: filterBusId,
+    page,
+    limit: 20,
+  };
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  const { data: rules = [], isLoading: rulesLoading } = useDeductionRules();
+  const { data: historyData, isLoading: historyLoading, error: fetchError, refetch: load } = useDeductionHistory(filters);
+  const { updateRule, applyDeduction, isSubmitting: submitting } = useDeductionMutations();
+
+  const meta = {
+    total: historyData?.total || 0,
+    pages: historyData?.pages || 1,
+    limit: historyData?.limit || 20,
+  };
+
+  const loading = rulesLoading || historyLoading;
+  const error = fetchError ? messageFromAxiosError(fetchError, "Failed to load deductions") : null;
 
   const applyDeductions = async () => {
     if (!periodStart || !periodEnd) {
@@ -59,27 +56,27 @@ export default function DeductionPage() {
       return;
     }
     try {
-      const { data } = await API.post(
-        Endpoints.deductions.apply(),
-        null,
-        {
-          params: buildQuery({
-            period_start: periodStart,
-            period_end: periodEnd,
-            depot: filterDepot,
-            bus_id: filterBusId,
-          }),
-        }
-      );
+      const data = await applyDeduction({
+        period_start: periodStart,
+        period_end: periodEnd,
+        depot: filterDepot,
+        bus_id: filterBusId,
+      });
       setResult(data);
       toast.success("Deductions calculated");
     } catch (err) {
-      toast.error(formatApiError(err.response?.data?.detail));
+      toast.error(messageFromAxiosError(err, "Failed to apply deductions"));
     }
   };
 
-  const depots = [...new Set(buses.map((b) => b.depot).filter(Boolean))].sort();
-  const busesForFilter = (filterDepot ? buses.filter((b) => b.depot === filterDepot) : buses).sort((a, b) => String(a.bus_id).localeCompare(String(b.bus_id)));
+  const handleUpdateRule = async (key, val) => {
+    try {
+      await updateRule({ key, payload: { value: parseFloat(val) } });
+    } catch (err) {
+      // Error handled in hook
+    }
+  };
+
   const ir = result?.infractions_breakdown || {};
 
   return (
@@ -92,7 +89,7 @@ export default function DeductionPage() {
         Contract-facing deduction view for SLA/infraction evidence. Line-level actions are in{" "}
         <Link to="/infractions" className="text-[#C8102E] font-medium hover:underline">Infractions</Link>{" "}
         and KPI damages are in{" "}
-        <Link to="/gcc-kpi" className="text-[#C8102E] font-medium hover:underline">GCC KPI</Link>.
+        <Link to="/kpi" className="text-[#C8102E] font-medium hover:underline">KPI</Link>.
       </p>
 
       {!SHOW_DEDUCTION_UI ? (

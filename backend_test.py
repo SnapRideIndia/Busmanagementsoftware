@@ -114,8 +114,6 @@ class BusManagementTester:
             "tender_id": f"TEST-{datetime.now().strftime('%H%M%S')}",
             "pk_rate": 90.0,
             "energy_rate": 9.0,
-            "subsidy_rate": 6.0,
-            "subsidy_type": "per_km",
             "description": "Test tender for automation",
             "status": "active"
         }
@@ -478,7 +476,7 @@ class BusManagementTester:
                 "PUT",
                 f"incidents/{incident_id}",
                 200,
-                data={"status": "investigating"},
+                data={"status": "in_progress"},
             )
         
         return success

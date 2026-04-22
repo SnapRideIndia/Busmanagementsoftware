@@ -12,7 +12,6 @@ export default function TablePaginationBar({
   if (total === 0) return null;
   const from = (page - 1) * limit + 1;
   const to = Math.min(page * limit, total);
-  if (pages <= 1 && total <= limit) return null;
 
   return (
     <div

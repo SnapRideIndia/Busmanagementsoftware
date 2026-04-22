@@ -1,6 +1,7 @@
-import { formatTripReason, tripStatusBadgeClass, dutyDashTime } from "../lib/dutyTrips";
-import { Badge } from "./ui/badge";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
+import { formatTripReason, tripStatusBadgeClass, dutyDashTime, formatManualStatusPctDisplay, isDutyTripLeg } from "@/features/duty/lib/dutyTrips";
+import { breakRowPrimaryLabel } from "@/features/duty/lib/dutyFormHelpers";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 /**
  * Read-only timetable for trips on a duty (used on duty list expand + duty summary cards).
@@ -18,19 +19,37 @@ export default function DutyTripsReadOnlyTable({ trips, className = "" }) {
             <TableHead className="whitespace-nowrap">End point</TableHead>
             <TableHead className="whitespace-nowrap">Start time</TableHead>
             <TableHead className="whitespace-nowrap">End time</TableHead>
+            <TableHead className="whitespace-nowrap text-[10px]">Trip Status (%)</TableHead>
             <TableHead className="whitespace-nowrap">Status</TableHead>
             <TableHead className="whitespace-nowrap min-w-[120px]">Reason / note</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {list.map((t) => {
+          {list.map((t, idx) => {
+            if (!isDutyTripLeg(t)) {
+              const reason = String(t.break_label || "").trim();
+              return (
+                <TableRow key={t.trip_number ?? idx} className="text-xs bg-slate-50/50">
+                  <TableCell className="font-mono font-medium">{t.trip_number}</TableCell>
+                  <TableCell className="text-muted-foreground">—</TableCell>
+                  <TableCell colSpan={2} className="text-muted-foreground tabular-nums">
+                    {breakRowPrimaryLabel(t.start_time, t.end_time)}
+                  </TableCell>
+                  <TableCell className="font-mono">{dutyDashTime(t.start_time)}</TableCell>
+                  <TableCell className="font-mono">{dutyDashTime(t.end_time)}</TableCell>
+                  <TableCell className="text-muted-foreground">—</TableCell>
+                  <TableCell className="text-muted-foreground">—</TableCell>
+                  <TableCell className="text-gray-700 whitespace-normal">{reason || "—"}</TableCell>
+                </TableRow>
+              );
+            }
             const reason = formatTripReason({
               trip_status: t.trip_status,
               cancel_reason_code: t.cancel_reason_code,
               cancel_reason_custom: t.cancel_reason_custom,
             });
             return (
-              <TableRow key={t.trip_number} className="text-xs">
+              <TableRow key={t.trip_number ?? idx} className="text-xs">
                 <TableCell className="font-mono font-medium">{t.trip_number}</TableCell>
                 <TableCell className="font-mono text-gray-600 min-w-0 break-all whitespace-normal" title={t.trip_id || ""}>
                   {t.trip_id && String(t.trip_id).trim() ? t.trip_id : "-"}
@@ -39,6 +58,7 @@ export default function DutyTripsReadOnlyTable({ trips, className = "" }) {
                 <TableCell>{t.end_point || "—"}</TableCell>
                 <TableCell className="font-mono">{dutyDashTime(t.start_time)}</TableCell>
                 <TableCell className="font-mono">{dutyDashTime(t.end_time)}</TableCell>
+                <TableCell className="font-mono tabular-nums">{formatManualStatusPctDisplay(t)}</TableCell>
                 <TableCell>
                   <Badge className={`${tripStatusBadgeClass(t.trip_status)} text-[10px] font-normal`}>
                     {(t.trip_status || "scheduled").replace(/_/g, " ")}

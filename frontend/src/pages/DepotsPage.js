@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import API, { formatApiError, buildQuery, unwrapListResponse } from "../lib/api";
+import { useDepots, useDepotMutations } from "../features/depots/api/useDepots";
+import API, { formatApiError } from "../lib/api";
 import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import TableLoadRows from "../components/TableLoadRows";
@@ -14,41 +15,31 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
-const empty = { name: "", code: "", address: "", active: true };
+const empty = { name: "", code: "", address: "", lat: "", lng: "", active: true };
 
 export default function DepotsPage() {
-  const [depots, setDepots] = useState([]);
+
   const [open, setOpen] = useState(false);
   const [editingOriginalName, setEditingOriginalName] = useState(null);
   const [form, setForm] = useState(empty);
   const [filterActive, setFilterActive] = useState("");
   const [filterSearch, setFilterSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 20 });
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setFetchError(null);
-    try {
-      const { data } = await API.get(Endpoints.masters.depots.list(), { params: buildQuery({ active: filterActive, search: filterSearch, page, limit: 20 }) });
-      const u = unwrapListResponse(data);
-      setDepots(u.items);
-      setMeta({ total: u.total, pages: u.pages, limit: u.limit });
-    } catch (err) {
-      setFetchError(formatApiError(err.response?.data?.detail) || err.message || "Failed to load depots");
-      setDepots([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [filterActive, filterSearch, page]);
+  const { data, isLoading: loading, error: fetchError, refetch: load } = useDepots({
+    active: filterActive,
+    search: filterSearch,
+    page,
+    limit: 20
+  });
+  const depots = data?.items || [];
+  const meta = { total: data?.total || 0, pages: data?.pages || 1, limit: data?.limit || 20 };
+
+  const { createDepot, updateDepot, deleteDepot, isSaving } = useDepotMutations();
+
   useEffect(() => {
     setPage(1);
-  }, [filterSearch]);
-  useEffect(() => {
-    load();
-  }, [load]);
+  }, [filterSearch, filterActive]);
 
   const handleSave = async () => {
     try {
@@ -58,30 +49,30 @@ export default function DepotsPage() {
         address: (form.address || "").trim(),
         active: !!form.active,
       };
+      const lt = parseFloat(String(form.lat).trim(), 10);
+      const ln = parseFloat(String(form.lng).trim(), 10);
+      if (String(form.lat).trim() !== "" && !Number.isNaN(lt)) payload.lat = lt;
+      if (String(form.lng).trim() !== "" && !Number.isNaN(ln)) payload.lng = ln;
+      
       if (editingOriginalName) {
-        await API.put(Endpoints.masters.depots.update(editingOriginalName), payload);
-        toast.success("Depot updated");
+        await updateDepot({ name: editingOriginalName, payload });
       } else {
-        await API.post(Endpoints.masters.depots.create(), payload);
-        toast.success("Depot added");
+        await createDepot(payload);
       }
       setOpen(false);
       setEditingOriginalName(null);
       setForm(empty);
-      load();
     } catch (err) {
-      toast.error(formatApiError(err.response?.data?.detail));
+      // Error handled in hook
     }
   };
 
   const handleDelete = async (name) => {
     if (!window.confirm(`Delete depot "${name}"?`)) return;
     try {
-      await API.delete(Endpoints.masters.depots.remove(name));
-      toast.success("Deleted");
-      load();
+      await deleteDepot(name);
     } catch (err) {
-      toast.error(formatApiError(err.response?.data?.detail));
+      // Error handled in hook
     }
   };
 
@@ -90,6 +81,8 @@ export default function DepotsPage() {
       name: d.name || "",
       code: d.code || "",
       address: d.address || "",
+      lat: d.lat != null && d.lat !== "" ? String(d.lat) : "",
+      lng: d.lng != null && d.lng !== "" ? String(d.lng) : "",
       active: d.active !== false,
     });
     setEditingOriginalName(d.name);
@@ -232,6 +225,27 @@ export default function DepotsPage() {
                 data-testid="depot-address-input"
               />
             </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Latitude (optional)</Label>
+                <Input
+                  value={form.lat}
+                  onChange={(e) => setForm({ ...form, lat: e.target.value })}
+                  placeholder="e.g. 17.45"
+                  data-testid="depot-lat-input"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Longitude (optional)</Label>
+                <Input
+                  value={form.lng}
+                  onChange={(e) => setForm({ ...form, lng: e.target.value })}
+                  placeholder="e.g. 78.38"
+                  data-testid="depot-lng-input"
+                />
+              </div>
+            </div>
+            <p className="text-[11px] text-gray-500">Used for depot boundaries on the Geofences map. Leave blank if unknown.</p>
             <div className="space-y-2">
               <Label>Status</Label>
               <Select
@@ -247,8 +261,8 @@ export default function DepotsPage() {
                 </SelectContent>
               </Select>
             </div>
-            <Button onClick={handleSave} className="w-full bg-[#C8102E] hover:bg-[#A50E25]" data-testid="depot-save-btn">
-              {editingOriginalName ? "Update" : "Save"}
+            <Button onClick={handleSave} disabled={isSaving} className="w-full bg-[#C8102E] hover:bg-[#A50E25]" data-testid="depot-save-btn">
+              {isSaving ? "Saving..." : (editingOriginalName ? "Update" : "Save")}
             </Button>
           </div>
         </DialogContent>

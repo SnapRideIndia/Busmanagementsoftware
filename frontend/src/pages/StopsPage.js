@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
-import API, { buildQuery, unwrapListResponse, messageFromAxiosError } from "../lib/api";
-import { Endpoints } from "../lib/endpoints";
+import { useStops, useStopMutations } from "../features/stops/api/useStops";
 import TablePaginationBar from "../components/TablePaginationBar";
 import TableLoadRows from "../components/TableLoadRows";
 import { Button } from "../components/ui/button";
@@ -27,7 +26,6 @@ const empty = {
 };
 
 export default function StopsPage() {
-  const [rows, setRows] = useState([]);
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(empty);
@@ -35,31 +33,29 @@ export default function StopsPage() {
   const [filterActive, setFilterActive] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 30 });
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState(null);
+  const [metaLimit, setMetaLimit] = useState(30);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setFetchError(null);
-    try {
-      const { data } = await API.get(Endpoints.masters.stops.list(), {
-        params: buildQuery({ region: filterRegion, active: filterActive, search, page, limit: meta.limit }),
-      });
-      const u = unwrapListResponse(data);
-      setRows(u.items);
-      setMeta({ total: u.total, pages: u.pages, limit: u.limit });
-    } catch (err) {
-      setFetchError(messageFromAxiosError(err, "Failed to load stops"));
-      setRows([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [filterRegion, filterActive, search, page, meta.limit]);
+  const { data: stopsData, isLoading: loading, error: fetchError, refetch: load } = useStops({
+    region: filterRegion,
+    active: filterActive,
+    search,
+    page,
+    limit: metaLimit,
+  });
+
+  const rows = stopsData?.items || [];
+  const stopGeofenceMap = stopsData?.geofenceMap || {};
+  const meta = {
+    total: stopsData?.total || 0,
+    pages: stopsData?.pages || 1,
+    limit: stopsData?.limit || metaLimit,
+  };
+
+  const { createStop, updateStop, deleteStop, isSaving } = useStopMutations();
 
   useEffect(() => {
-    load();
-  }, [load]);
+    setPage(1);
+  }, [search, filterRegion, filterActive]);
 
   const handleSave = async () => {
     const sid = (form.stop_id || "").trim();
@@ -83,32 +79,25 @@ export default function StopsPage() {
     };
     try {
       if (editingId) {
-        await API.put(Endpoints.masters.stops.update(editingId), payload);
-        toast.success("Stop updated");
+        await updateStop({ id: editingId, payload });
       } else {
-        await API.post(Endpoints.masters.stops.create(), { ...payload, stop_id: sid });
-        toast.success("Stop created");
+        await createStop({ ...payload, stop_id: sid });
       }
       setOpen(false);
       setEditingId(null);
       setForm(empty);
-      load();
     } catch (err) {
-      toast.error(messageFromAxiosError(err, "Could not save stop"));
+      // Error handled in hook
     }
   };
 
-  const handleDelete = (stopId) => {
+  const handleDelete = async (stopId) => {
     if (!window.confirm(`Delete stop "${stopId}"? It must not be used on any route.`)) return;
-    (async () => {
-      try {
-        await API.delete(Endpoints.masters.stops.remove(stopId));
-        toast.success("Deleted");
-        load();
-      } catch (err) {
-        toast.error(messageFromAxiosError(err, "Could not delete"));
-      }
-    })();
+    try {
+      await deleteStop(stopId);
+    } catch (err) {
+      // Error handled in hook
+    }
   };
 
   const openEdit = (s) => {
@@ -209,6 +198,7 @@ export default function StopsPage() {
                 <TableHead>Name</TableHead>
                 <TableHead>Locality</TableHead>
                 <TableHead>Region</TableHead>
+                <TableHead>Geofence</TableHead>
                 <TableHead className="text-right">Routes</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -216,7 +206,7 @@ export default function StopsPage() {
             </TableHeader>
             <TableBody>
               <TableLoadRows
-                colSpan={7}
+                colSpan={8}
                 loading={loading}
                 error={fetchError}
                 onRetry={load}
@@ -229,6 +219,15 @@ export default function StopsPage() {
                     <TableCell className="text-[12px]">{s.name}</TableCell>
                     <TableCell className="text-[12px] text-gray-600">{s.locality || "—"}</TableCell>
                     <TableCell className="text-[12px] text-gray-600">{s.region || "—"}</TableCell>
+                    <TableCell>
+                      {stopGeofenceMap[s.stop_id] ? (
+                        <Badge variant={stopGeofenceMap[s.stop_id].active ? "default" : "outline"}>
+                          {stopGeofenceMap[s.stop_id].active ? "linked" : "inactive"}
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline">missing</Badge>
+                      )}
+                    </TableCell>
                     <TableCell className="text-right font-mono text-[12px]">{s.route_count ?? 0}</TableCell>
                     <TableCell>
                       <Badge
@@ -262,7 +261,10 @@ export default function StopsPage() {
             total={meta.total} 
             limit={meta.limit} 
             onPageChange={setPage} 
-            onLimitChange={(l) => setMeta(prev => ({ ...prev, limit: l }))}
+            onLimitChange={(l) => {
+              setPage(1);
+              setMetaLimit(l);
+            }}
           />
         </CardContent>
       </Card>
@@ -323,8 +325,8 @@ export default function StopsPage() {
                 Active
               </Label>
             </div>
-            <Button onClick={handleSave} className="w-full bg-[#C8102E] hover:bg-[#A50E25]" data-testid="stop-save-btn">
-              {editingId ? "Update" : "Save"}
+            <Button onClick={handleSave} disabled={isSaving} className="w-full bg-[#C8102E] hover:bg-[#A50E25]" data-testid="stop-save-btn">
+              {isSaving ? "Saving..." : (editingId ? "Update" : "Save")}
             </Button>
           </div>
         </DialogContent>

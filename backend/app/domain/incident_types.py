@@ -7,6 +7,7 @@ See docs/TRACEBILITY_INCIDENT_TYPES.md for clause → code mapping.
 from __future__ import annotations
 
 from enum import Enum
+from collections import Counter
 from typing import Any, Final
 
 
@@ -24,11 +25,10 @@ class IncidentSeverity(str, Enum):
 
 
 class IncidentStatus(str, Enum):
-    OPEN = "open"
+    """IRMS lifecycle — investigating, progress, then closed (terminal)."""
+
     INVESTIGATING = "investigating"
-    ASSIGNED = "assigned"
     IN_PROGRESS = "in_progress"
-    RESOLVED = "resolved"
     CLOSED = "closed"
 
 
@@ -46,6 +46,21 @@ DEFAULT_ASSIGNMENT_TEAMS: Final[tuple[str, ...]] = (
 # Tender TGSRTC EBMS: §4 "Type of Instances for Alerts" (a–g), then §5 rules, §7 reports, scope (g).
 # Dropdown order follows §4 first, then breakdown/accident and other named reports, then extended IRMS.
 
+# GCC Article 20 KPI slugs used by /kpi/gcc-engine categories (detail pages + transparency).
+KPI_SLUG_RELIABILITY: Final[str] = "reliability"
+KPI_SLUG_AVAILABILITY: Final[str] = "availability"
+KPI_SLUG_PUNCTUALITY: Final[str] = "punctuality"
+KPI_SLUG_FREQUENCY: Final[str] = "frequency"
+KPI_SLUG_TRIP_SPEED: Final[str] = "trip_speed"
+GCC_KPI_SLUGS: Final[tuple[str, ...]] = (
+    KPI_SLUG_RELIABILITY,
+    KPI_SLUG_AVAILABILITY,
+    KPI_SLUG_PUNCTUALITY,
+    KPI_SLUG_FREQUENCY,
+    KPI_SLUG_TRIP_SPEED,
+)
+
+
 def _row(
     code: str,
     label: str,
@@ -54,6 +69,7 @@ def _row(
     reliability_bd: bool = False,
     safety_minor: bool = False,
     safety_major: bool = False,
+    kpi_links: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     return {
         "code": code,
@@ -62,6 +78,7 @@ def _row(
         "counts_for_reliability_breakdown": reliability_bd,
         "counts_for_safety_maf_minor": safety_minor,
         "counts_for_safety_major": safety_major,
+        "kpi_links": kpi_links,
     }
 
 
@@ -189,6 +206,7 @@ def incident_types_public() -> list[dict[str, Any]]:
             "ui_group": _ui_group_for_code(r["code"]),
             "counts_for_reliability_breakdown": r["counts_for_reliability_breakdown"],
             "counts_for_safety_kpi": r["counts_for_safety_maf_minor"] or r["counts_for_safety_major"],
+            "kpi_links": list(effective_kpi_links_for_type(r["code"])),
         }
         for r in _INCIDENT_TYPE_ROWS
     ]
@@ -225,6 +243,100 @@ def is_breakdown_for_reliability(incident: dict[str, Any]) -> bool:
     code = normalize_incident_type(incident.get("incident_type"))
     row = _type_row(code)
     return bool(row and row["counts_for_reliability_breakdown"])
+
+
+def effective_kpi_links_for_type(code: str) -> frozenset[str]:
+    """
+    All GCC KPI buckets an incident type informs for dashboards (explicit + inferred).
+    New types: set ``kpi_links`` on the row; reliability breakdown and code fallbacks add more.
+    """
+    row = _type_row(code)
+    out: set[str] = set(row.get("kpi_links") or ()) if row else set()
+    if row and row.get("counts_for_reliability_breakdown"):
+        out.add(KPI_SLUG_RELIABILITY)
+    # Infer schedule / headway / speed relevance when row has no explicit links yet.
+    if code in _CODES_INFER_PUNCTUALITY:
+        out.add(KPI_SLUG_PUNCTUALITY)
+    if code in _CODES_INFER_FREQUENCY:
+        out.add(KPI_SLUG_FREQUENCY)
+    if code in _CODES_INFER_TRIP_SPEED:
+        out.add(KPI_SLUG_TRIP_SPEED)
+    if code in _CODES_INFER_AVAILABILITY:
+        out.add(KPI_SLUG_AVAILABILITY)
+    return frozenset(out & set(GCC_KPI_SLUGS))
+
+
+# Types that affect schedule adherence narrative (complements trip_data punctuality %).
+_CODES_INFER_PUNCTUALITY: Final[frozenset[str]] = frozenset(
+    {
+        "EARLY_LATE_DEPOT_OR_TRIP",
+        "TRIP_NOT_STARTED_ORIGIN",
+        "TRIP_NOT_COMPLETED",
+        "IDLE_EXCESS",
+        "ROUTE_DEVIATION",
+        "BUNCHING_ALERT",
+        "SCHEDULE_CURTAILMENT",
+        "ITS_GPS_FAILURE",
+    }
+)
+_CODES_INFER_FREQUENCY: Final[frozenset[str]] = frozenset(
+    {
+        "TRIP_NOT_STARTED_ORIGIN",
+        "TRIP_NOT_COMPLETED",
+        "SCHEDULE_CURTAILMENT",
+        "BREAKDOWN",
+        "CHARGING_INFRA_FAULT",
+        "HARNESS_REMOVAL",
+    }
+)
+_CODES_INFER_TRIP_SPEED: Final[frozenset[str]] = frozenset(
+    {
+        "OVERSPEED",
+        "OVERSPEED_CRITICAL",
+        "IDLE_EXCESS",
+    }
+)
+_CODES_INFER_AVAILABILITY: Final[frozenset[str]] = frozenset(
+    {
+        "NO_DRIVER_OR_CONDUCTOR",
+        "DOUBLE_DUTY_DRIVER",
+        "BREAKDOWN",
+        "CHARGING_INFRA_FAULT",
+        "FIRE_ON_BUS",
+        "CMS_OR_ENERGY_DATA_FAULT",
+    }
+)
+
+
+def gcc_incident_visibility_by_kpi(incidents_list: list[dict[str, Any]]) -> dict[str, Any]:
+    """
+    Per GCC KPI slug: how many incidents in scope relate (for detail pages).
+    Does not change monetary KPI math — trip_data + bus_km drive formulas.
+    """
+    by_slug: dict[str, Counter[str]] = {s: Counter() for s in GCC_KPI_SLUGS}
+    samples: dict[str, list[dict[str, Any]]] = {s: [] for s in GCC_KPI_SLUGS}
+    for inc in incidents_list:
+        code = normalize_incident_type(inc.get("incident_type"))
+        links = effective_kpi_links_for_type(code)
+        mini = {
+            "id": inc.get("id"),
+            "bus_id": inc.get("bus_id"),
+            "incident_type": code,
+            "occurred_at": inc.get("occurred_at"),
+            "severity": inc.get("severity"),
+        }
+        for slug in links:
+            by_slug[slug][code] += 1
+            if len(samples[slug]) < 500:
+                samples[slug].append(mini)
+    return {
+        slug: {
+            "incident_count": sum(by_slug[slug].values()),
+            "by_incident_code": dict(by_slug[slug]),
+            "sample": samples[slug],
+        }
+        for slug in GCC_KPI_SLUGS
+    }
 
 
 def safety_kpi_counts(incidents_list: list[dict[str, Any]]) -> tuple[int, int]:

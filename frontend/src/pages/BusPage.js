@@ -1,5 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
-import API, { formatApiError, buildQuery, unwrapListResponse, fetchAllPaginated } from "../lib/api";
+import { useState, useMemo } from "react";
+import { useBuses, useAllBuses } from "../features/buses/api/useBuses";
+import { useBusMutations } from "../features/buses/api/useBusMutations";
+import { useAllDepotNames } from "../features/depots/api/useDepots";
+import { useAllTenders } from "../features/tenders/api/useTenders";
+import API from "../lib/api";
 import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import TableLoadRows from "../components/TableLoadRows";
@@ -14,11 +18,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Plus, Pencil, Trash2, Eye, Link } from "lucide-react";
 import { toast } from "sonner";
 
-const emptyBus = { bus_id: "", bus_type: "12m_ac", capacity: "40", tender_id: "", depot: "", status: "active" };
+const emptyBus = { bus_id: "", bus_type: "12m_ac", capacity: "40", tender_id: "", depot: "", status: "active", annual_assured_km_override: "" };
+
+function formatTariffRsCell(v) {
+  if (v == null || v === "") return "—";
+  const n = Number(v);
+  return Number.isFinite(n)
+    ? n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : "—";
+}
 
 export default function BusPage() {
-  const [buses, setBuses] = useState([]);
-  const [tenders, setTenders] = useState([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyBus);
@@ -30,77 +40,69 @@ export default function BusPage() {
   const [filterDepot, setFilterDepot] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [filterSearch, setFilterSearch] = useState("");
-  const [fleetDepots, setFleetDepots] = useState([]);
   const [page, setPage] = useState(1);
-  const [listMeta, setListMeta] = useState({ total: 0, pages: 1, limit: 30 });
-  const [allBusesForAssign, setAllBusesForAssign] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState(null);
+  const [limit, setLimit] = useState(30);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const depots = await fetchAllPaginated(Endpoints.masters.depots.list(), {});
-        setFleetDepots(depots.map((d) => d.name).filter(Boolean).sort());
-      } catch {
-        setFleetDepots([]);
-      }
-    })();
-  }, []);
+  // TanStack Queries
+  const { data: depotOptions = [] } = useAllDepotNames();
+  const { data: busData, isLoading: loadingBuses, error: busError, refetch: refetchBuses } = useBuses({
+    depot: filterDepot,
+    status: filterStatus,
+    search: filterSearch,
+    page,
+    limit,
+  });
+  const { data: allBusesForAssign = [] } = useAllBuses({ enabled: assignOpen });
+  const { data: tenders = [] } = useAllTenders({ enabled: assignOpen });
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setFetchError(null);
-    try {
-      const [b, allBuses, tenderRows] = await Promise.all([
-        API.get(Endpoints.masters.buses.list(), { params: buildQuery({ depot: filterDepot, status: filterStatus, search: filterSearch, page, limit: listMeta.limit }) }),
-        fetchAllPaginated(Endpoints.masters.buses.list(), {}),
-        fetchAllPaginated(Endpoints.masters.tenders.list(), {}),
-      ]);
-      const bu = unwrapListResponse(b.data);
-      setBuses(bu.items);
-      setListMeta({ total: bu.total, pages: bu.pages, limit: bu.limit });
-      setTenders(tenderRows);
-      setAllBusesForAssign(allBuses);
-    } catch (err) {
-      setFetchError(formatApiError(err.response?.data?.detail) || err.message || "Failed to load buses");
-      setBuses([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [filterDepot, filterStatus, filterSearch, page, listMeta.limit]);
-  useEffect(() => {
-    setPage(1);
-  }, [filterSearch]);
-  useEffect(() => {
-    load();
-  }, [load]);
+  const buses = busData?.items || [];
+  const listMeta = useMemo(() => ({
+    total: busData?.total || 0,
+    pages: busData?.pages || 1,
+    limit: busData?.limit || limit,
+  }), [busData, limit]);
+
+  // Mutations
+  const { createBus, updateBus, deleteBus, assignTender: assignTenderMutation } = useBusMutations();
 
   const handleSave = async () => {
-    try {
-      const payload = { ...form, capacity: Number(form.capacity) };
-      if (editing) { await API.put(Endpoints.masters.buses.update(editing), payload); toast.success("Bus updated"); }
-      else { await API.post(Endpoints.masters.buses.create(), payload); toast.success("Bus added"); }
-      setOpen(false); setEditing(null); setForm(emptyBus); load();
-    } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
+    const payload = {
+      ...form,
+      capacity: Number(form.capacity),
+      annual_assured_km_override:
+        form.annual_assured_km_override === "" || form.annual_assured_km_override == null ? 0 : Number(form.annual_assured_km_override),
+    };
+
+    if (editing) {
+      updateBus.mutate({ busId: editing, payload }, {
+        onSuccess: () => { setOpen(false); setEditing(null); setForm(emptyBus); }
+      });
+    } else {
+      createBus.mutate(payload, {
+        onSuccess: () => { setOpen(false); setEditing(null); setForm(emptyBus); }
+      });
+    }
   };
 
   const handleDelete = async (id) => {
     if (!window.confirm("Delete this bus?")) return;
-    try { await API.delete(Endpoints.masters.buses.remove(id)); toast.success("Deleted"); load(); }
-    catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
+    deleteBus.mutate(id);
   };
 
   const viewDetail = async (id) => {
-    try { const { data } = await API.get(Endpoints.masters.buses.get(id)); setDetail(data); setDetailOpen(true); }
-    catch {}
+    try {
+      const { data } = await API.get(Endpoints.masters.buses.get(id));
+      setDetail(data);
+      setDetailOpen(true);
+    } catch (err) {
+      console.error("Failed to load bus detail", err);
+    }
   };
 
   const handleAssign = async () => {
-    try {
-      await API.put(Endpoints.masters.buses.assignTender(assignBus, assignTender));
-      toast.success("Tender assigned"); setAssignOpen(false); load();
-    } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
+    assignTenderMutation.mutate({ busId: assignBus, tenderId: assignTender }, {
+      onSuccess: () => setAssignOpen(false)
+    });
   };
 
   const busTypeLabel = (t) => ({ "12m_ac": "12m AC", "9m_ac": "9m AC", "12m_non_ac": "12m Non-AC", "9m_non_ac": "9m Non-AC" }[t] || t);
@@ -118,7 +120,9 @@ export default function BusPage() {
           </Button>
         </div>
       </div>
-      <p className="page-desc mb-3 max-w-3xl">Fleet register by depot, tender, and vehicle type.</p>
+      <p className="page-desc mb-3 max-w-3xl">
+        Fleet register by depot, tender, and vehicle type. Assured km (yearly) comes from the tender’s Annual Assured Bus Kilometers, or from the bus override if set. “—” means neither is set. Base and actual electricity tariffs use billing business rules (default Rs. 5/kWh each); actual is meter-weighted for the current month when charging rows include tariff.
+      </p>
 
       <div className="flex flex-wrap gap-3 mb-4 items-end">
         <div className="space-y-1">
@@ -137,7 +141,7 @@ export default function BusPage() {
             <SelectTrigger className="w-44"><SelectValue placeholder="All Depots" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Depots</SelectItem>
-              {fleetDepots.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+              {depotOptions.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>
@@ -156,21 +160,26 @@ export default function BusPage() {
 
       <Card className="border-gray-200 shadow-sm">
         <CardContent className="p-0">
-          <Table className="text-[12px]">
+          <div className="w-full overflow-x-auto" data-testid="bus-fleet-table-scroll">
+            <Table className="text-[12px] min-w-[1100px]">
             <TableHeader><TableRow className="table-header">
               <TableHead>Bus ID</TableHead><TableHead>Type</TableHead><TableHead>Capacity</TableHead>
-              <TableHead>Tender</TableHead><TableHead>Depot</TableHead><TableHead>kWh/km</TableHead>
-              <TableHead className="text-right">Allowed Monthly Energy (kWh)</TableHead>
-              <TableHead className="text-right">Actual Monthly Energy (kWh)</TableHead>
-              <TableHead className="text-right">Variance (kWh)</TableHead>
+              <TableHead>Tender</TableHead><TableHead>Depot</TableHead>
+              <TableHead className="text-right whitespace-nowrap">Assured km (yr)</TableHead>
+              <TableHead className="whitespace-nowrap">kWh/km</TableHead>
+              <TableHead className="text-right whitespace-nowrap">Allowed Monthly Energy (kWh)</TableHead>
+              <TableHead className="text-right whitespace-nowrap">Actual Monthly Energy (kWh)</TableHead>
+              <TableHead className="text-right whitespace-nowrap">Base Electricity Tariff (Rs/kWh)</TableHead>
+              <TableHead className="text-right whitespace-nowrap">Actual Electricity Tariff (Rs/kWh)</TableHead>
+              <TableHead className="text-right whitespace-nowrap">Variance (kWh)</TableHead>
               <TableHead>Status</TableHead><TableHead className="text-right">Actions</TableHead>
             </TableRow></TableHeader>
             <TableBody>
               <TableLoadRows
-                colSpan={11}
-                loading={loading}
-                error={fetchError}
-                onRetry={load}
+                colSpan={14}
+                loading={loadingBuses}
+                error={busError}
+                onRetry={refetchBuses}
                 isEmpty={buses.length === 0}
                 emptyMessage="No buses found"
               >
@@ -181,18 +190,29 @@ export default function BusPage() {
                     <TableCell className="font-mono">{b.capacity}</TableCell>
                     <TableCell className="font-mono text-[12px]">{b.tender_id || "-"}</TableCell>
                     <TableCell>{b.depot || "-"}</TableCell>
+                    <TableCell className="text-right font-mono">
+                      {b.assured_km_yearly != null
+                        ? Number(b.assured_km_yearly).toLocaleString(undefined, { maximumFractionDigits: 0 })
+                        : "—"}
+                    </TableCell>
                     <TableCell className="font-mono">{b.kwh_per_km}</TableCell>
                     <TableCell className="text-right font-mono">
-                      {Number(b.allowed_monthly_energy || 0).toLocaleString(undefined, {
+                      {Number(b.base_energy_kwh ?? b.allowed_monthly_energy ?? 0).toLocaleString(undefined, {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2,
                       })}
                     </TableCell>
                     <TableCell className="text-right font-mono">
-                      {Number(b.actual_monthly_energy || 0).toLocaleString(undefined, {
+                      {Number(b.actual_energy_kwh ?? b.actual_monthly_energy ?? 0).toLocaleString(undefined, {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2,
                       })}
+                    </TableCell>
+                    <TableCell className="text-right font-mono">
+                      {formatTariffRsCell(b.base_electricity_tariff)}
+                    </TableCell>
+                    <TableCell className="text-right font-mono">
+                      {formatTariffRsCell(b.actual_electricity_tariff)}
                     </TableCell>
                     <TableCell className={`text-right font-mono ${Number(b.monthly_energy_variance || 0) > 0 ? "text-red-600" : "text-green-700"}`}>
                       {Number(b.monthly_energy_variance || 0).toLocaleString(undefined, {
@@ -208,7 +228,15 @@ export default function BusPage() {
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
                         <Button variant="ghost" size="icon" onClick={() => viewDetail(b.bus_id)} data-testid={`view-bus-${b.bus_id}`}><Eye size={14} /></Button>
-                        <Button variant="ghost" size="icon" onClick={() => { setForm(b); setEditing(b.bus_id); setOpen(true); }} data-testid={`edit-bus-${b.bus_id}`}><Pencil size={14} /></Button>
+                        <Button variant="ghost" size="icon" onClick={() => {
+                          setForm({
+                            ...b,
+                            capacity: String(b.capacity ?? ""),
+                            annual_assured_km_override: b.annual_assured_km_override > 0 ? String(b.annual_assured_km_override) : "",
+                          });
+                          setEditing(b.bus_id);
+                          setOpen(true);
+                        }} data-testid={`edit-bus-${b.bus_id}`}><Pencil size={14} /></Button>
                         <Button variant="ghost" size="icon" onClick={() => handleDelete(b.bus_id)} data-testid={`delete-bus-${b.bus_id}`}><Trash2 size={14} className="text-red-500" /></Button>
                       </div>
                     </TableCell>
@@ -217,13 +245,14 @@ export default function BusPage() {
               </TableLoadRows>
             </TableBody>
           </Table>
+          </div>
           <TablePaginationBar 
             page={page} 
             pages={listMeta.pages} 
             total={listMeta.total} 
             limit={listMeta.limit} 
             onPageChange={setPage} 
-            onLimitChange={(l) => setListMeta(prev => ({ ...prev, limit: l }))}
+            onLimitChange={setLimit}
           />
         </CardContent>
       </Card>
@@ -246,6 +275,18 @@ export default function BusPage() {
                 </Select>
               </div>
               <div className="space-y-2"><Label>Capacity</Label><Input type="number" value={form.capacity} onChange={(e) => setForm({ ...form, capacity: e.target.value })} data-testid="bus-capacity" /></div>
+            </div>
+            <div className="space-y-2">
+              <Label>Annual assured km override (per year, optional)</Label>
+              <Input
+                type="number"
+                min={0}
+                placeholder="Leave empty to use tender only"
+                value={form.annual_assured_km_override}
+                onChange={(e) => setForm({ ...form, annual_assured_km_override: e.target.value })}
+                data-testid="bus-assured-override"
+              />
+              <p className="text-[11px] text-gray-500">If set, this value is shown instead of the tender’s annual assured km (Article 22.3.1).</p>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2"><Label>Depot</Label><Input value={form.depot} onChange={(e) => setForm({ ...form, depot: e.target.value })} data-testid="bus-depot" /></div>
@@ -272,10 +313,28 @@ export default function BusPage() {
                 <div><span className="text-gray-500">Type:</span> {busTypeLabel(detail.bus_type)}</div>
                 <div><span className="text-gray-500">Capacity:</span> {detail.capacity}</div>
                 <div><span className="text-gray-500">Tender:</span> {detail.tender_id || "None"}</div>
+                <div><span className="text-gray-500">Assured km (yr):</span>{" "}
+                  {detail.assured_km_yearly != null
+                    ? Number(detail.assured_km_yearly).toLocaleString()
+                    : "—"}
+                  {Number(detail.annual_assured_km_override || 0) > 0 ? (
+                    <span className="text-gray-400 text-xs ml-1">(override)</span>
+                  ) : null}
+                </div>
                 <div><span className="text-gray-500">Depot:</span> {detail.depot || "None"}</div>
                 <div><span className="text-gray-500">kWh/km:</span> {detail.kwh_per_km}</div>
-                <div><span className="text-gray-500">Allowed monthly energy:</span> {Number(detail.allowed_monthly_energy || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kWh</div>
-                <div><span className="text-gray-500">Actual monthly energy:</span> {Number(detail.actual_monthly_energy || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kWh</div>
+                <div><span className="text-gray-500">Allowed monthly energy:</span> {Number(detail.base_energy_kwh ?? detail.allowed_monthly_energy ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kWh</div>
+                <div><span className="text-gray-500">Actual monthly energy:</span> {Number(detail.actual_energy_kwh ?? detail.actual_monthly_energy ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kWh</div>
+                <div><span className="text-gray-500">Base electricity tariff:</span>{" "}
+                  {detail.base_electricity_tariff != null && detail.base_electricity_tariff !== ""
+                    ? `Rs. ${Number(detail.base_electricity_tariff).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kWh`
+                    : "—"}
+                </div>
+                <div><span className="text-gray-500">Actual electricity tariff:</span>{" "}
+                  {detail.actual_electricity_tariff != null && detail.actual_electricity_tariff !== ""
+                    ? `Rs. ${Number(detail.actual_electricity_tariff).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kWh`
+                    : "—"}
+                </div>
                 <div><span className="text-gray-500">Monthly variance:</span> {Number(detail.monthly_energy_variance || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kWh</div>
                 <div><span className="text-gray-500">Status:</span> {detail.status}</div>
               </div>

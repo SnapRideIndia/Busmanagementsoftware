@@ -31,11 +31,17 @@ async def _ensure_indexes() -> None:
     await db.incidents.create_index("id", unique=True)
     await db.routes.create_index("route_id", unique=True)
     await db.stop_master.create_index("stop_id", unique=True)
+    await db.terminal_master.create_index("terminal_id", unique=True)
     await db.role_permissions.create_index("role_id", unique=True)
     await db.conductors.create_index("conductor_id", unique=True)
     await db.conductors.create_index("badge_no", unique=True)
     await db.trip_data.create_index([("bus_id", 1), ("date", 1)])
     await db.trip_data.create_index("trip_id")
+    await db.geofences.create_index("geofence_id", unique=True)
+    await db.geofences.create_index([("type", 1), ("entity_ref", 1)])
+    await db.geofence_events.create_index([("bus_id", 1), ("event_ts", -1)])
+    await db.geofence_events.create_index([("geofence_id", 1), ("event_ts", -1)])
+    await db.geofence_bus_state.create_index([("bus_id", 1), ("geofence_id", 1)], unique=True)
 
 
 @asynccontextmanager

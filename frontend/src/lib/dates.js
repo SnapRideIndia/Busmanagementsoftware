@@ -3,6 +3,10 @@
 export function formatDateIN(value) {
   if (value == null || value === "") return "—";
   const s = String(value).trim();
+  const range = s.match(/^(\d{4}-\d{2}-\d{2})\s+to\s+(\d{4}-\d{2}-\d{2})$/i);
+  if (range) {
+    return `${formatDateIN(range[1])} to ${formatDateIN(range[2])}`;
+  }
   const ymd = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (ymd) {
     const [, y, m, d] = ymd;
@@ -14,6 +18,7 @@ export function formatDateIN(value) {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
+      timeZone: "Asia/Kolkata",
     });
   }
   return s;
@@ -31,6 +36,7 @@ export function formatDateTimeIN(value) {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
+    timeZone: "Asia/Kolkata",
   });
 }
 
@@ -46,6 +52,7 @@ export function formatDateTimeINAmPm(value) {
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
+    timeZone: "Asia/Kolkata",
   });
 }
 

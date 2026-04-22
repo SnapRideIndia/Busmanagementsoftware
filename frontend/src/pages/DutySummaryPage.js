@@ -1,21 +1,30 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import API, { buildQuery, buildDutiesSummaryExportUrl, unwrapListResponse, fetchAllPaginated, messageFromAxiosError } from "../lib/api";
+import { useDuties, useDutySummaryMetrics } from "@/features/duty/api/useDuties";
+import { useAllBuses } from "@/features/buses/api/useBuses";
+import { useAllDrivers } from "@/features/drivers/api/useDrivers";
+import API, { buildDutiesSummaryExportUrl, messageFromAxiosError } from "../lib/api";
 import { Endpoints } from "../lib/endpoints";
 import AsyncPanel from "../components/AsyncPanel";
-import DutyTripsReadOnlyTable from "../components/DutyTripsReadOnlyTable";
+import DutyTripsReadOnlyTable from "@/features/duty/components/DutyTripsReadOnlyTable";
 import TablePaginationBar from "../components/TablePaginationBar";
 import ReportDownloads from "../components/ReportDownloads";
 import { formatDateIN } from "../lib/dates";
+import { isDutyTripLeg, dutyListStatusLabel, dutyListStatusBadgeClass } from "@/features/duty/lib/dutyTrips";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { ArrowLeft, Bus, CalendarDays, Hourglass, MessageSquare, Phone, Route, User } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Bus, CalendarDays, FilterX, Hourglass, MessageSquare, Phone, Route, User } from "lucide-react";
 
-const today = new Date().toISOString().slice(0, 10);
 const PAGE_LIMIT = 20;
+
+function normalizeDutyLoad(raw) {
+  const v = String(raw || "all").toLowerCase();
+  if (v === "single" || v === "double") return v;
+  return "all";
+}
 
 function StatTile({ label, value, icon: Icon, hint }) {
   return (
@@ -38,31 +47,57 @@ function StatTile({ label, value, icon: Icon, hint }) {
 
 export default function DutySummaryPage() {
   const [searchParams] = useSearchParams();
-  const [filterDate, setFilterDate] = useState(searchParams.get("date") || today);
   const [filterDepot, setFilterDepot] = useState(searchParams.get("depot") || "");
   const [filterBusId, setFilterBusId] = useState(searchParams.get("bus_id") || "");
+  const [filterDriverLicense, setFilterDriverLicense] = useState(searchParams.get("driver_license") || "");
+  const [filterDutyLoad, setFilterDutyLoad] = useState(() => normalizeDutyLoad(searchParams.get("duty_load")));
   const [filterSearchQ, setFilterSearchQ] = useState(searchParams.get("q") || "");
   const [page, setPage] = useState(1);
-  const [buses, setBuses] = useState([]);
-  const [duties, setDuties] = useState([]);
-  const [listMeta, setListMeta] = useState({ total: 0, pages: 1, limit: PAGE_LIMIT });
-  const [metrics, setMetrics] = useState({
-    duty_count: 0,
-    trip_legs: 0,
-    sms_sent: 0,
-    sms_pending: 0,
-  });
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState(null);
+
+  const { data: buses = [] } = useAllBuses();
+  const { data: drivers = [] } = useAllDrivers();
+
+  const filters = {
+    depot: filterDepot,
+    bus_id: filterBusId,
+    driver_license: filterDriverLicense,
+    q: filterSearchQ.trim(),
+    page,
+    limit: PAGE_LIMIT,
+    ...(filterDutyLoad !== "all" ? { duty_load: filterDutyLoad } : {}),
+  };
+
+  const { data: dutiesData, isLoading: listLoading, error: listError, refetch: loadList } = useDuties(filters);
+  const { data: metricsData, isLoading: metricsLoading, error: metricsError, refetch: loadMetrics } = useDutySummaryMetrics(filters);
+
+  const duties = dutiesData?.items || [];
+  const listMeta = {
+    total: dutiesData?.total || 0,
+    pages: dutiesData?.pages || 1,
+    limit: dutiesData?.limit || PAGE_LIMIT,
+  };
+
+  const metrics = {
+    duty_count: Number(metricsData?.duty_count) || 0,
+    trip_legs: Number(metricsData?.trip_legs) || 0,
+    sms_sent: Number(metricsData?.sms_sent) || 0,
+    sms_pending: Number(metricsData?.sms_pending) || 0,
+    double_duty_count: Number(metricsData?.double_duty_count) || 0,
+    max_duty_hours_rule: Number(metricsData?.max_duty_hours_rule) || 10,
+  };
+
+  const loading = listLoading || metricsLoading;
+  const fetchError = listError || metricsError ? messageFromAxiosError(listError || metricsError, "Failed to load duty data") : null;
 
   const exportFilters = useMemo(
     () => ({
-      date: filterDate,
       depot: filterDepot,
       bus_id: filterBusId,
+      driver_license: filterDriverLicense,
       q: filterSearchQ.trim(),
+      ...(filterDutyLoad !== "all" ? { duty_load: filterDutyLoad } : {}),
     }),
-    [filterDate, filterDepot, filterBusId, filterSearchQ]
+    [filterDepot, filterBusId, filterDriverLicense, filterDutyLoad, filterSearchQ]
   );
 
   const pdfHref = useMemo(() => buildDutiesSummaryExportUrl("pdf", exportFilters), [exportFilters]);
@@ -70,74 +105,14 @@ export default function DutySummaryPage() {
 
   const listQueryString = () => {
     const q = new URLSearchParams();
-    q.set("date", filterDate || today);
     if (filterDepot) q.set("depot", filterDepot);
     if (filterBusId) q.set("bus_id", filterBusId);
+    if (filterDriverLicense) q.set("driver_license", filterDriverLicense);
+    if (filterDutyLoad !== "all") q.set("duty_load", filterDutyLoad);
     if (filterSearchQ.trim()) q.set("q", filterSearchQ.trim());
     return q.toString();
   };
 
-  useEffect(() => {
-    setPage(1);
-  }, [filterDate, filterDepot, filterBusId, filterSearchQ]);
-
-  const loadMetrics = useCallback(async () => {
-    try {
-      const { data } = await API.get(Endpoints.operations.duties.summaryMetrics(), {
-        params: buildQuery({
-          date: filterDate,
-          depot: filterDepot,
-          bus_id: filterBusId,
-          q: filterSearchQ.trim(),
-        }),
-      });
-      setMetrics({
-        duty_count: Number(data?.duty_count) || 0,
-        trip_legs: Number(data?.trip_legs) || 0,
-        sms_sent: Number(data?.sms_sent) || 0,
-        sms_pending: Number(data?.sms_pending) || 0,
-      });
-    } catch {
-      setMetrics({ duty_count: 0, trip_legs: 0, sms_sent: 0, sms_pending: 0 });
-    }
-  }, [filterDate, filterDepot, filterBusId, filterSearchQ]);
-
-  const loadList = useCallback(async () => {
-    setLoading(true);
-    setFetchError(null);
-    try {
-      const params = buildQuery({
-        date: filterDate,
-        depot: filterDepot,
-        bus_id: filterBusId,
-        q: filterSearchQ.trim(),
-        page,
-        limit: PAGE_LIMIT,
-      });
-      const [dRes, busItems] = await Promise.all([
-        API.get(Endpoints.operations.duties.list(), { params }),
-        fetchAllPaginated(Endpoints.masters.buses.list(), {}),
-      ]);
-      const du = unwrapListResponse(dRes.data);
-      setDuties(du.items);
-      setListMeta({ total: du.total, pages: du.pages, limit: du.limit });
-      setBuses(busItems);
-    } catch (err) {
-      setFetchError(messageFromAxiosError(err, "Failed to load duties"));
-      setDuties([]);
-      setListMeta({ total: 0, pages: 1, limit: PAGE_LIMIT });
-    } finally {
-      setLoading(false);
-    }
-  }, [filterDate, filterDepot, filterBusId, filterSearchQ, page]);
-
-  useEffect(() => {
-    loadMetrics();
-  }, [loadMetrics]);
-
-  useEffect(() => {
-    loadList();
-  }, [loadList]);
 
   const refreshAll = () => {
     loadMetrics();
@@ -145,6 +120,22 @@ export default function DutySummaryPage() {
   };
 
   const exportDisabled = !!fetchError || loading;
+
+  const filtersAreDefault =
+    !filterDepot &&
+    !filterBusId &&
+    !filterDriverLicense &&
+    filterDutyLoad === "all" &&
+    !filterSearchQ.trim();
+
+  const clearFilters = () => {
+    setFilterDepot("");
+    setFilterBusId("");
+    setFilterDriverLicense("");
+    setFilterDutyLoad("all");
+    setFilterSearchQ("");
+    setPage(1);
+  };
 
   return (
     <div className="w-full max-w-none" data-testid="duty-summary-page">
@@ -172,10 +163,6 @@ export default function DutySummaryPage() {
         <CardContent className="px-4 sm:px-5 pb-4 pt-0">
           <div className="flex flex-wrap gap-3 items-end">
             <div className="space-y-1">
-              <label className="text-xs font-medium uppercase text-gray-500">Date</label>
-              <Input type="date" value={filterDate} onChange={(e) => setFilterDate(e.target.value)} className="w-44 rounded-lg" />
-            </div>
-            <div className="space-y-1">
               <label className="text-xs font-medium uppercase text-gray-500">Depot</label>
               <Select value={filterDepot || "all"} onValueChange={(v) => { setFilterDepot(v === "all" ? "" : v); setFilterBusId(""); }}>
                 <SelectTrigger className="w-44 rounded-lg"><SelectValue placeholder="All Depots" /></SelectTrigger>
@@ -199,10 +186,50 @@ export default function DutySummaryPage() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-1 min-w-[200px] max-w-[260px]">
+              <label className="text-xs font-medium uppercase text-gray-500">Driver</label>
+              <Select value={filterDriverLicense || "all"} onValueChange={(v) => setFilterDriverLicense(v === "all" ? "" : v)}>
+                <SelectTrigger className="w-full rounded-lg"><SelectValue placeholder="All drivers" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All drivers</SelectItem>
+                  {drivers
+                    .filter((dr) => dr.license_number)
+                    .map((dr) => (
+                      <SelectItem key={dr.license_number} value={dr.license_number}>
+                        {(dr.name || dr.license_number) + (dr.license_number ? ` · ${dr.license_number}` : "")}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1 w-44">
+              <label className="text-xs font-medium uppercase text-gray-500">Duty load</label>
+              <Select value={filterDutyLoad} onValueChange={(v) => setFilterDutyLoad(normalizeDutyLoad(v))}>
+                <SelectTrigger className="rounded-lg">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="single">Single duty</SelectItem>
+                  <SelectItem value="double">Double duty</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <div className="space-y-1 flex-1 min-w-[200px] max-w-md">
               <label className="text-xs font-medium uppercase text-gray-500">Search</label>
               <Input placeholder="Driver, route, bus, trip ID…" value={filterSearchQ} onChange={(e) => setFilterSearchQ(e.target.value)} className="rounded-lg" />
             </div>
+            <Button
+              type="button"
+              onClick={clearFilters}
+              variant="outline"
+              className="rounded-lg"
+              disabled={filtersAreDefault}
+              title={filtersAreDefault ? "Filters are already at defaults" : "Reset date, depot, bus, driver, duty load, and search"}
+            >
+              <FilterX size={14} className="mr-1.5" />
+              Clear filters
+            </Button>
             <Button type="button" onClick={refreshAll} variant="outline" className="rounded-lg">
               Refresh
             </Button>
@@ -227,7 +254,7 @@ export default function DutySummaryPage() {
           <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
             <div>
               <h2 className="text-sm font-semibold text-gray-800">
-                {formatDateIN(filterDate)}
+                Standalone duties
               </h2>
               <p className="text-xs text-gray-600 mt-0.5">
                 This page: {duties.length} of {listMeta.total} duties
@@ -235,16 +262,22 @@ export default function DutySummaryPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
             <StatTile label="Duties" value={metrics.duty_count} icon={CalendarDays} hint="Same filters; counts every page" />
             <StatTile label="Trip legs" value={metrics.trip_legs} icon={Route} hint="All trips on those duties" />
+            <StatTile
+              label="Double duty (hours)"
+              value={metrics.double_duty_count}
+              icon={AlertTriangle}
+              hint={`Scheduled or actual span over ${metrics.max_duty_hours_rule ?? 10} h (business rule max_duty_hours)`}
+            />
             <StatTile label="SMS sent" value={metrics.sms_sent} icon={MessageSquare} hint="Duty SMS already sent" />
             <StatTile label="SMS pending" value={metrics.sms_pending} icon={Hourglass} hint="Duty SMS not sent" />
           </div>
 
           <div className="space-y-4">
             {duties.map((d) => {
-              const tripCount = d.trips?.length || 0;
+              const tripCount = (d.trips || []).filter(isDutyTripLeg).length;
               return (
                 <Card
                   key={d.id}
@@ -256,8 +289,8 @@ export default function DutySummaryPage() {
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
                         <span className="font-mono text-xs text-gray-500">{d.id}</span>
                         <span className="text-xs text-gray-600">{formatDateIN(d.date)}</span>
-                        <Badge className={d.status === "assigned" ? "bg-blue-100 text-blue-700 hover:bg-blue-100" : "bg-green-100 text-green-700 hover:bg-green-100"}>
-                          {d.status}
+                        <Badge className={dutyListStatusBadgeClass(d)}>
+                          {dutyListStatusLabel(d)}
                         </Badge>
                         {d.sms_sent ? (
                           <Badge className="bg-green-100 text-green-700 hover:bg-green-100">
@@ -314,6 +347,10 @@ export default function DutySummaryPage() {
                     <div className="px-4 py-4 bg-gray-50/90">
                       <p className="text-xs text-gray-600 mb-2">
                         Punctuality (duty): Sch {d.punctuality_scheduled_departure || "—"} - {d.punctuality_scheduled_arrival || "—"} | Act {d.punctuality_actual_departure || "—"} - {d.punctuality_actual_arrival || "—"}
+                        {" "}
+                        · Sch. span {d.scheduled_duty_hours != null ? `${Number(d.scheduled_duty_hours).toFixed(2)} h` : "—"} · Act. span{" "}
+                        {d.actual_duty_hours != null ? `${Number(d.actual_duty_hours).toFixed(2)} h` : "—"}
+                        {d.max_duty_hours_rule != null ? ` · Max ${Number(d.max_duty_hours_rule).toFixed(1)} h` : ""}
                       </p>
                       <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-2">Trip timetable</p>
                       <DutyTripsReadOnlyTable trips={d.trips} />

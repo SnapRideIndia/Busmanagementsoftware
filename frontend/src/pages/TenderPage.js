@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import API, { formatApiError, buildQuery, unwrapListResponse } from "../lib/api";
+import { useTenders, useTenderMutations } from "../features/tenders/api/useTenders";
+import API, { formatApiError } from "../lib/api";
 import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import TableLoadRows from "../components/TableLoadRows";
@@ -14,76 +15,58 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
-const empty = { tender_id: "", concessionaire: "", pk_rate: "", energy_rate: "", subsidy_rate: "0", subsidy_type: "per_km", description: "", status: "active" };
+const empty = { tender_id: "", concessionaire: "", pk_rate: "", energy_rate: "", description: "", status: "active", annual_assured_bus_km: "" };
 
 export default function TenderPage() {
-  const [tenders, setTenders] = useState([]);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
-  const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 30 });
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(empty);
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setFetchError(null);
-    try {
-      const { data } = await API.get(Endpoints.masters.tenders.list(), {
-        params: buildQuery({
-          page,
-          limit: 30,
-          search,
-          status: filterStatus,
-        }),
-      });
-      const u = unwrapListResponse(data);
-      setTenders(u.items);
-      setMeta({ total: u.total, pages: u.pages, limit: u.limit });
-    } catch (err) {
-      setFetchError(formatApiError(err.response?.data?.detail) || err.message || "Failed to load tenders");
-      setTenders([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [page, search, filterStatus]);
-  useEffect(() => {
-    load();
-  }, [load]);
+  const { data, isLoading: loading, error: fetchError, refetch: load } = useTenders({
+    page,
+    limit: 30,
+    search,
+    status: filterStatus,
+  });
+  const tenders = data?.items || [];
+  const meta = { total: data?.total || 0, pages: data?.pages || 1, limit: data?.limit || 30 };
+
+  const { createTender, updateTender, deleteTender, isSaving } = useTenderMutations();
+
   useEffect(() => {
     setPage(1);
   }, [search, filterStatus]);
 
   const handleSave = async () => {
     try {
-      const payload = { ...form, pk_rate: Number(form.pk_rate), energy_rate: Number(form.energy_rate), subsidy_rate: Number(form.subsidy_rate) };
+      const payload = {
+        ...form,
+        pk_rate: Number(form.pk_rate),
+        energy_rate: Number(form.energy_rate),
+        annual_assured_bus_km: form.annual_assured_bus_km === "" || form.annual_assured_bus_km == null ? 0 : Number(form.annual_assured_bus_km),
+      };
       if (editing) {
-        await API.put(Endpoints.masters.tenders.update(editing), payload);
-        toast.success("Tender updated");
+        await updateTender({ id: editing, payload });
       } else {
-        await API.post(Endpoints.masters.tenders.create(), payload);
-        toast.success("Tender added");
+        await createTender(payload);
       }
       setOpen(false);
       setEditing(null);
       setForm(empty);
-      load();
     } catch (err) {
-      toast.error(formatApiError(err.response?.data?.detail));
+      // Error handled in hook
     }
   };
 
   const handleDelete = async (id) => {
     if (!window.confirm("Delete this tender?")) return;
     try {
-      await API.delete(Endpoints.masters.tenders.remove(id));
-      toast.success("Deleted");
-      load();
+      await deleteTender(id);
     } catch (err) {
-      toast.error(formatApiError(err.response?.data?.detail));
+      // Error handled in hook
     }
   };
 
@@ -93,10 +76,9 @@ export default function TenderPage() {
       concessionaire: t.concessionaire || "",
       pk_rate: t.pk_rate,
       energy_rate: t.energy_rate,
-      subsidy_rate: t.subsidy_rate || 0,
-      subsidy_type: t.subsidy_type || "per_km",
       description: t.description || "",
       status: t.status,
+      annual_assured_bus_km: t.annual_assured_bus_km != null && t.annual_assured_bus_km !== "" ? String(t.annual_assured_bus_km) : "",
     });
     setEditing(t.tender_id);
     setOpen(true);
@@ -157,9 +139,9 @@ export default function TenderPage() {
                 <TableHead>Tender ID</TableHead>
                 <TableHead>Description</TableHead>
                 <TableHead>Concessionaire</TableHead>
+                <TableHead className="text-right">Assured km / bus / yr</TableHead>
                 <TableHead className="text-right">PK Rate (Rs/km)</TableHead>
                 <TableHead className="text-right">Energy Rate</TableHead>
-                <TableHead className="text-right">Subsidy</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
@@ -171,11 +153,9 @@ export default function TenderPage() {
                     <TableCell className="font-mono text-[12px] font-medium">{t.tender_id}</TableCell>
                     <TableCell className="text-[12px]">{t.description}</TableCell>
                     <TableCell className="text-[12px]">{t.concessionaire || "—"}</TableCell>
+                    <TableCell className="text-right font-mono">{Number(t.annual_assured_bus_km || 0).toLocaleString()}</TableCell>
                     <TableCell className="text-right font-mono">{t.pk_rate}</TableCell>
                     <TableCell className="text-right font-mono">{t.energy_rate}</TableCell>
-                    <TableCell className="text-right font-mono">
-                      {t.subsidy_rate} ({t.subsidy_type})
-                    </TableCell>
                     <TableCell>
                       <Badge variant={t.status === "active" ? "default" : "secondary"} className={t.status === "active" ? "bg-green-100 text-green-700 hover:bg-green-100" : ""}>
                         {t.status}
@@ -214,6 +194,18 @@ export default function TenderPage() {
               <Label>Concessionaire</Label>
               <Input value={form.concessionaire} onChange={(e) => setForm({ ...form, concessionaire: e.target.value })} data-testid="tender-concessionaire" />
             </div>
+            <div className="space-y-2">
+              <Label>Annual assured bus km (per bus / year)</Label>
+              <Input
+                type="number"
+                min={0}
+                value={form.annual_assured_bus_km}
+                onChange={(e) => setForm({ ...form, annual_assured_bus_km: e.target.value })}
+                placeholder="e.g. 72000 (Art. 22.3.1)"
+                data-testid="tender-annual-assured-km"
+              />
+              <p className="text-[11px] text-gray-500">Minimum average scheduled km per bus per contract year for this lot (concession).</p>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>PK Rate (Rs/km)</Label>
@@ -222,24 +214,6 @@ export default function TenderPage() {
               <div className="space-y-2">
                 <Label>Energy Rate (Rs/kWh)</Label>
                 <Input type="number" value={form.energy_rate} onChange={(e) => setForm({ ...form, energy_rate: e.target.value })} data-testid="tender-energy-rate" />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>Subsidy Rate</Label>
-                <Input type="number" value={form.subsidy_rate} onChange={(e) => setForm({ ...form, subsidy_rate: e.target.value })} data-testid="tender-subsidy-rate" />
-              </div>
-              <div className="space-y-2">
-                <Label>Subsidy Type</Label>
-                <Select value={form.subsidy_type} onValueChange={(v) => setForm({ ...form, subsidy_type: v })}>
-                  <SelectTrigger data-testid="tender-subsidy-type">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="per_km">Per KM</SelectItem>
-                    <SelectItem value="per_bus">Per Bus</SelectItem>
-                  </SelectContent>
-                </Select>
               </div>
             </div>
             <div className="space-y-2">
@@ -258,8 +232,8 @@ export default function TenderPage() {
                 </SelectContent>
               </Select>
             </div>
-            <Button onClick={handleSave} className="w-full bg-[#C8102E] hover:bg-[#A50E25]" data-testid="tender-save-btn">
-              {editing ? "Update" : "Save"}
+            <Button onClick={handleSave} disabled={isSaving} className="w-full bg-[#C8102E] hover:bg-[#A50E25]" data-testid="tender-save-btn">
+              {isSaving ? "Saving..." : (editing ? "Update" : "Save")}
             </Button>
           </div>
         </DialogContent>

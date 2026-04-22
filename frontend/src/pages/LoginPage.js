@@ -11,13 +11,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/
 import { Bus, Eye, EyeOff } from "lucide-react";
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, loginLoading } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
   const [forgotOpen, setForgotOpen] = useState(false);
   const [forgotEmail, setForgotEmail] = useState("");
   const [forgotMsg, setForgotMsg] = useState("");
@@ -26,14 +25,11 @@ export default function LoginPage() {
     e.preventDefault();
     setError("");
     if (!email || !password) { setError("All fields are required"); return; }
-    setLoading(true);
     try {
       await login(email, password);
       navigate("/dashboard");
     } catch (err) {
       setError(formatApiError(err.response?.data?.detail) || "Login failed");
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -124,11 +120,11 @@ export default function LoginPage() {
                 </div>
               </div>
               <Button
-                type="submit" disabled={loading}
+                type="submit" disabled={loginLoading}
                 data-testid="login-submit-btn"
                 className="w-full bg-[#C8102E] hover:bg-[#A50E25] rounded-lg"
               >
-                {loading ? "Signing in..." : "Sign in"}
+                {loginLoading ? "Signing in..." : "Sign in"}
               </Button>
               <button
                 type="button" onClick={() => setForgotOpen(true)}

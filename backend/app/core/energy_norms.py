@@ -10,7 +10,7 @@ KWH_PER_KM_BY_BUS_TYPE: dict[str, float] = {
     "12m_ac": 1.3,
     "9m_ac": 1.0,
     "12m_non_ac": 1.1,
-    "9m_non_ac": 0.8,
+    "9m_non_ac": 0.85,
 }
 
 DEFAULT_KWH_PER_KM = 1.0

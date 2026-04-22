@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import API, { buildQuery, formatApiError } from "../lib/api";
+import { useDashboardStats } from "../features/dashboard/api/useDashboardStats";
+import API, { formatApiError } from "../lib/api";
 import { Endpoints } from "../lib/endpoints";
 import { formatChartAxisDate, rechartsDateLabelFormatter } from "../lib/dates";
 import AsyncPanel from "../components/AsyncPanel";
@@ -52,55 +53,17 @@ function StatCard({ icon: Icon, label, value, sub, trend, color = "#C8102E", onC
 
 export default function DashboardPage() {
   const navigate = useNavigate();
-  const [data, setData] = useState(null);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [depot, setDepot] = useState("");
   const [busId, setBusId] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
 
-  const fetchDashboard = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = buildQuery({
-        date_from: dateFrom,
-        date_to: dateTo,
-        depot,
-        bus_id: busId,
-      });
-      const [{ data: d }, { data: km }] = await Promise.all([
-        API.get(Endpoints.dashboard.root(), { params }),
-        API.get(Endpoints.km.summary(), { params }),
-      ]);
-      const kmTotals = km?.totals || {};
-      const kmToday = km?.today || {};
-      const kmDaySeries = Array.isArray(km?.series?.day_wise) ? km.series.day_wise : [];
-      const merged = {
-        ...d,
-        total_km: kmTotals.actual_km ?? d.total_km,
-        scheduled_km: kmTotals.scheduled_km ?? d.scheduled_km,
-        availability_pct:
-          kmTotals.scheduled_km > 0
-            ? Math.round((Number(kmTotals.actual_km || 0) / Number(kmTotals.scheduled_km || 0)) * 1000) / 10
-            : d.availability_pct,
-        total_km_today: kmToday.actual_km ?? d.total_km_today,
-        scheduled_km_today: kmToday.scheduled_km ?? d.scheduled_km_today,
-        km_chart: kmDaySeries.length ? kmDaySeries : d.km_chart,
-      };
-      setData(merged);
-    } catch (err) {
-      setError(formatApiError(err.response?.data?.detail) || err.message || "Could not load dashboard");
-      setData(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [dateFrom, dateTo, depot, busId]);
-
-  useEffect(() => {
-    fetchDashboard();
-  }, [fetchDashboard]);
+  const { data, isLoading: loading, error, refetch: fetchDashboard } = useDashboardStats({
+    date_from: dateFrom,
+    date_to: dateTo,
+    depot,
+    bus_id: busId,
+  });
 
   const primaryRow = data
     ? [
@@ -297,7 +260,7 @@ export default function DashboardPage() {
                 className="h-full min-w-0"
                 data-testid={`kpi-${kpi.label
                   .toLowerCase()
-                  .replace(/[\s()\/]/g, "-")
+                  .replace(/[\s()/]/g, "-")
                   .replace(/-+/g, "-")
                   .replace(/-$/, "")}`}
               >
@@ -322,7 +285,7 @@ export default function DashboardPage() {
                 className="h-full min-w-0"
                 data-testid={`kpi-${kpi.label
                   .toLowerCase()
-                  .replace(/[\s()\/]/g, "-")
+                  .replace(/[\s()/]/g, "-")
                   .replace(/-+/g, "-")
                   .replace(/-$/, "")}`}
               >

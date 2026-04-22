@@ -1,42 +1,32 @@
-import { createContext, useContext, useState, useEffect, useCallback } from "react";
-import API from "../lib/api";
-import { Endpoints } from "../lib/endpoints";
+import { createContext, useContext } from "react";
+import { useSession, useLogin, useLogout } from "../features/auth/api/useAuth";
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  const checkAuth = useCallback(async () => {
-    try {
-      const { data } = await API.get(Endpoints.auth.me());
-      setUser(data);
-    } catch {
-      setUser(false);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    checkAuth();
-  }, [checkAuth]);
+  const { data: user, isLoading: loading, refetch: checkAuth } = useSession();
+  const loginMutation = useLogin();
+  const logoutMutation = useLogout();
 
   const login = async (email, password) => {
-    await API.post(Endpoints.auth.login(), { email, password });
-    const { data } = await API.get(Endpoints.auth.me());
-    setUser(data);
-    return data;
+    return loginMutation.mutateAsync({ email, password });
   };
 
   const logout = async () => {
-    await API.post(Endpoints.auth.logout());
-    setUser(false);
+    return logoutMutation.mutateAsync();
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, checkAuth }}>
+    <AuthContext.Provider value={{
+      user,
+      loading: loading && user === undefined, // Consider loading only if we don't have a cached session yet
+      userLoaded: !loading,
+      login,
+      logout,
+      checkAuth,
+      loginLoading: loginMutation.isPending,
+      logoutLoading: logoutMutation.isPending
+    }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,14 +1,86 @@
-"""GCC-style KPI damage / incentive calculator (prompt §18).
-
-All 5 categories now compute from REAL data — no random fallbacks.
-"""
+"""GCC-style KPI damage / incentive calculator (Article 20 aligned)."""
 
 from __future__ import annotations
 
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from app.domain.incident_types import is_breakdown_for_reliability, safety_kpi_counts
-from app.services.punctuality import punctuality_percentages_from_trips
+from app.services.punctuality import parse_hhmm_to_minutes, punctuality_percentages_from_trips
+
+
+def _as_float(v: Any, default: float = 0.0) -> float:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _parse_ymd(s: str | None) -> date | None:
+    raw = str(s or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.strptime(raw[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _first_30_day_active(rules: dict[str, str], *, period_start: str = "", period_end: str = "") -> bool:
+    # Explicit toggle wins when provided.
+    force = str(rules.get("first_30_day_active", "")).strip().lower()
+    if force in {"1", "true", "yes", "on"}:
+        return True
+    if force in {"0", "false", "no", "off"}:
+        return False
+
+    lot_cod = _parse_ymd(rules.get("lot_cod_date", ""))
+    if lot_cod is None:
+        return False
+    p_start = _parse_ymd(period_start)
+    p_end = _parse_ymd(period_end)
+    if p_start is None and p_end is None:
+        return False
+    window_end = lot_cod + timedelta(days=29)
+    check_start = p_start or p_end
+    check_end = p_end or p_start
+    return bool(check_start and check_end and check_start <= window_end and check_end >= lot_cod)
+
+
+def _apply_relax_to_target(target: float, relax_pct: float, *, lower_is_better: bool) -> float:
+    if relax_pct <= 0:
+        return target
+    factor = relax_pct / 100.0
+    if lower_is_better:
+        return target * (1.0 + factor)
+    return target * (1.0 - factor)
+
+
+def _trip_speed_kmh(trip: dict[str, Any]) -> float | None:
+    direct = _as_float(trip.get("avg_speed"), -1.0)
+    if direct > 0:
+        return direct
+    km = _as_float(trip.get("actual_km"), 0.0)
+    st = parse_hhmm_to_minutes(trip.get("actual_start_time"))
+    et = parse_hhmm_to_minutes(trip.get("actual_end_time"))
+    if km <= 0 or st is None or et is None:
+        return None
+    duration_min = et - st
+    if duration_min <= 0:
+        duration_min += 24 * 60
+    if duration_min <= 0:
+        return None
+    return km / (duration_min / 60.0)
+
+
+def _is_fire_serious_incident(incident: dict[str, Any]) -> bool:
+    it = str(incident.get("incident_type", "") or "").strip().upper()
+    if it == "FIRE_ON_BUS":
+        return True
+    if any(str(i.get("infraction_code", "")).strip().upper() == "F01" for i in (incident.get("infractions") or [])):
+        return True
+    d = str(incident.get("description", "") or "").lower()
+    return "fire" in d or "thermal" in d
 
 
 def compute_kpi_damages(
@@ -19,65 +91,92 @@ def compute_kpi_damages(
     bus_km: float,
     rules: dict[str, str],
     duty_assignments: list[dict[str, Any]] | None = None,
+    *,
+    period_start: str = "",
+    period_end: str = "",
 ) -> dict[str, Any]:
-    """Return KPI category breakdown, raw/capped damages and incentives.
-
-    All values computed from real operational data. No random numbers.
-    """
+    """Return KPI category breakdown, raw/capped damages and incentives."""
     results: dict[str, Any] = {}
 
-    # ────────────────────────────────────────────────────
-    # 1. RELIABILITY — BF = (breakdowns × 10,000) / bus_km
-    # ────────────────────────────────────────────────────
+    relax_pct = _as_float(rules.get("first_30_day_kpi_relaxation_pct", "0"), 0.0)
+    first30 = _first_30_day_active(rules, period_start=period_start, period_end=period_end)
+
+    # 1) Reliability
     breakdowns = sum(1 for i in incidents_list if is_breakdown_for_reliability(i))
-    bf = (breakdowns * 10000) / bus_km if bus_km > 0 else 0
-    bf_target = float(rules.get("reliability_target", "0.5"))
+    bf = (breakdowns * 10000) / bus_km if bus_km > 0 else 0.0
+    bf_target_base = _as_float(rules.get("reliability_target", "0.5"), 0.5)
+    bf_target = _apply_relax_to_target(bf_target_base, relax_pct, lower_is_better=True) if first30 else bf_target_base
     rel_dam = 0.0
     rel_inc = 0.0
     if bf > bf_target:
-        steps = int(round((bf - bf_target) / 0.1))
+        steps = max(0, int((bf - bf_target) / 0.1))
         rel_dam = steps * 0.001 * monthly_fee
     elif bf < bf_target:
-        steps = int(round((bf_target - bf) / 0.1))
+        steps = max(0, int((bf_target - bf) / 0.1))
         rel_inc = steps * 0.0005 * monthly_fee
     results["reliability"] = {
         "bf": round(bf, 4),
-        "target": bf_target,
+        "target": round(bf_target, 4),
+        "target_base": round(bf_target_base, 4),
         "breakdowns": breakdowns,
         "bus_km": round(bus_km, 2),
         "damages": round(rel_dam, 2),
         "incentive": round(rel_inc, 2),
     }
 
-    # ────────────────────────────────────────────────────
-    # 2. AVAILABILITY — % of buses that actually operated
-    #    in the period vs total buses in scope.
-    #    Computed from trip_data: if a bus has at least 1 trip
-    #    record, it was "ready/available".
-    # ────────────────────────────────────────────────────
+    # 2) Availability (shift-turnout semantics proxy)
     total_buses_in_scope = len(buses)
-    # Unique buses that have trip records in the period
-    buses_with_trips = set()
-    for t in trips:
-        bid = str(t.get("bus_id", "") or "").strip()
-        if bid:
-            buses_with_trips.add(bid)
-    buses_operated = len(buses_with_trips)
+    by_duty_date = {
+        (str(t.get("duty_id", "") or ""), str(t.get("date", "") or "")): t
+        for t in trips
+        if (t.get("duty_id") or t.get("date"))
+    }
+    duties = duty_assignments or []
+    expected_shift_turnouts = 0
+    available_shift_turnouts = 0
+    excluded_shift_turnouts = 0
+    for drow in duties:
+        ddate = str(drow.get("date", "") or "")
+        duty_id = str(drow.get("duty_id", "") or "")
+        bid = str(drow.get("bus_id", "") or "")
+        if not ddate:
+            continue
+        if bid and buses and bid not in {str(b.get("bus_id", "")) for b in buses}:
+            continue
+        expected_shift_turnouts += 1
+        attribution = str(drow.get("attribution_context", "") or "").lower()
+        # 17.12-like non-attributable exclusions (treated available).
+        if attribution in {"external", "force_majeure", "authority", "riot", "natural_disaster", "vandalism", "traffic_jam"}:
+            available_shift_turnouts += 1
+            excluded_shift_turnouts += 1
+            continue
+        trip = by_duty_date.get((duty_id, ddate))
+        if trip and _as_float(trip.get("actual_km", 0), 0.0) > 0:
+            available_shift_turnouts += 1
+            continue
+        # Fallback: if duty status is completed/assigned with real start timestamp, treat as available.
+        if str(drow.get("status", "") or "").lower() in {"completed", "assigned"} and str(drow.get("punctuality_actual_departure", "") or "").strip():
+            available_shift_turnouts += 1
+            continue
 
-    # Calculate per-day availability for more granularity
-    all_dates = sorted(set(str(t.get("date", "")) for t in trips if t.get("date")))
-    total_bus_days_planned = total_buses_in_scope * max(len(all_dates), 1)
-    bus_days_operated = 0
-    for d in all_dates:
-        buses_on_date = set(str(t.get("bus_id", "")) for t in trips if str(t.get("date", "")) == d and float(t.get("actual_km", 0) or 0) > 0)
-        bus_days_operated += len(buses_on_date)
-
-    avail_pct = (bus_days_operated / total_bus_days_planned * 100) if total_bus_days_planned > 0 else 100
-    avail_target = float(rules.get("availability_target", "95"))
-    pk_rate = float(rules.get("avg_pk_rate", "85"))
+    if expected_shift_turnouts == 0:
+        # Last resort if no duty data: bus-day proxy from trip_data.
+        all_dates = sorted(set(str(t.get("date", "")) for t in trips if t.get("date")))
+        expected_shift_turnouts = total_buses_in_scope * max(len(all_dates), 1)
+        available_shift_turnouts = sum(
+            len({str(t.get("bus_id", "")) for t in trips if str(t.get("date", "")) == d and _as_float(t.get("actual_km", 0), 0.0) > 0})
+            for d in all_dates
+        )
+    avail_pct = (available_shift_turnouts / expected_shift_turnouts * 100) if expected_shift_turnouts > 0 else 100.0
+    avail_target_base = _as_float(rules.get("availability_target", "95"), 95.0)
+    avail_target = _apply_relax_to_target(avail_target_base, relax_pct, lower_is_better=False) if first30 else avail_target_base
+    if str(rules.get("availability_refurbishment_relax_active", "0")).strip().lower() in {"1", "true", "yes", "on"}:
+        refurb_relax = _as_float(rules.get("availability_refurbishment_relax_pct", "5"), 5.0)
+        avail_target = _apply_relax_to_target(avail_target, refurb_relax, lower_is_better=False)
+    pk_rate = _as_float(rules.get("avg_pk_rate", "85"), 85.0)
     avail_dam = 0.0
     if avail_pct < avail_target:
-        missed_bus_days = total_bus_days_planned - bus_days_operated
+        missed_bus_days = max(0, expected_shift_turnouts - available_shift_turnouts)
         if avail_pct >= 90:
             avail_dam = missed_bus_days * 50 * pk_rate
         elif avail_pct >= 85:
@@ -86,197 +185,197 @@ def compute_kpi_damages(
             avail_dam = missed_bus_days * 70 * pk_rate
     results["availability"] = {
         "pct": round(avail_pct, 1),
-        "target": avail_target,
-        "buses_in_scope": total_buses_in_scope,
-        "buses_operated": buses_operated,
-        "bus_days_planned": total_bus_days_planned,
-        "bus_days_operated": bus_days_operated,
-        "operating_days": len(all_dates),
+        "target": round(avail_target, 2),
+        "target_base": round(avail_target_base, 2),
+        "shift_turnouts_expected": expected_shift_turnouts,
+        "shift_turnouts_available": available_shift_turnouts,
+        "shift_turnouts_excluded_1712": excluded_shift_turnouts,
+        "method": "shift_turnout_proxy",
         "damages": round(avail_dam, 2),
+        "incentive": 0.0,
     }
 
-    # ────────────────────────────────────────────────────
-    # 3. PUNCTUALITY — from actual trip start/arrival times
-    #    Uses the punctuality service which checks:
-    #    - plan_start_time vs actual_start_time (±5 min relax)
-    #    - plan_end_time vs actual_end_time (10% trip time relax, max 15 min)
-    #    No random fallback — if no time data, report as "insufficient data".
-    # ────────────────────────────────────────────────────
+    # 3) Punctuality
     sp_data, ap_data, p_meta = punctuality_percentages_from_trips(trips, rules)
-    start_measured = p_meta.get("trips_start_measured", 0)
-    arrival_measured = p_meta.get("trips_arrival_measured", 0)
-    total_trips = len(trips)
+    start_pct = sp_data if sp_data is not None else 100.0
+    arrival_pct = ap_data if ap_data is not None else 100.0
+    start_target_base = _as_float(rules.get("punctuality_start_target", "90"), 90.0)
+    arrival_target_base = _as_float(rules.get("punctuality_arrival_target", "80"), 80.0)
+    start_target = _apply_relax_to_target(start_target_base, relax_pct, lower_is_better=False) if first30 else start_target_base
+    arrival_target = _apply_relax_to_target(arrival_target_base, relax_pct, lower_is_better=False) if first30 else arrival_target_base
 
-    if start_measured > 0 and sp_data is not None:
-        start_pct = sp_data
-    else:
-        # Compute from actual_start_time vs plan_start_time manually
-        on_time = 0
-        measured = 0
-        start_relax = int(float(rules.get("punctuality_start_relax_min", "5")))
-        for t in trips:
-            plan = t.get("plan_start_time") or t.get("start_time")
-            actual = t.get("actual_start_time")
-            if plan and actual:
-                try:
-                    ph, pm = int(plan.split(":")[0]), int(plan.split(":")[1])
-                    ah, am = int(actual.split(":")[0]), int(actual.split(":")[1])
-                    plan_min = ph * 60 + pm
-                    actual_min = ah * 60 + am
-                    measured += 1
-                    if actual_min <= plan_min + start_relax:
-                        on_time += 1
-                except (ValueError, IndexError):
-                    pass
-        start_pct = (on_time / measured * 100) if measured > 0 else 100.0
-        start_measured = measured
+    start_shortfall = max(0.0, start_target - start_pct)
+    arrival_shortfall = max(0.0, arrival_target - arrival_pct)
+    punct_dam = (start_shortfall * 0.01 * monthly_fee) + (max(0.0, arrival_shortfall - start_shortfall) * 0.01 * monthly_fee)
 
-    if arrival_measured > 0 and ap_data is not None:
-        arrival_pct = ap_data
-    else:
-        # Compute from actual_end_time vs plan_end_time manually
-        on_time = 0
-        measured = 0
-        arrival_relax_pct = float(rules.get("punctuality_arrival_relax_pct", "10"))
-        arrival_relax_max = float(rules.get("punctuality_arrival_relax_max_min", "15"))
-        for t in trips:
-            plan_end = t.get("plan_end_time") or t.get("end_time")
-            actual_end = t.get("actual_end_time")
-            plan_start = t.get("plan_start_time") or t.get("start_time")
-            if plan_end and actual_end and plan_start:
-                try:
-                    psh, psm = int(plan_start.split(":")[0]), int(plan_start.split(":")[1])
-                    peh, pem = int(plan_end.split(":")[0]), int(plan_end.split(":")[1])
-                    aeh, aem = int(actual_end.split(":")[0]), int(actual_end.split(":")[1])
-                    plan_start_min = psh * 60 + psm
-                    plan_end_min = peh * 60 + pem
-                    actual_end_min = aeh * 60 + aem
-                    duration = max(plan_end_min - plan_start_min, 1)
-                    slack = min(arrival_relax_max, (arrival_relax_pct / 100) * duration)
-                    measured += 1
-                    if actual_end_min <= plan_end_min + slack:
-                        on_time += 1
-                except (ValueError, IndexError):
-                    pass
-        arrival_pct = (on_time / measured * 100) if measured > 0 else 100.0
-        arrival_measured = measured
+    # Incentive: compute independently for each KPI above target (0.05% per +1%).
+    start_excess = max(0.0, start_pct - start_target)
+    arrival_excess = max(0.0, arrival_pct - arrival_target)
+    punct_inc = ((start_excess + arrival_excess) * 0.0005 * monthly_fee)
 
-    start_target = float(rules.get("punctuality_start_target", "90"))
-    arrival_target = float(rules.get("punctuality_arrival_target", "80"))
-    punct_dam = 0.0
-    punct_inc = 0.0
-    # Anti-double-count: if arrival failure is solely because of late start, count only one
-    start_shortfall = max(0, start_target - start_pct)
-    arrival_shortfall = max(0, arrival_target - arrival_pct)
-    if start_shortfall > 0:
-        punct_dam += start_shortfall * 0.01 * monthly_fee
-    if arrival_shortfall > 0 and arrival_shortfall > start_shortfall:
-        # Only add the EXTRA arrival shortfall beyond what start caused
-        punct_dam += (arrival_shortfall - start_shortfall) * 0.01 * monthly_fee
-    elif arrival_shortfall > 0 and start_shortfall == 0:
-        punct_dam += arrival_shortfall * 0.01 * monthly_fee
-    # Incentive: only if BOTH are above target
-    if start_pct > start_target and arrival_pct > arrival_target:
-        start_excess = start_pct - start_target
-        punct_inc = start_excess * 0.0005 * monthly_fee
     results["punctuality"] = {
         "start_pct": round(start_pct, 1),
         "arrival_pct": round(arrival_pct, 1),
         "start_target_pct": round(start_target, 1),
         "arrival_target_pct": round(arrival_target, 1),
-        "trips_start_measured": start_measured,
-        "trips_arrival_measured": arrival_measured,
-        "total_trips": total_trips,
+        "start_target_pct_base": round(start_target_base, 1),
+        "arrival_target_pct_base": round(arrival_target_base, 1),
+        "trips_start_measured": int(p_meta.get("trips_start_measured", 0)),
+        "trips_arrival_measured": int(p_meta.get("trips_arrival_measured", 0)),
+        "total_trips": len(trips),
         "damages": round(punct_dam, 2),
         "incentive": round(punct_inc, 2),
-        "data_source": "real" if (start_measured > 0 or arrival_measured > 0) else "insufficient_data",
+        "meta": p_meta,
+        "data_source": p_meta.get("source", "none"),
     }
 
-    # ────────────────────────────────────────────────────
-    # 4. FREQUENCY — completed trips / scheduled trips
-    #    A trip is "completed" if actual_km >= 80% of scheduled_km.
-    #    Scheduled trips = total trip records in period.
-    # ────────────────────────────────────────────────────
-    completed_trips = 0
+    # 4) Frequency (Trip Frequency + Bus-km Frequency)
     scheduled_trips = 0
+    completed_trips = 0
+    scheduled_km_total = 0.0
+    actual_km_total = 0.0
+    completed_trip_threshold_pct = _as_float(rules.get("frequency_completed_trip_threshold_pct", "100"), 100.0)
+    completed_trip_threshold_pct = max(0.0, min(100.0, completed_trip_threshold_pct))
+    completed_trip_factor = completed_trip_threshold_pct / 100.0
     for t in trips:
-        sched = float(t.get("scheduled_km", 0) or 0)
-        actual = float(t.get("actual_km", 0) or 0)
+        sched = _as_float(t.get("scheduled_km", 0), 0.0)
+        actual = _as_float(t.get("actual_km", 0), 0.0)
+        explicit_completed = str(t.get("trip_status", "") or "").strip().lower() == "completed"
         if sched > 0:
             scheduled_trips += 1
-            # Trip is "completed" if operator ran at least 80% of scheduled km
-            if actual >= sched * 0.80:
+            scheduled_km_total += sched
+            actual_km_total += max(0.0, actual)
+            # Default strict completion is 100% scheduled km unless business rule overrides.
+            if explicit_completed or actual >= sched * completed_trip_factor:
                 completed_trips += 1
         elif actual > 0:
-            # Trip exists with actual km but no schedule — count as both
             scheduled_trips += 1
             completed_trips += 1
+            actual_km_total += actual
 
-    trip_freq = (completed_trips / scheduled_trips * 100) if scheduled_trips > 0 else 100.0
-    freq_target = float(rules.get("frequency_target", "94"))
-    freq_dam = 0.0
-    freq_inc = 0.0
-    if trip_freq < freq_target:
-        shortfall = freq_target - trip_freq
-        freq_dam = shortfall * 0.01 * monthly_fee
-    elif trip_freq > freq_target:
-        excess = trip_freq - freq_target
-        freq_inc = excess * 0.0005 * monthly_fee
+    trip_freq = (completed_trips / scheduled_trips * 100.0) if scheduled_trips > 0 else 100.0
+    bus_km_freq = (actual_km_total / scheduled_km_total * 100.0) if scheduled_km_total > 0 else 100.0
+
+    trip_freq_target_base = _as_float(rules.get("frequency_trip_target", rules.get("frequency_target", "94")), 94.0)
+    bus_km_freq_target_base = _as_float(rules.get("frequency_bus_km_target", rules.get("frequency_target", "94")), 94.0)
+    trip_freq_target = _apply_relax_to_target(trip_freq_target_base, relax_pct, lower_is_better=False) if first30 else trip_freq_target_base
+    bus_km_freq_target = _apply_relax_to_target(bus_km_freq_target_base, relax_pct, lower_is_better=False) if first30 else bus_km_freq_target_base
+
+    trip_short = max(0.0, trip_freq_target - trip_freq)
+    km_short = max(0.0, bus_km_freq_target - bus_km_freq)
+    # Anti-double-count: apply trip shortfall + extra km shortfall beyond trip shortfall.
+    freq_dam = (trip_short * 0.01 * monthly_fee) + (max(0.0, km_short - trip_short) * 0.01 * monthly_fee)
+
+    trip_excess = max(0.0, trip_freq - trip_freq_target)
+    km_excess = max(0.0, bus_km_freq - bus_km_freq_target)
+    freq_inc = (trip_excess + km_excess) * 0.0005 * monthly_fee
+
     results["frequency"] = {
         "trip_freq_pct": round(trip_freq, 1),
-        "target": freq_target,
+        "trip_target": round(trip_freq_target, 1),
+        "trip_target_base": round(trip_freq_target_base, 1),
+        "bus_km_freq_pct": round(bus_km_freq, 1),
+        "bus_km_target": round(bus_km_freq_target, 1),
+        "bus_km_target_base": round(bus_km_freq_target_base, 1),
+        # Backward compatibility for UI/report code expecting `target`.
+        "target": round(trip_freq_target, 1),
         "scheduled_trips": scheduled_trips,
         "completed_trips": completed_trips,
-        "incomplete_trips": scheduled_trips - completed_trips,
+        "incomplete_trips": max(0, scheduled_trips - completed_trips),
+        "completed_trip_threshold_pct": round(completed_trip_threshold_pct, 2),
+        "scheduled_km": round(scheduled_km_total, 2),
+        "actual_km": round(actual_km_total, 2),
         "damages": round(freq_dam, 2),
         "incentive": round(freq_inc, 2),
     }
 
-    # ────────────────────────────────────────────────────
-    # 5. SAFETY — MAF from real incident data
-    # ────────────────────────────────────────────────────
+    # 4b) Trip speed KPI
+    speed_rows = [s for s in (_trip_speed_kmh(t) for t in trips) if s is not None and s > 0]
+    avg_speed = (sum(speed_rows) / len(speed_rows)) if speed_rows else 0.0
+    speed_target_base = _as_float(rules.get("trip_speed_target_kmh", "22"), 22.0)
+    speed_target = _apply_relax_to_target(speed_target_base, relax_pct, lower_is_better=False) if first30 else speed_target_base
+    speed_short_pct = max(0.0, ((speed_target - avg_speed) / speed_target) * 100.0) if speed_target > 0 else 0.0
+    speed_excess_pct = max(0.0, ((avg_speed - speed_target) / speed_target) * 100.0) if speed_target > 0 else 0.0
+    speed_penalty_rate = _as_float(rules.get("trip_speed_penalty_pct_per_1pct", "1"), 1.0)
+    speed_incentive_rate = _as_float(rules.get("trip_speed_incentive_pct_per_1pct", "0.05"), 0.05)
+    speed_dam = speed_short_pct * (speed_penalty_rate / 100.0) * monthly_fee
+    speed_inc = speed_excess_pct * (speed_incentive_rate / 100.0) * monthly_fee
+    results["trip_speed"] = {
+        "avg_kmh": round(avg_speed, 2),
+        "target_kmh": round(speed_target, 2),
+        "target_kmh_base": round(speed_target_base, 2),
+        "measured_trips": len(speed_rows),
+        "damages": round(speed_dam, 2),
+        "incentive": round(speed_inc, 2),
+    }
+
+    # 5) Safety (no first-30 relaxation per Article 20)
     minor_acc, major_acc = safety_kpi_counts(incidents_list)
-    maf = (minor_acc * 10000) / bus_km if bus_km > 0 else 0
-    maf_target = float(rules.get("safety_maf_target", "0.01"))
+    maf = (minor_acc * 10000.0) / bus_km if bus_km > 0 else 0.0
+    maf_target = _as_float(rules.get("safety_maf_target", "0.01"), 0.01)
     safe_dam = 0.0
     safe_inc = 0.0
     if maf > maf_target:
-        steps = int(round((maf - maf_target) / 0.01))
+        steps = max(0, int((maf - maf_target) / 0.01))
         safe_dam = steps * 0.02 * monthly_fee
     elif maf < 0.005:
-        steps = int(round((0.005 - maf) / 0.001))
+        steps = max(0, int((0.005 - maf) / 0.001))
         safe_inc = steps * 0.0005 * monthly_fee
     safe_dam += major_acc * 0.02 * monthly_fee
+    end_day = _parse_ymd(period_end) or datetime.now(timezone.utc).date()
+    lookback_start = end_day - timedelta(days=89)
+    serious_fire_buses = set()
+    for inc in incidents_list:
+        occ = _parse_ymd(str(inc.get("occurred_at", "") or inc.get("created_at", "")))
+        if occ is None or occ < lookback_start or occ > end_day:
+            continue
+        if _is_fire_serious_incident(inc):
+            bid = str(inc.get("bus_id", "") or "").strip()
+            if bid:
+                serious_fire_buses.add(bid)
+    bus_count_scope = max(1, len(buses))
+    serious_fire_pct = (len(serious_fire_buses) / bus_count_scope) * 100.0
+    fire_threshold_pct = _as_float(rules.get("safety_serious_fire_lot_pct_threshold", "4"), 4.0)
+    lot_shutdown_triggered = serious_fire_pct > fire_threshold_pct
     results["safety"] = {
         "maf": round(maf, 4),
         "maf_target": maf_target,
         "minor_accidents": minor_acc,
         "major_accidents": major_acc,
+        "lot_fire_bus_pct_3m": round(serious_fire_pct, 2),
+        "lot_fire_bus_count_3m": len(serious_fire_buses),
+        "lot_fire_threshold_pct": fire_threshold_pct,
+        "lot_shutdown_triggered": lot_shutdown_triggered,
         "damages": round(safe_dam, 2),
         "incentive": round(safe_inc, 2),
     }
 
-    # ────────────────────────────────────────────────────
-    # CAPS — §18: KPI damages ≤10%, incentives ≤5%
-    # ────────────────────────────────────────────────────
-    total_kpi_dam = sum(r["damages"] for r in results.values())
-    total_inc = sum(r.get("incentive", 0) for r in results.values())
-    kpi_dam_cap_pct = float(rules.get("kpi_damages_cap_pct", "10"))
-    inc_cap_pct = float(rules.get("incentive_cap_pct", "5"))
-    kpi_cap = (kpi_dam_cap_pct / 100) * monthly_fee
-    incentive_cap = (inc_cap_pct / 100) * monthly_fee
-    capped_dam = min(total_kpi_dam, kpi_cap)
-    capped_inc = min(total_inc, incentive_cap)
+    # Caps
+    total_kpi_dam = sum(_as_float(r.get("damages", 0), 0.0) for r in results.values())
+    total_inc = sum(_as_float(r.get("incentive", 0), 0.0) for r in results.values())
+    kpi_dam_cap_pct = _as_float(rules.get("kpi_damages_cap_pct", "10"), 10.0)
+    inc_cap_pct = _as_float(rules.get("incentive_cap_pct", "5"), 5.0)
+    kpi_cap = (kpi_dam_cap_pct / 100.0) * monthly_fee
+    incentive_cap = (inc_cap_pct / 100.0) * monthly_fee
 
     return {
         "categories": results,
         "total_damages_raw": round(total_kpi_dam, 2),
-        "total_damages_capped": round(capped_dam, 2),
+        "total_damages_capped": round(min(total_kpi_dam, kpi_cap), 2),
         "kpi_cap": round(kpi_cap, 2),
         "kpi_cap_pct": kpi_dam_cap_pct,
         "total_incentive_raw": round(total_inc, 2),
-        "total_incentive_capped": round(capped_inc, 2),
+        "total_incentive_capped": round(min(total_inc, incentive_cap), 2),
         "incentive_cap": round(incentive_cap, 2),
         "incentive_cap_pct": inc_cap_pct,
         "monthly_fee_base": round(monthly_fee, 2),
+        "first_30_day_relaxation_applied": first30,
+        "first_30_day_relaxation_pct": relax_pct if first30 else 0.0,
+        "billing_impact_flags": {
+            "safety_lot_shutdown_triggered": lot_shutdown_triggered,
+            "no_payment_recommended": lot_shutdown_triggered,
+            "reason": "Article 20.6.6 serious incidents exceed threshold"
+            if lot_shutdown_triggered
+            else "",
+        },
     }

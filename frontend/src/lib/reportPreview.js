@@ -17,17 +17,19 @@ export const SIMPLE_REPORT_NAMES = {
   early_late_trip_started_from_origin: "Early/Late Trip Started From Origin",
   no_driver_no_conductor: "No Driver / No Conductor",
   breakdown_unattended_over_2h: "Breakdown >2h Unattended",
-  breakdown_0_2_pct: "Breakdown 0.2%",
+  breakdown_0_2_pct: "Breakdown 0.2% (Article 20.2)",
   incident_details: "Incident Details",
   authorized_curtailment: "Authorized Curtailment",
   unauthorized_curtailment: "Unauthorized Curtailment",
   unauthorized_route_deviation: "Unauthorized Route Deviation",
+  geofence_events: "Geofence Events",
   over_speed: "Over Speed",
   accident_instances: "Accident Instances",
   monthly_sla_non_conformance: "Monthly SLA / Non-Conformance",
-  double_duty_driver_report: "Double Duty Driver Report",
+    double_duty_driver_report: "Double Duty Report (Hours)",
   daily_earning_report: "Daily Earning Report",
   kpi_report: "KPI Report",
+  monthly_reporting_report: "MONTHLY REPORTING",
   daily_cancelled_kms_total: "Daily Cancelled KMs (Total)",
   head_wise_cancelled_kms: "Head Wise Cancelled KMs",
   daily_cancelled_kms_type_wise: "Daily Cancelled KMs Type Wise",
@@ -81,6 +83,39 @@ const TRIP_KM_LABELS = {
   maintenance_km_finalized_by: "Final by",
 };
 
+const SCHEDULE_X_LABELS = {
+  details_of_depot: "Details Of Depot",
+  date: "Date",
+  number_of_buses: "Number of buses",
+  daily_assured_km: "Daily Assured Km",
+  assured_km_per_month: "Assured Km Per Month",
+  per_km_fee_rs_km_excl_gst: "Per km fee (Rs/km) - Excl GST",
+  name_of_city: "Name Of City",
+  address_of_depot: "Address Of Depot",
+  list_of_report: "List Of Report",
+  daily_required: "Daily",
+  monthly_required: "Monthly",
+  annual_required: "Annual",
+};
+
+function humanizeColumnName(col) {
+  const raw = String(col || "");
+  const withSpaces = raw.replace(/_/g, " ").trim();
+  if (!withSpaces) return raw;
+  const titled = withSpaces.replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+  return titled
+    .replace(/\bId\b/g, "ID")
+    .replace(/\bKm\b/g, "KM")
+    .replace(/\bGps\b/g, "GPS")
+    .replace(/\bIts\b/g, "ITS")
+    .replace(/\bSoh\b/g, "SoH")
+    .replace(/\bSoc\b/g, "SoC")
+    .replace(/\bGst\b/g, "GST")
+    .replace(/\bTds\b/g, "TDS")
+    .replace(/\bDc\b/g, "DC")
+    .replace(/\bCpu\b/g, "CPU");
+}
+
 function toAmPm(hhmm) {
   if (typeof hhmm !== "string") return hhmm;
   const m = hhmm.trim().match(/^(\d{1,2}):(\d{2})$/);
@@ -119,15 +154,25 @@ export function formatReportCellValue(col, val, options = {}) {
   if (c.includes("date") || c.startsWith("period_") || c.endsWith("_on") || c.endsWith("_from") || c.endsWith("_to")) {
     return formatDateIN(trimVal);
   }
+  if (
+    c.includes("status") ||
+    c.includes("severity") ||
+    c.includes("category") ||
+    c.endsWith("_type") ||
+    c.includes("state") ||
+    c.includes("reason")
+  ) {
+    return trimVal.replace(/_/g, " ").replace(/\s{2,}/g, " ");
+  }
   return trimVal.replace(/\s*\n+\s*/g, " ").replace(/\s{2,}/g, " ");
 }
 
 export function columnsForPreview(reportType, revenuePeriod) {
   const map = {
     operations: ["bus_id", "driver_id", "date", "scheduled_bus_out", "actual_bus_out", "scheduled_bus_in", "actual_bus_in", "scheduled_km", "actual_km"],
-    energy: ["bus_id", "date", "units_charged", "tariff_rate"],
+    energy: ["bus_id", "date", "units_charged"],
     incidents: ["id", "incident_type", "channel", "bus_id", "depot", "assigned_team", "severity", "status", "occurred_at", "vehicles_affected_count", "damage_summary", "engineer_action", "attachments_summary", "created_at"],
-    billing: ["invoice_id", "period_start", "period_end", "depot", "bus_id", "base_payment", "energy_adjustment", "km_incentive", "total_deduction", "final_payable", "status", "workflow_state"],
+    billing: ["invoice_id", "period_start", "period_end", "depot", "bus_id", "base_payment", "energy_adjustment", "total_deduction", "final_payable", "status", "workflow_state"],
     billing_trip_wise_km: ["date", "bus_id", "route_name", "trip_id", "duty_id", "scheduled_km", "actual_km", "variance_km"],
     billing_day_wise_km: ["date", "scheduled_km", "actual_km", "variance_km", "achievement_pct"],
     billing_bus_wise_km: ["bus_id", "trip_count", "scheduled_km", "actual_km", "variance_km", "achievement_pct"],
@@ -140,7 +185,7 @@ export function columnsForPreview(reportType, revenuePeriod) {
           ? ["bus_id", "depot", "period", "route", "passengers", "revenue_amount", "days"]
           : ["bus_id", "depot", "period", "passengers", "revenue_amount", "days"],
     km_gps: ["bus_id", "date", "depot", "driver_id", "scheduled_km", "actual_km"],
-    energy_efficiency: ["bus_id", "bus_type", "km_operated", "kwh_per_km", "allowed_kwh", "actual_kwh", "efficiency", "allowed_cost", "actual_cost", "adjustment"],
+    energy_efficiency: ["bus_id", "bus_type", "km_operated", "kwh_per_km", "allowed_kwh", "actual_kwh", "efficiency", "base_electricity_tariff", "actual_electricity_tariff", "adjustment"],
     infractions_logged: ["id", "date", "bus_id", "driver_id", "depot", "infraction_code", "category", "amount", "route_name", "related_incident_id", "status", "created_at"],
     infractions_driver_wise: ["driver_id", "category", "count", "total_amount"],
     infractions_vehicle_wise: ["bus_id", "category", "count", "total_amount"],
@@ -155,12 +200,42 @@ export function columnsForPreview(reportType, revenuePeriod) {
     authorized_curtailment: ["id", "occurred_at", "bus_id", "depot", "trip_id", "status", "description"],
     unauthorized_curtailment: ["id", "occurred_at", "bus_id", "depot", "trip_id", "status", "description"],
     unauthorized_route_deviation: ["id", "occurred_at", "bus_id", "depot", "route_name", "trip_id", "severity", "status", "description"],
+    geofence_events: ["event_id", "event_ts", "bus_id", "depot", "geofence_id", "geofence_type", "event_type", "distance_m", "threshold_m", "speed_kmh", "resolved"],
     over_speed: ["id", "occurred_at", "bus_id", "depot", "route_name", "trip_id", "severity", "status", "description"],
     accident_instances: ["id", "occurred_at", "bus_id", "depot", "route_name", "trip_id", "severity", "status", "description"],
     monthly_sla_non_conformance: ["month", "metric", "total_events", "non_conformance_events", "non_conformance_pct", "threshold_pct", "sla_compliant"],
-    double_duty_driver_report: ["date", "driver_id", "driver_name", "duty_count", "duty_ids"],
+    double_duty_driver_report: [
+      "date",
+      "duty_id",
+      "driver_license",
+      "driver_name",
+      "depot",
+      "scheduled_duty_hours",
+      "actual_duty_hours",
+      "driver_day_scheduled_hours_total",
+      "driver_day_actual_hours_total",
+      "driver_day_duty_count",
+      "max_duty_hours_rule",
+      "duty_load_kind",
+      "double_duty_triggers",
+      "double_duty_reason",
+    ],
     daily_earning_report: ["date", "trip_rows", "passengers", "revenue_amount"],
     kpi_report: ["period", "period_type", "trip_count", "scheduled_km", "actual_km", "km_achievement_pct", "punctual_trips", "punctuality_pct", "incident_count", "open_incidents"],
+    monthly_reporting_report: [
+      "details_of_depot",
+      "date",
+      "number_of_buses",
+      "daily_assured_km",
+      "assured_km_per_month",
+      "per_km_fee_rs_km_excl_gst",
+      "name_of_city",
+      "address_of_depot",
+      "list_of_report",
+      "daily_required",
+      "monthly_required",
+      "annual_required",
+    ],
     daily_cancelled_kms_total: ["date", "cancelled_trip_count", "cancelled_km"],
     head_wise_cancelled_kms: ["cancel_head", "cancelled_trip_count", "cancelled_km"],
     daily_cancelled_kms_type_wise: ["date", "cancel_reason_code", "cancel_head", "cancelled_trip_count", "cancelled_km"],
@@ -190,5 +265,6 @@ export function columnsForPreview(reportType, revenuePeriod) {
 export function headerLabel(reportType, col) {
   if (reportType === "operations" && OPERATIONS_COLUMN_LABELS[col]) return OPERATIONS_COLUMN_LABELS[col];
   if (reportType === "trip_km_verification" && TRIP_KM_LABELS[col]) return TRIP_KM_LABELS[col];
-  return col.replace(/_/g, " ");
+  if (reportType === "monthly_reporting_report" && SCHEDULE_X_LABELS[col]) return SCHEDULE_X_LABELS[col];
+  return humanizeColumnName(col);
 }

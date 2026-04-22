@@ -27,6 +27,8 @@ import {
   Warehouse,
   GitBranch,
   Milestone,
+  Building2,
+  Radar,
   UserCog,
   Ticket,
   Bell,
@@ -63,6 +65,8 @@ const navGroups = [
       { to: "/depots", label: "Depots", icon: Warehouse },
       { to: "/bus-routes", label: "Routes", icon: GitBranch },
       { to: "/bus-stops", label: "Stops", icon: Milestone },
+      { to: "/bus-terminals", label: "Terminals", icon: Building2 },
+      { to: "/geofences", label: "Geofences", icon: Radar },
       { to: "/buses", label: "Bus Fleet", icon: Bus },
       { to: "/drivers", label: "Drivers", icon: Users },
       { to: "/conductors", label: "Conductors", icon: Ticket },
@@ -72,8 +76,7 @@ const navGroups = [
     label: "Finance & SLA",
     items: [
       { to: "/billing", label: "Billing", icon: Receipt },
-      { to: "/kpi", label: "KPI", icon: BarChart3 },
-      { to: "/gcc-kpi", label: "GCC KPI", icon: Shield },
+      { to: "/kpi", label: "KPI", icon: Shield },
       { to: "/revenue-details", label: "Revenue", icon: IndianRupee },
       { to: "/km-details", label: "KM Tracking", icon: Route },
       { to: "/passenger-details", label: "Passengers", icon: UsersRound },
@@ -109,7 +112,9 @@ export default function Layout({ children }) {
       const { data } = await API.get("/notifications", { params: { limit: 8, unread_only: "true" } });
       setNotifCount(data.unread_count || 0);
       setNotifs(data.items || []);
-    } catch {}
+    } catch (err) {
+      console.error("Failed to load notifications", err);
+    }
   }, []);
 
   useEffect(() => {
@@ -119,7 +124,13 @@ export default function Layout({ children }) {
   }, [loadNotifCount]);
 
   const markAllRead = async () => {
-    try { await API.put("/notifications/read-all"); setNotifCount(0); setNotifs(n => n.map(x => ({ ...x, read: true }))); } catch {}
+    try {
+      await API.put("/notifications/read-all");
+      setNotifCount(0);
+      setNotifs((n) => n.map((x) => ({ ...x, read: true })));
+    } catch (err) {
+      console.error("Failed to mark notifications as read", err);
+    }
   };
 
   const toggleGroup = (label) => {

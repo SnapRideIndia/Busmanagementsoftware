@@ -49,6 +49,8 @@ for prefix, title, group in [
     ("masters.depots", "Depots", "Master data"),
     ("masters.routes", "Routes", "Master data"),
     ("masters.stops", "Stops", "Master data"),
+    ("masters.terminals", "Terminals", "Master data"),
+    ("masters.geofences", "Geofences", "Master data"),
     ("masters.buses", "Bus fleet", "Master data"),
     ("masters.drivers", "Drivers", "Master data"),
     ("masters.conductors", "Conductors", "Master data"),
@@ -96,6 +98,8 @@ def default_permission_ids_for_role(role_id: str) -> list[str]:
             "masters.depots",
             "masters.routes",
             "masters.stops",
+            "masters.terminals",
+            "masters.geofences",
             "masters.buses",
             "masters.drivers",
             "masters.conductors",
@@ -146,7 +150,8 @@ def default_permission_ids_for_role(role_id: str) -> list[str]:
             | crud("masters.drivers")
             | crud("masters.conductors")
             | crud("masters.routes")
-            | crud("masters.stops"),
+            | crud("masters.stops")
+            | crud("masters.geofences"),
         )
     if role_id == "vendor":
         return sorted(

@@ -83,7 +83,7 @@ All routes prefixed with `/api`. Auth via JWT cookie or Bearer header.
 - `/api/dashboard` — KPI summary
 - `/api/tenders`, `/api/buses`, `/api/drivers` — Masters CRUD
 - `/api/duties` — Duty assignment with SMS
-- `/api/kpi/gcc-engine` — GCC KPI calculation
+- `/api/kpi/gcc-engine` — KPI (damages/incentives) calculation; supports `concessionaire` filter via tenders
 - `/api/billing/*` — Invoice generation, workflow, Fee/PK, export
 - `/api/infractions/*` — Schedule-S catalogue and logging
 - `/api/business-rules` — Configurable parameters

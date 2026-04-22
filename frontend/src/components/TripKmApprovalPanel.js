@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
-import { useAuth } from "../contexts/AuthContext";
-import API, { formatApiError, buildQuery, unwrapListResponse, fetchAllPaginated, messageFromAxiosError } from "../lib/api";
+import { useState, useMemo, useEffect } from "react";
+import { useKmApprovals, useKmMutations } from "../features/km/api/useKm";
+import { useAllBuses } from "../features/buses/api/useBuses";
 import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "./TablePaginationBar";
 import AsyncPanel from "./AsyncPanel";
@@ -15,6 +15,8 @@ import { Badge } from "./ui/badge";
 import { Checkbox } from "./ui/checkbox";
 import { CheckCircle2, CircleDashed, ShieldCheck, ClipboardCheck, AlertTriangle, MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "../contexts/AuthContext";
+import API, { messageFromAxiosError, formatApiError } from "../lib/api";
 
 function dayISO(d) {
   return d.toISOString().slice(0, 10);
@@ -44,54 +46,38 @@ export default function TripKmApprovalPanel() {
   const [busId, setBusId] = useState("");
   const [queue, setQueue] = useState("traffic_pending");
   const [page, setPage] = useState(1);
-  const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 20 });
-  const [rows, setRows] = useState([]);
-  const [buses, setBuses] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [selected, setSelected] = useState(() => new Set());
-  const [acting, setActing] = useState(false);
+  const [manualActing, setManualActing] = useState(false);
 
-  const depotsList = useMemo(
-    () => [...new Set(buses.map((b) => b.depot).filter(Boolean))].sort(),
-    [buses],
-  );
-  const busesForSelect = depot ? buses.filter((b) => b.depot === depot) : buses;
+  const { data: allBuses = [] } = useAllBuses();
+  const depotsList = useMemo(() => [...new Set(allBuses.map((b) => b.depot).filter(Boolean))].sort(), [allBuses]);
+  const busesForSelect = depot ? allBuses.filter((b) => b.depot === depot) : allBuses;
 
-  const load = useCallback(async () => {
-    if (!canRead) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const params = buildQuery({
-        date_from: dateFrom,
-        date_to: dateTo,
-        depot,
-        bus_id: busId,
-        queue,
-        page,
-        limit: 20,
-      });
-      const [res, busItems] = await Promise.all([
-        API.get(Endpoints.tripKmApprovals.list(), { params }),
-        fetchAllPaginated(Endpoints.masters.buses.list(), {}),
-      ]);
-      const u = unwrapListResponse(res.data);
-      setRows(u.items);
-      setMeta({ total: u.total, pages: u.pages, limit: u.limit });
-      setBuses(busItems);
-      setSelected(new Set());
-    } catch (err) {
-      setError(messageFromAxiosError(err, "Failed to load trip kilometre verification queue"));
-      setRows([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [canRead, dateFrom, dateTo, depot, busId, queue, page]);
+  const filters = {
+    date_from: dateFrom,
+    date_to: dateTo,
+    depot,
+    bus_id: busId,
+    queue,
+    page,
+    limit: 20,
+  };
+
+  const { data: qData, isLoading: loading, error: fetchError, refetch: load } = useKmApprovals(filters);
+  const { approveKm, isSubmitting: acting } = useKmMutations();
+
+  const rows = useMemo(() => qData?.items || [], [qData]);
+  const meta = {
+    total: qData?.total || 0,
+    pages: qData?.pages || 1,
+    limit: qData?.limit || 20,
+  };
+
+  const error = fetchError ? messageFromAxiosError(fetchError, "Failed to load approval queue") : null;
 
   useEffect(() => {
-    load();
-  }, [load]);
+    setSelected(new Set());
+  }, [rows]);
 
   useEffect(() => {
     setPage(1);
@@ -128,21 +114,12 @@ export default function TripKmApprovalPanel() {
     else setSelected(new Set());
   };
 
-  const postBatch = async (path, keys) => {
+  const postBatch = async (keys) => {
     if (!keys.length) return;
-    setActing(true);
     try {
-      const { data } = await API.post(path, { trip_keys: keys });
-      const { updated, failed } = data;
-      if (updated) toast.success(`${updated} row(s) updated`);
-      if (failed?.length) {
-        toast.error(`${failed.length} skipped`, { description: failed.map((f) => f.detail).slice(0, 3).join(" · ") });
-      }
-      await load();
+      await approveKm({ trip_keys: keys });
     } catch (err) {
-      toast.error(formatApiError(err.response?.data?.detail) || err.message || "Request failed");
-    } finally {
-      setActing(false);
+      // Error handled in hook
     }
   };
 
@@ -155,7 +132,7 @@ export default function TripKmApprovalPanel() {
       toast.info("Select at least one row still awaiting first verification.");
       return;
     }
-    postBatch(Endpoints.tripKmApprovals.approve(), keys);
+    postBatch(keys);
   };
 
   const finalizeBulk = () => {
@@ -185,7 +162,7 @@ export default function TripKmApprovalPanel() {
       "Optional incident identifier for traceability:",
       row.linked_incident_id || "",
     ) || "";
-    setActing(true);
+    setManualActing(true);
     try {
       await API.post(Endpoints.tripKmApprovals.exceptionAction(), {
         trip_key: row.trip_key,
@@ -198,7 +175,7 @@ export default function TripKmApprovalPanel() {
     } catch (err) {
       toast.error(formatApiError(err.response?.data?.detail) || err.message || "Could not save exception action");
     } finally {
-      setActing(false);
+      setManualActing(false);
     }
   };
 
@@ -210,8 +187,8 @@ export default function TripKmApprovalPanel() {
         size="sm"
         variant="outline"
         className="h-8 text-xs border-amber-200 text-amber-900 hover:bg-amber-50"
-        disabled={acting}
-        onClick={() => postBatch(Endpoints.tripKmApprovals.approve(), [r.trip_key])}
+        disabled={acting || manualActing}
+        onClick={() => postBatch([r.trip_key])}
       >
         Mark first verification complete
       </Button>
@@ -226,8 +203,8 @@ export default function TripKmApprovalPanel() {
         size="sm"
         variant="outline"
         className="h-8 text-xs border-slate-300 text-slate-800 hover:bg-slate-50"
-        disabled={acting}
-        onClick={() => postBatch(Endpoints.tripKmApprovals.finalize(), [r.trip_key])}
+        disabled={acting || manualActing}
+        onClick={() => postBatch([r.trip_key])}
       >
         Mark final verification complete
       </Button>

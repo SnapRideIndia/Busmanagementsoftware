@@ -20,14 +20,24 @@ export const Endpoints = {
   },
 
   operations: {
+    dutyTemplates: {
+      list: () => "/duty-templates",
+      create: () => "/duty-templates",
+      detail: (templateId) => `/duty-templates/${enc(templateId)}`,
+      update: (templateId) => `/duty-templates/${enc(templateId)}`,
+      remove: (templateId) => `/duty-templates/${enc(templateId)}`,
+    },
+
     duties: {
       list: () => "/duties",
       create: () => "/duties",
+      detail: (dutyId) => `/duties/${enc(dutyId)}`,
       update: (dutyId) => `/duties/${enc(dutyId)}`,
       remove: (dutyId) => `/duties/${enc(dutyId)}`,
       summaryMetrics: () => "/duties/summary-metrics",
       summaryExport: () => "/duties/summary-export",
       sendSms: (dutyId) => `/duties/${enc(dutyId)}/send-sms`,
+      cancelFollowingTrips: (dutyId) => `/duties/${enc(dutyId)}/cancel-following-trips`,
       sendAllSms: (date) => `/duties/send-all-sms?date=${enc(date)}`,
     },
 
@@ -85,6 +95,25 @@ export const Endpoints = {
       remove: (stopId) => `/stop-master/${enc(stopId)}`,
     },
 
+    terminals: {
+      list: () => "/terminal-master",
+      create: () => "/terminal-master",
+      get: (terminalId) => `/terminal-master/${enc(terminalId)}`,
+      update: (terminalId) => `/terminal-master/${enc(terminalId)}`,
+      remove: (terminalId) => `/terminal-master/${enc(terminalId)}`,
+    },
+
+    geofences: {
+      list: () => "/geofences",
+      stats: () => "/geofences/stats",
+      create: () => "/geofences",
+      get: (id) => `/geofences/${enc(id)}`,
+      update: () => "/geofences",
+      remove: (id) => `/geofences/${enc(id)}`,
+      bootstrap: () => "/geofences/bootstrap",
+      events: () => "/geofence-events",
+    },
+
     routes: {
       // Legacy alias used by RoutesPage list; backed by the same master.
       legacyList: () => "/route-master",
@@ -96,11 +125,13 @@ export const Endpoints = {
     },
 
     settings: {
+      root: () => "/settings",
       list: () => "/settings",
       upsert: () => "/settings",
     },
 
     businessRules: {
+      root: () => "/business-rules",
       list: () => "/business-rules",
       upsert: () => "/business-rules",
       remove: (key) => `/business-rules/${enc(key)}`,
@@ -115,6 +146,9 @@ export const Endpoints = {
     update: (id) => `/incidents/${enc(id)}`,
     addNote: (id) => `/incidents/${enc(id)}/notes`,
     closeInfraction: (incidentId, idx) => `/incidents/${enc(incidentId)}/infractions/${Number(idx)}/close`,
+    attachments: (id) => `/incidents/${enc(id)}/attachments`,
+    attachmentFile: (incidentId, attachmentId) => `/incidents/${enc(incidentId)}/attachments/${enc(attachmentId)}/file`,
+    attachmentFileView: (incidentId, attachmentId) => `/incidents/${enc(incidentId)}/attachments/${enc(attachmentId)}/file?inline=1`,
   },
 
   infractions: {
@@ -163,6 +197,7 @@ export const Endpoints = {
   km: {
     details: () => "/km/details",
     summary: () => "/km/summary",
+    tripRowPatch: () => "/km/trip-row",
   },
 
   tripKmApprovals: {

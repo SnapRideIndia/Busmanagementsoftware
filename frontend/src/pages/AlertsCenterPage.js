@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import API, { buildQuery, fetchAllPaginated, formatApiError, getBackendOrigin } from "../lib/api";
+import { useState, useEffect, useMemo } from "react";
+import { useAlerts } from "../features/tracking/api/useTracking";
+import { useAllBuses } from "../features/buses/api/useBuses";
+import { messageFromAxiosError } from "../lib/api";
 import { Endpoints } from "../lib/endpoints";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
@@ -25,6 +27,9 @@ const ALERT_CODES = [
   { value: "route_deviation", label: "Route deviation" },
   { value: "bunching_user", label: "Bunching" },
   { value: "harness_removal", label: "Harness removal" },
+  { value: "geofence_entry", label: "Geofence entry" },
+  { value: "geofence_exit", label: "Geofence exit" },
+  { value: "stop_geofence_speed", label: "Stop geofence speed" },
 ];
 
 function formatTs(ts) {
@@ -63,19 +68,41 @@ function StatCard({ label, value, icon: Icon, tone = "slate" }) {
 }
 
 export default function AlertsCenterPage() {
-  const [rows, setRows] = useState([]);
-  const [summary, setSummary] = useState({ active: 0, resolved: 0, high: 0, medium: 0, low: 0 });
-  const [depots, setDepots] = useState([]);
-  const [allBuses, setAllBuses] = useState([]);
   const [depot, setDepot] = useState("");
   const [busId, setBusId] = useState("");
   const [severity, setSeverity] = useState("");
   const [alertCode, setAlertCode] = useState("");
   const [resolved, setResolved] = useState("");
   const [search, setSearch] = useState("");
-  const [meta, setMeta] = useState({ total: 0, page: 1, pages: 1, limit: 20 });
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState(null);
+  const [page, setPage] = useState(1);
+
+  const { data: allBuses = [] } = useAllBuses();
+  const depots = useMemo(() => [...new Set(allBuses.map((b) => b.depot).filter(Boolean))].sort(), [allBuses]);
+
+  const filters = {
+    depot,
+    bus_id: busId,
+    severity,
+    alert_code: alertCode,
+    resolved,
+    search,
+    page,
+    limit: 20,
+  };
+
+  const { data: alertsData, isLoading: loading, error: fetchError, refetch: load } = useAlerts(filters);
+
+  const rows = alertsData?.items || [];
+  const summary = alertsData?.summary || { active: 0, resolved: 0, high: 0, medium: 0, low: 0 };
+  const meta = {
+    total: alertsData?.total || 0,
+    page: alertsData?.page || 1,
+    pages: alertsData?.pages || 1,
+    limit: alertsData?.limit || 20,
+  };
+
+  const err = fetchError ? messageFromAxiosError(fetchError, "Failed to load alerts") : null;
+
 
   const busOptions = useMemo(() => {
     if (!depot) return allBuses;
@@ -83,59 +110,8 @@ export default function AlertsCenterPage() {
   }, [allBuses, depot]);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const buses = await fetchAllPaginated(Endpoints.masters.buses.list(), {});
-        setAllBuses(buses);
-        setDepots([...new Set(buses.map((b) => b.depot).filter(Boolean))].sort());
-      } catch {
-        setAllBuses([]);
-        setDepots([]);
-      }
-    })();
-  }, []);
-
-  useEffect(() => {
     if (busId && !busOptions.some((b) => b.bus_id === busId)) setBusId("");
   }, [busId, busOptions]);
-
-  const load = useCallback(
-    async (pageOverride = 1) => {
-      setLoading(true);
-      setErr(null);
-      try {
-        const params = buildQuery({
-          depot,
-          bus_id: busId,
-          severity,
-          alert_code: alertCode,
-          resolved,
-          search,
-          page: pageOverride,
-          limit: 20,
-        });
-        const { data } = await API.get(Endpoints.alerts.center(), { params });
-        setRows(data.items || []);
-        setSummary(data.summary || { active: 0, resolved: 0, high: 0, medium: 0, low: 0 });
-        setMeta({
-          total: Number(data.total) || 0,
-          page: Number(data.page) || 1,
-          pages: Number(data.pages) || 1,
-          limit: Number(data.limit) || 20,
-        });
-      } catch (e) {
-        setErr(formatApiError(e.response?.data?.detail) || e.message || "Failed to load alerts");
-        setRows([]);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [depot, busId, severity, alertCode, resolved, search],
-  );
-
-  useEffect(() => {
-    load(1);
-  }, [load]);
 
   const clearFilters = () => {
     setDepot("");
@@ -147,26 +123,23 @@ export default function AlertsCenterPage() {
   };
 
   const reportParams = useMemo(
-    () =>
-      buildQuery({
-        report_type: "alerts",
-        depot,
-        bus_id: busId,
-        alert_code: alertCode,
-        severity,
-        resolved,
-      }),
+    () => ({
+      report_type: "alerts",
+      depot,
+      bus_id: busId,
+      alert_code: alertCode,
+      severity,
+      resolved,
+    }),
     [depot, busId, alertCode, severity, resolved],
   );
   const reportPdfHref = useMemo(() => {
     const q = new URLSearchParams({ ...reportParams, fmt: "pdf" });
-    const origin = getBackendOrigin();
-    return `${origin || ""}/api/reports/download?${q.toString()}`;
+    return `${Endpoints.reports.run()}?${q.toString()}`;
   }, [reportParams]);
   const reportExcelHref = useMemo(() => {
     const q = new URLSearchParams({ ...reportParams, fmt: "excel" });
-    const origin = getBackendOrigin();
-    return `${origin || ""}/api/reports/download?${q.toString()}`;
+    return `${Endpoints.reports.run()}?${q.toString()}`;
   }, [reportParams]);
 
   return (
@@ -259,7 +232,7 @@ export default function AlertsCenterPage() {
             </div>
           </div>
           <div className="flex items-center gap-2 mt-3">
-            <Button onClick={() => load(1)} className="bg-[#C8102E] hover:bg-[#A50E25]">
+            <Button onClick={() => load()} className="bg-[#C8102E] hover:bg-[#A50E25]">
               Refresh
             </Button>
             <ReportDownloads pdfHref={reportPdfHref} excelHref={reportExcelHref} />
@@ -335,7 +308,7 @@ export default function AlertsCenterPage() {
             pages={meta.pages || 1}
             total={meta.total || 0}
             limit={meta.limit || 20}
-            onPageChange={(p) => load(p)}
+            onPageChange={setPage}
           />
         </CardContent>
       </Card>

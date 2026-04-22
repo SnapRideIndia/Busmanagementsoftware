@@ -1,6 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
-import API, { formatApiError, buildQuery, unwrapListResponse, fetchAllPaginated, messageFromAxiosError } from "../lib/api";
+import { useState, useMemo } from "react";
+import API, { messageFromAxiosError } from "../lib/api";
 import { Endpoints } from "../lib/endpoints";
+import { useDrivers, useAllDrivers, useDriverPerformance } from "../features/drivers/api/useDrivers";
+import { useDriverMutations } from "../features/drivers/api/useDriverMutations";
+import { useAllBuses } from "../features/buses/api/useBuses";
+import { useAllDepotNames } from "../features/depots/api/useDepots";
 import TablePaginationBar from "../components/TablePaginationBar";
 import TableLoadRows from "../components/TableLoadRows";
 import { Button } from "../components/ui/button";
@@ -17,13 +21,11 @@ import { toast } from "sonner";
 const emptyDriver = { name: "", license_number: "", phone: "", bus_id: "", status: "active" };
 
 export default function DriverPage() {
-  const [drivers, setDrivers] = useState([]);
-  const [buses, setBuses] = useState([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyDriver);
   const [perfOpen, setPerfOpen] = useState(false);
-  const [perf, setPerf] = useState(null);
+  const [selectedPerfLicense, setSelectedPerfLicense] = useState(null);
   const [assignOpen, setAssignOpen] = useState(false);
   const [assignDriver, setAssignDriver] = useState("");
   const [assignBus, setAssignBus] = useState("");
@@ -31,84 +33,57 @@ export default function DriverPage() {
   const [filterStatus, setFilterStatus] = useState("");
   const [filterSearch, setFilterSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 30 });
-  const [depotNames, setDepotNames] = useState([]);
-  const [allDriversForAssign, setAllDriversForAssign] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState(null);
+  const [limit, setLimit] = useState(30);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const depots = await fetchAllPaginated(Endpoints.masters.depots.list(), {});
-        setDepotNames(depots.map((x) => x.name).filter(Boolean).sort());
-      } catch {
-        setDepotNames([]);
-      }
-    })();
-  }, []);
+  // TanStack Queries
+  const { data: depotNames = [] } = useAllDepotNames();
+  const { data: driverData, isLoading: loadingDrivers, error: driverError, refetch: refetchDrivers } = useDrivers({
+    depot: filterDepot,
+    status: filterStatus,
+    search: filterSearch,
+    page,
+    limit,
+  });
+  const { data: buses = [] } = useAllBuses({ enabled: assignOpen });
+  const { data: allDriversForAssign = [] } = useAllDrivers({ enabled: assignOpen });
+  const { data: perf } = useDriverPerformance(selectedPerfLicense, { enabled: perfOpen && !!selectedPerfLicense });
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const drivers = await fetchAllPaginated(Endpoints.masters.drivers.list(), {});
-        setAllDriversForAssign(drivers);
-      } catch {
-        setAllDriversForAssign([]);
-      }
-    })();
-  }, []);
+  const drivers = driverData?.items || [];
+  const meta = useMemo(() => ({
+    total: driverData?.total || 0,
+    pages: driverData?.pages || 1,
+    limit: driverData?.limit || limit,
+  }), [driverData, limit]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setFetchError(null);
-    try {
-      const [d, busItems] = await Promise.all([
-        API.get(Endpoints.masters.drivers.list(), { params: buildQuery({ depot: filterDepot, status: filterStatus, search: filterSearch, page, limit: meta.limit }) }),
-        fetchAllPaginated(Endpoints.masters.buses.list(), {}),
-      ]);
-      const du = unwrapListResponse(d.data);
-      setDrivers(du.items);
-      setMeta({ total: du.total, pages: du.pages, limit: du.limit });
-      setBuses(busItems);
-    } catch (err) {
-      setFetchError(messageFromAxiosError(err, "Failed to load drivers"));
-      setDrivers([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [filterDepot, filterStatus, filterSearch, page, meta.limit]);
-  useEffect(() => {
-    setPage(1);
-  }, [filterSearch]);
-  useEffect(() => {
-    load();
-  }, [load]);
+  // Mutations
+  const { createDriver, updateDriver, deleteDriver, assignBus: assignBusMutation } = useDriverMutations();
 
   const handleSave = async () => {
-    try {
-      if (editing) { await API.put(Endpoints.masters.drivers.update(editing), form); toast.success("Driver updated"); }
-      else { await API.post(Endpoints.masters.drivers.create(), form); toast.success("Driver added"); }
-      setOpen(false); setEditing(null); setForm(emptyDriver); load();
-    } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
+    if (editing) {
+      updateDriver.mutate({ licenseNumber: editing, payload: form }, {
+        onSuccess: () => { setOpen(false); setEditing(null); setForm(emptyDriver); }
+      });
+    } else {
+      createDriver.mutate(form, {
+        onSuccess: () => { setOpen(false); setEditing(null); setForm(emptyDriver); }
+      });
+    }
   };
 
   const handleDelete = async (lic) => {
     if (!window.confirm("Delete this driver?")) return;
-    try { await API.delete(Endpoints.masters.drivers.remove(lic)); toast.success("Deleted"); load(); }
-    catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
+    deleteDriver.mutate(lic);
   };
 
-  const viewPerf = async (lic) => {
-    try { const { data } = await API.get(Endpoints.masters.drivers.performance(lic)); setPerf(data); setPerfOpen(true); }
-    catch {}
+  const viewPerf = (lic) => {
+    setSelectedPerfLicense(lic);
+    setPerfOpen(true);
   };
 
   const handleAssign = async () => {
-    try {
-      await API.put(Endpoints.masters.drivers.assignBus(assignDriver, assignBus));
-      toast.success("Bus assigned"); setAssignOpen(false); load();
-    } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
+    assignBusMutation.mutate({ licenseNumber: assignDriver, busId: assignBus }, {
+      onSuccess: () => setAssignOpen(false)
+    });
   };
 
   return (
@@ -169,9 +144,9 @@ export default function DriverPage() {
             <TableBody>
               <TableLoadRows
                 colSpan={7}
-                loading={loading}
-                error={fetchError}
-                onRetry={load}
+                loading={loadingDrivers}
+                error={driverError}
+                onRetry={refetchDrivers}
                 isEmpty={drivers.length === 0}
                 emptyMessage="No drivers found"
               >
@@ -210,7 +185,7 @@ export default function DriverPage() {
             total={meta.total} 
             limit={meta.limit} 
             onPageChange={setPage} 
-            onLimitChange={(l) => setMeta(prev => ({ ...prev, limit: l }))}
+            onLimitChange={setLimit}
           />
         </CardContent>
       </Card>

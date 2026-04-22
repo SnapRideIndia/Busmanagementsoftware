@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
-import API, { formatApiError, buildQuery, unwrapListResponse, fetchAllPaginated, messageFromAxiosError } from "../lib/api";
+import { useConductors, useConductorMutations } from "../features/conductors/api/useConductors";
+import { useAllDepotNames } from "../features/depots/api/useDepots";
+import API, { formatApiError, messageFromAxiosError } from "../lib/api";
 import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import TableLoadRows from "../components/TableLoadRows";
@@ -20,93 +22,65 @@ const emptyConductor = {
   phone: "",
   depot: "",
   status: "active",
-  rating: 4.5,
   total_trips: 0,
 };
 
 export default function ConductorsPage() {
-  const [rows, setRows] = useState([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyConductor);
   const [filterDepot, setFilterDepot] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [filterSearch, setFilterSearch] = useState("");
-  const [depotNames, setDepotNames] = useState([]);
   const [page, setPage] = useState(1);
-  const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 20 });
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState(null);
+  const [metaLimit, setMetaLimit] = useState(20);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const depots = await fetchAllPaginated(Endpoints.masters.depots.list(), {});
-        setDepotNames(depots.map((x) => x.name).filter(Boolean).sort());
-      } catch {
-        setDepotNames([]);
-      }
-    })();
-  }, []);
+  const { data: depotNames = [] } = useAllDepotNames();
+  const { data: conductorsData, isLoading: loading, error: fetchError, refetch: load } = useConductors({
+    depot: filterDepot,
+    status: filterStatus,
+    search: filterSearch,
+    page,
+    limit: metaLimit,
+  });
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setFetchError(null);
-    try {
-      const res = await API.get(
-        Endpoints.masters.conductors.list(),
-        { params: buildQuery({ depot: filterDepot, status: filterStatus, search: filterSearch, page, limit: 20 }) }
-      );
-      const u = unwrapListResponse(res.data);
-      setRows(u.items);
-      setMeta({ total: u.total, pages: u.pages, limit: u.limit });
-    } catch (err) {
-      setFetchError(messageFromAxiosError(err, "Failed to load conductors"));
-      setRows([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [filterDepot, filterStatus, filterSearch, page]);
+  const rows = conductorsData?.items || [];
+  const meta = {
+    total: conductorsData?.total || 0,
+    pages: conductorsData?.pages || 1,
+    limit: conductorsData?.limit || metaLimit,
+  };
+
+  const { createConductor, updateConductor, deleteConductor, isSaving } = useConductorMutations();
 
   useEffect(() => {
     setPage(1);
-  }, [filterSearch]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
+  }, [filterSearch, filterDepot, filterStatus]);
   const handleSave = async () => {
     try {
       const payload = {
         ...form,
-        rating: Math.min(5, Math.max(0, Number(form.rating) || 0)),
         total_trips: Number(form.total_trips) || 0,
       };
       if (editing) {
-        await API.put(Endpoints.masters.conductors.update(editing), payload);
-        toast.success("Conductor updated");
+        await updateConductor({ id: editing, payload });
       } else {
-        await API.post(Endpoints.masters.conductors.create(), payload);
-        toast.success("Conductor added");
+        await createConductor(payload);
       }
       setOpen(false);
       setEditing(null);
       setForm(emptyConductor);
-      load();
     } catch (err) {
-      toast.error(formatApiError(err.response?.data?.detail) || err.message || "Save failed");
+      // Error handled in hook
     }
   };
 
   const handleDelete = async (id) => {
     if (!window.confirm("Delete this conductor?")) return;
     try {
-      await API.delete(Endpoints.masters.conductors.remove(id));
-      toast.success("Deleted");
-      load();
+      await deleteConductor(id);
     } catch (err) {
-      toast.error(formatApiError(err.response?.data?.detail) || err.message || "Delete failed");
+      // Error handled in hook
     }
   };
 
@@ -192,7 +166,6 @@ export default function ConductorsPage() {
                 <TableHead>Badge</TableHead>
                 <TableHead>Phone</TableHead>
                 <TableHead>Depot</TableHead>
-                <TableHead>Rating</TableHead>
                 <TableHead>Trips</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -200,7 +173,7 @@ export default function ConductorsPage() {
             </TableHeader>
             <TableBody>
               <TableLoadRows
-                colSpan={9}
+                colSpan={8}
                 loading={loading}
                 error={fetchError}
                 onRetry={load}
@@ -214,10 +187,6 @@ export default function ConductorsPage() {
                     <TableCell className="font-mono text-[12px]">{c.badge_no}</TableCell>
                     <TableCell>{c.phone || "—"}</TableCell>
                     <TableCell>{c.depot || "—"}</TableCell>
-                    <TableCell className="font-mono">
-                      {Number(c.rating).toFixed(1)}
-                      <span className="text-gray-400 text-xs ml-0.5">/ 5</span>
-                    </TableCell>
                     <TableCell className="font-mono">{c.total_trips ?? 0}</TableCell>
                     <TableCell>
                       <Badge
@@ -242,7 +211,6 @@ export default function ConductorsPage() {
                               phone: c.phone || "",
                               depot: c.depot || "",
                               status: c.status || "active",
-                              rating: c.rating ?? 4.5,
                               total_trips: c.total_trips ?? 0,
                             });
                             setEditing(c.conductor_id);
@@ -322,19 +290,7 @@ export default function ConductorsPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>Rating (0–5)</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  max={5}
-                  step="0.1"
-                  value={form.rating}
-                  onChange={(e) => setForm({ ...form, rating: e.target.value })}
-                  data-testid="conductor-rating"
-                />
-              </div>
+            <div className="grid grid-cols-1 gap-3">
               <div className="space-y-2">
                 <Label>Total trips</Label>
                 <Input
@@ -345,8 +301,8 @@ export default function ConductorsPage() {
                 />
               </div>
             </div>
-            <Button onClick={handleSave} className="w-full bg-[#C8102E] hover:bg-[#A50E25]" data-testid="conductor-save-btn">
-              {editing ? "Update" : "Save"}
+            <Button onClick={handleSave} disabled={isSaving} className="w-full bg-[#C8102E] hover:bg-[#A50E25]" data-testid="conductor-save-btn">
+              {isSaving ? "Saving..." : (editing ? "Update" : "Save")}
             </Button>
           </div>
         </DialogContent>

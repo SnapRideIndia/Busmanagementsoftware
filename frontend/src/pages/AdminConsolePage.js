@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import API, { formatApiError, unwrapListResponse, messageFromAxiosError } from "../lib/api";
+import { useAdminUsers, useAdminRoles, usePermissionsCatalog, usePermissionsMatrix, useAdminMutations } from "../features/admin/api/useAdmin";
+import API, { messageFromAxiosError } from "../lib/api";
 import { Endpoints } from "../lib/endpoints";
 import AsyncPanel from "../components/AsyncPanel";
 import { Card, CardContent } from "../components/ui/card";
@@ -47,45 +48,20 @@ function buildPermissionTableRows(perms) {
 }
 
 export default function AdminConsolePage() {
-  const [users, setUsers] = useState([]);
-  const [total, setTotal] = useState(0);
-  const [roles, setRoles] = useState([]);
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [permCatalog, setPermCatalog] = useState([]);
-  const [permMatrix, setPermMatrix] = useState({});
   const [permRole, setPermRole] = useState("admin");
   const [permDraft, setPermDraft] = useState([]);
-  const [permSaving, setPermSaving] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [uRes, rRes, cRes, mRes] = await Promise.all([
-        API.get(Endpoints.admin.users(), { params: { page: 1, limit: 100 } }),
-        API.get(Endpoints.admin.roles()),
-        API.get(Endpoints.admin.permissionsCatalog()),
-        API.get(Endpoints.admin.permissionsMatrix()),
-      ]);
-      const u = unwrapListResponse(uRes.data);
-      setUsers(u.items);
-      setTotal(u.total);
-      setRoles(Array.isArray(rRes.data) ? rRes.data : []);
-      setPermCatalog(Array.isArray(cRes.data) ? cRes.data : []);
-      setPermMatrix(mRes.data?.matrix || {});
-    } catch (err) {
-      const msg = messageFromAxiosError(err, "Failed to load admin data");
-      setError(msg);
-      setUsers([]);
-      setRoles([]);
-      setPermCatalog([]);
-      setPermMatrix({});
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const { data: userData, isLoading: userLoading, error: userError } = useAdminUsers({ search });
+  const { data: roles = [], isLoading: rolesLoading } = useAdminRoles();
+  const { data: permCatalog = [], isLoading: catLoading } = usePermissionsCatalog();
+  const { data: permMatrix = {}, isLoading: matrixLoading, refetch: refetchMatrix } = usePermissionsMatrix();
+  const { setUserRole, savePermissions: savePerms, isSaving: permSaving } = useAdminMutations();
+
+  const users = userData?.items || [];
+  const total = userData?.total || 0;
+  const loading = userLoading || rolesLoading || catLoading || matrixLoading;
+  const error = userError;
 
   useEffect(() => {
     const ids = permMatrix[permRole];
@@ -120,39 +96,23 @@ export default function AdminConsolePage() {
   };
 
   const savePermissions = async () => {
-    setPermSaving(true);
     try {
-      await API.put(Endpoints.admin.setRolePermissions(permRole), { permission_ids: permDraft });
-      toast.success("Permissions saved");
-      const { data } = await API.get(Endpoints.admin.permissionsMatrix());
-      setPermMatrix(data?.matrix || {});
+      await savePerms({ roleId: permRole, permissions: permDraft });
     } catch (err) {
-      toast.error(formatApiError(err.response?.data?.detail) || err.message || "Save failed");
-    } finally {
-      setPermSaving(false);
+      // Error handled in hook
     }
   };
 
-  useEffect(() => {
-    load();
-  }, [load]);
 
   const handleRoleChange = async (userId, newRole) => {
     try {
-      await API.put(Endpoints.admin.setUserRole(userId), { role: newRole });
-      setUsers((prev) => prev.map((x) => (x.user_id === userId || x._id === userId ? { ...x, role: newRole } : x)));
-      toast.success("Role updated");
+      await setUserRole({ userId, role: newRole });
     } catch (err) {
-      toast.error(formatApiError(err.response?.data?.detail) || err.message || "Update failed");
+      // Error handled in hook
     }
   };
 
-  const filtered = users.filter(
-    (u) =>
-      !search ||
-      (u.name && u.name.toLowerCase().includes(search.toLowerCase())) ||
-      (u.email && u.email.toLowerCase().includes(search.toLowerCase()))
-  );
+  const filtered = users;
 
   if (error && !loading) {
     return (
@@ -160,7 +120,7 @@ export default function AdminConsolePage() {
         <div className="page-header">
           <h1 className="page-title">Admin Console</h1>
         </div>
-        <AsyncPanel error={error} onRetry={load} />
+        <AsyncPanel error={error} onRetry={() => {}} />
       </div>
     );
   }

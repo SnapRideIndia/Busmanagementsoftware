@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
-import API, { formatApiError, buildQuery, unwrapListResponse } from "../lib/api";
+import { useInfractionCatalogue } from "../features/infractions/api/useInfractions";
+import { buildQuery, unwrapListResponse } from "../lib/api";
 import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import TableLoadRows from "../components/TableLoadRows";
@@ -12,20 +13,24 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "../components/ui/
 import { Search, ExternalLink, Info, HelpCircle } from "lucide-react";
 
 const catColors = {
-  A: "bg-gray-100 text-gray-700", B: "bg-blue-100 text-blue-700",
-  C: "bg-yellow-100 text-yellow-700", D: "bg-orange-100 text-orange-700",
-  E: "bg-red-100 text-red-700", F: "bg-red-200 text-red-800",
-  G: "bg-red-300 text-red-900"
+  A: "bg-gray-100 text-gray-700",
+  B: "bg-blue-100 text-blue-700",
+  C: "bg-yellow-100 text-yellow-700",
+  D: "bg-orange-100 text-orange-700",
+  E: "bg-red-100 text-red-700",
+  F: "bg-red-200 text-red-800",
+  G: "bg-red-300 text-red-900",
+  OTHERS: "bg-stone-100 text-stone-800",
 };
 
 const categories = [
-  { cat: 'A', label: 'Minor / Documentation', color: 'bg-gray-100' },
-  { cat: 'B', label: 'Operational Sync', color: 'bg-blue-100' },
-  { cat: 'C', label: 'Major Maintenance', color: 'bg-yellow-100' },
-  { cat: 'D', label: 'Serious Violation', color: 'bg-orange-100' },
-  { cat: 'E', label: 'Critical Safety', color: 'bg-red-600 text-white' },
-  { cat: 'F', label: 'Severe Breakdown', color: 'bg-red-800 text-white' },
-  { cat: 'G', label: 'Fatal Accident', color: 'bg-black text-white' }
+  { cat: "A", label: "Minor / Documentation", color: "bg-gray-100" },
+  { cat: "B", label: "Operational Sync", color: "bg-blue-100" },
+  { cat: "C", label: "Major Maintenance", color: "bg-yellow-100" },
+  { cat: "D", label: "Serious Violation", color: "bg-orange-100" },
+  { cat: "E", label: "Critical Safety", color: "bg-red-600 text-white" },
+  { cat: "F", label: "Severe Breakdown", color: "bg-red-800 text-white" },
+  { cat: "G", label: "Fatal Accident", color: "bg-black text-white" },
 ];
 
 function capRuleLabel(row) {
@@ -62,35 +67,34 @@ function has20KmRule(row) {
   return row?.km_deduction_rule === "20_km_x_pk_rate" || ["O01", "O03"].includes(String(row?.code || "").toUpperCase());
 }
 
+/** O13–O15: category OTHERS but damages follow Article 20 KPI formulas (not flat ₹ slab). */
+function isArticle20ScheduleBridge(row) {
+  return ["O13", "O14", "O15"].includes(String(row?.code || "").toUpperCase());
+}
+
 export default function InfractionsPage() {
-  const [catalogue, setCatalogue] = useState([]);
   const [catalogueSearch, setCatalogueSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(30);
-  const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 30 });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [limit, setLimit] = useState(100);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const { data } = await API.get(Endpoints.infractions.catalogue(), {
-        params: buildQuery({ page, limit, search: catalogueSearch }),
-      });
-      const cu = unwrapListResponse(data);
-      setCatalogue(cu.items);
-      setMeta({ total: cu.total, pages: cu.pages, limit: cu.limit });
-    } catch (err) {
-      setError(formatApiError(err.response?.data?.detail) || err.message || "Failed to load catalogue");
-      setCatalogue([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [page, limit, catalogueSearch]);
+  const { data: catalogueData, isLoading: loading, error: fetchError, refetch: load } = useInfractionCatalogue({
+    search: catalogueSearch,
+    page,
+    limit,
+  });
 
-  useEffect(() => { load(); }, [load]);
-  useEffect(() => { setPage(1); }, [catalogueSearch, limit]);
+  const catalogue = catalogueData?.items || [];
+  const meta = {
+    total: catalogueData?.total || 0,
+    pages: catalogueData?.pages || 1,
+    limit: catalogueData?.limit || limit,
+  };
+
+  const error = fetchError?.message || null;
+
+  useEffect(() => {
+    setPage(1);
+  }, [catalogueSearch, limit]);
 
   return (
     <div data-testid="infractions-page" className="space-y-6 max-w-7xl mx-auto">
@@ -105,9 +109,7 @@ export default function InfractionsPage() {
                 </div>
               </HoverCardTrigger>
               <HoverCardContent className="w-80 p-0 border-none shadow-2xl rounded-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
-                <div className="p-4 bg-gray-900 text-white font-black text-[10px] uppercase tracking-[0.2em]">
-                  Schedule-S Category Guide
-                </div>
+                <div className="p-4 bg-gray-900 text-white font-black text-[10px] uppercase tracking-[0.2em]">Schedule-S Category Guide</div>
                 <div className="p-4 bg-white space-y-3">
                   {categories.map((item) => (
                     <div key={item.cat} className="flex items-center gap-3">
@@ -123,8 +125,11 @@ export default function InfractionsPage() {
             </HoverCard>
           </div>
           <p className="text-gray-500 max-w-2xl leading-relaxed">
-            Reference for Schedule-S penalty codes, amounts, and escalation rules.
-            Active penalties are now managed directly within <Link to="/incidents" className="text-[#C8102E] font-bold hover:underline inline-flex items-center gap-1 mx-1">Incidents <ExternalLink size={12}/></Link>.
+            Reference for Schedule-S penalty codes, amounts, and escalation rules. Active penalties are now managed directly within{" "}
+            <Link to="/incidents" className="text-[#C8102E] font-bold hover:underline inline-flex items-center gap-1 mx-1">
+              Incidents <ExternalLink size={12} />
+            </Link>
+            .
           </p>
         </div>
       </div>
@@ -134,8 +139,8 @@ export default function InfractionsPage() {
         <div className="space-y-1">
           <h4 className="text-xs font-black uppercase tracking-widest text-amber-900">Operational Notice</h4>
           <p className="text-xs text-amber-800 leading-relaxed font-medium">
-            Infraction amounts are fixed at the time of incident reporting. Unrectified violations may trigger escalation 
-            to the next penalty slab if non-compliance continues beyond the defined resolution period.
+            Infraction amounts are fixed at the time of incident reporting. Unrectified violations may trigger escalation to the next penalty slab if non-compliance continues beyond the defined
+            resolution period.
           </p>
         </div>
       </Card>
@@ -156,7 +161,7 @@ export default function InfractionsPage() {
             <Info size={14} className="text-blue-500" /> Page {page} of {meta.pages}
           </div>
         </div>
-        
+
         <CardContent className="p-0">
           <Table className="text-[12px]">
             <TableHeader>
@@ -165,23 +170,14 @@ export default function InfractionsPage() {
                 <TableHead className="w-[60px] font-black uppercase text-[10px] tracking-widest">Category</TableHead>
                 <TableHead className="min-w-[400px] font-black uppercase text-[10px] tracking-widest">Description</TableHead>
                 <TableHead className="text-right font-black uppercase text-[10px] tracking-widest">Amount</TableHead>
-                <TableHead className="font-black uppercase text-[10px] tracking-widest pl-6 min-w-[120px]">
-                  Group
-                </TableHead>
+                <TableHead className="font-black uppercase text-[10px] tracking-widest pl-6 min-w-[120px]">Group</TableHead>
                 <TableHead className="text-right font-black uppercase text-[10px] tracking-widest">Resolution Days</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest pl-4">Capping Rule</TableHead>
                 <TableHead className="font-black uppercase text-[10px] tracking-widest">Escalation</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              <TableLoadRows
-                colSpan={8}
-                loading={loading}
-                error={error}
-                onRetry={load}
-                isEmpty={catalogue.length === 0}
-                emptyMessage="No catalogue entries found"
-              >
+              <TableLoadRows colSpan={8} loading={loading} error={error} onRetry={load} isEmpty={catalogue.length === 0} emptyMessage="No catalogue entries found">
                 {catalogue.map((c) => (
                   <TableRow key={c.id} className="hover:bg-gray-50 transition-colors border-b last:border-0" data-testid={`cat-row-${c.code}`}>
                     <TableCell className="font-mono font-bold text-[#C8102E] px-6 text-[12px]">{c.code}</TableCell>
@@ -191,7 +187,23 @@ export default function InfractionsPage() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-[12px] font-medium text-gray-700 py-4 leading-relaxed pr-8 whitespace-normal break-words">
-                      {c.description}
+                      <div>{c.description}</div>
+                      {(c.calculation_mechanism || c.data_provenance_note) && (
+                        <div className="mt-2 space-y-1 text-[11px] text-gray-500 font-normal border-t border-gray-100 pt-2">
+                          {c.calculation_mechanism && (
+                            <p>
+                              <span className="font-semibold text-gray-600">Calculation: </span>
+                              {c.calculation_mechanism}
+                            </p>
+                          )}
+                          {c.data_provenance_note && (
+                            <p>
+                              <span className="font-semibold text-gray-600">Data (next): </span>
+                              {c.data_provenance_note}
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell className="text-right pr-4 text-[12px]">
                       {has20KmRule(c) ? (
@@ -199,16 +211,18 @@ export default function InfractionsPage() {
                           <span className="font-mono font-black text-gray-900">20 km x PK rate</span>
                           <span className="text-[10px] text-amber-700 font-semibold">16.6 deduction rule</span>
                         </div>
+                      ) : isArticle20ScheduleBridge(c) ? (
+                        <div className="inline-flex flex-col items-end leading-tight">
+                          <span className="font-mono font-black text-gray-900">Art. 20 % / slabs</span>
+                          <span className="text-[10px] text-stone-600 font-semibold">not flat ₹ slab</span>
+                        </div>
                       ) : (
                         <span className="font-mono font-black text-gray-900">₹{c.amount?.toLocaleString()}</span>
                       )}
                     </TableCell>
                     <TableCell className="pl-6">
                       {scheduleGroupKey(c) ? (
-                        <Badge
-                          variant="outline"
-                          className={`text-[9px] font-black h-5 uppercase border ${scheduleGroupStyles[scheduleGroupKey(c)] || "bg-gray-50 text-gray-600 border-gray-100"}`}
-                        >
+                        <Badge variant="outline" className={`text-[9px] font-black h-5 uppercase border ${scheduleGroupStyles[scheduleGroupKey(c)] || "bg-gray-50 text-gray-600 border-gray-100"}`}>
                           {scheduleGroupLabel(c)}
                         </Badge>
                       ) : (
@@ -216,7 +230,7 @@ export default function InfractionsPage() {
                       )}
                     </TableCell>
                     <TableCell className="text-right font-mono text-gray-500 whitespace-nowrap text-[12px]">{c.resolve_days ?? "—"}d</TableCell>
-                    <TableCell className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter pl-8 font-mono whitespace-normal">{capRuleLabel(c)}</TableCell>
+                    <TableCell className="text-[10px] font-bold text-gray-400 tracking-tighter pl-8 font-mono whitespace-normal">{capRuleLabel(c)}</TableCell>
                     <TableCell className="text-[10px] font-medium text-gray-600 whitespace-normal">{escalationLabel(c)}</TableCell>
                   </TableRow>
                 ))}
@@ -224,14 +238,7 @@ export default function InfractionsPage() {
             </TableBody>
           </Table>
           <div className="bg-gray-50/30">
-            <TablePaginationBar
-              page={page}
-              pages={meta.pages}
-              total={meta.total}
-              limit={limit}
-              onPageChange={setPage}
-              onLimitChange={setLimit}
-            />
+            <TablePaginationBar page={page} pages={meta.pages} total={meta.total} limit={limit} onPageChange={setPage} onLimitChange={setLimit} />
           </div>
         </CardContent>
       </Card>

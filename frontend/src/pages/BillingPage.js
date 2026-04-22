@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import API, { formatApiError, buildQuery, unwrapListResponse, fetchAllPaginated, getBackendOrigin } from "../lib/api";
+import { useBillingList, useBillingDetail, useBillingTripIds, useBillingMutations } from "../features/billing/api/useBilling";
+import API, { formatApiError, buildQuery, unwrapListResponse, fetchAllPaginated, getBackendOrigin, messageFromAxiosError } from "../lib/api";
 import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import TableLoadRows from "../components/TableLoadRows";
@@ -28,6 +29,12 @@ import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, R
 
 const WORKFLOW_STATES = ["draft", "submitted", "paid"];
 
+function formatInvoiceTariffRs(v) {
+  if (v == null || v === "") return "—";
+  const n = Number(v);
+  return Number.isFinite(n) ? `Rs. ${n}/kWh` : "—";
+}
+
 async function copyInvoiceId(id) {
   const s = String(id || "");
   if (!s) return;
@@ -51,16 +58,23 @@ function dateInputFromIso(iso) {
 }
 
 export default function BillingPage() {
-  const [invoices, setInvoices] = useState([]);
+  const today = new Date().toISOString().split("T")[0];
   const [genOpen, setGenOpen] = useState(false);
   const [viewOpen, setViewOpen] = useState(false);
-  const [selected, setSelected] = useState(null);
-  const [form, setForm] = useState({ period_start: "", period_end: "", depot: "", bus_id: "", trip_id: "" });
-  const [generating, setGenerating] = useState(false);
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
   const [filterDepot, setFilterDepot] = useState("");
+  const [filterBus, setFilterBus] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
+  const [page, setPage] = useState(1);
+  const [selectedId, setSelectedId] = useState(null);
+  const [genForm, setGenForm] = useState({ date: today, period_start: "", period_end: "", depot: "", bus_id: "", trip_id: "" });
+  const [depotNames, setDepotNames] = useState([]);
+  const [allBuses, setAllBuses] = useState([]);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editingInvoice, setEditingInvoice] = useState(null);
+  const [editForm, setEditForm] = useState({ status: "draft", submitted_at: "", paid_at: "" });
+
   const [filterInvoiceId, setFilterInvoiceId] = useState("");
   const [filterBusId, setFilterBusId] = useState("");
   const [filterTripId, setFilterTripId] = useState("");
@@ -68,49 +82,37 @@ export default function BillingPage() {
   const [filterSubmittedTo, setFilterSubmittedTo] = useState("");
   const [filterPaidFrom, setFilterPaidFrom] = useState("");
   const [filterPaidTo, setFilterPaidTo] = useState("");
-  const [depotNames, setDepotNames] = useState([]);
-  const [allBuses, setAllBuses] = useState([]);
-  const [tripOptions, setTripOptions] = useState([]);
-  const [page, setPage] = useState(1);
-  const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 20 });
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState(null);
-  const [editOpen, setEditOpen] = useState(false);
-  const [editingInvoice, setEditingInvoice] = useState(null);
-  const [editForm, setEditForm] = useState({ status: "draft", submitted_at: "", paid_at: "" });
-  const [savingEdit, setSavingEdit] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setFetchError(null);
-    try {
-      const { data } = await API.get(Endpoints.billing.root(), {
-        params: buildQuery({
-          date_from: filterFrom,
-          date_to: filterTo,
-          depot: filterDepot,
-          status: filterStatus,
-          invoice_id: filterInvoiceId,
-          bus_id: filterBusId,
-          trip_id: filterTripId,
-          submitted_from: filterSubmittedFrom,
-          submitted_to: filterSubmittedTo,
-          paid_from: filterPaidFrom,
-          paid_to: filterPaidTo,
-          page,
-          limit: 20,
-        }),
-      });
-      const u = unwrapListResponse(data);
-      setInvoices(u.items);
-      setMeta({ total: u.total, pages: u.pages, limit: u.limit });
-    } catch (err) {
-      setFetchError(formatApiError(err.response?.data?.detail) || err.message || "Failed to load invoices");
-      setInvoices([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [filterFrom, filterTo, filterDepot, filterStatus, filterInvoiceId, filterBusId, filterTripId, filterSubmittedFrom, filterSubmittedTo, filterPaidFrom, filterPaidTo, page]);
+  const filters = {
+    date_from: filterFrom,
+    date_to: filterTo,
+    depot: filterDepot,
+    bus_id: filterBusId || filterBus,
+    status: filterStatus,
+    invoice_id: filterInvoiceId,
+    trip_id: filterTripId,
+    submitted_from: filterSubmittedFrom,
+    submitted_to: filterSubmittedTo,
+    paid_from: filterPaidFrom,
+    paid_to: filterPaidTo,
+    page,
+    limit: 20,
+  };
+
+  const { data: billingData, isLoading: loading, error: fetchError, refetch: load } = useBillingList(filters);
+  const { data: selected, isLoading: detailLoading } = useBillingDetail(selectedId);
+  const { data: tripIds = [] } = useBillingTripIds({ bus_id: genForm.bus_id, date: genForm.date });
+  const { generateBill, updateBill, isSubmitting: submitting } = useBillingMutations();
+
+  const bills = billingData?.items || [];
+  const meta = {
+    total: billingData?.total || 0,
+    pages: billingData?.pages || 1,
+    limit: billingData?.limit || 20,
+  };
+
+  const error = fetchError ? messageFromAxiosError(fetchError, "Failed to load billing") : null;
+
   useEffect(() => {
     (async () => {
       try {
@@ -126,48 +128,20 @@ export default function BillingPage() {
       }
     })();
   }, []);
-  useEffect(() => {
-    (async () => {
-      if (!form.period_start || !form.period_end || !form.bus_id) {
-        setTripOptions([]);
-        setForm((prev) => ({ ...prev, trip_id: "" }));
-        return;
-      }
-      try {
-        const { data } = await API.get(Endpoints.billing.tripIds(), {
-          params: buildQuery({
-            period_start: form.period_start,
-            period_end: form.period_end,
-            depot: form.depot,
-            bus_id: form.bus_id,
-          }),
-        });
-        const ids = Array.isArray(data?.trip_ids) ? data.trip_ids : [];
-        setTripOptions(ids);
-        setForm((prev) => (prev.trip_id && !ids.includes(prev.trip_id) ? { ...prev, trip_id: "" } : prev));
-      } catch {
-        setTripOptions([]);
-      }
-    })();
-  }, [form.period_start, form.period_end, form.depot, form.bus_id]);
-  useEffect(() => {
-    load();
-  }, [load]);
 
   const handleGenerate = async () => {
-    if (!form.period_start || !form.period_end) { toast.error("Select period"); return; }
-    setGenerating(true);
     try {
-      const { data } = await API.post(Endpoints.billing.generate(), form);
-      toast.success(`Invoice ${data.invoice_id} generated`);
-      setGenOpen(false); load(); setSelected(data); setViewOpen(true);
-    } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
-    finally { setGenerating(false); }
+      await generateBill(genForm);
+      setGenForm({ date: today, bus_id: "", trip_id: "" });
+      setGenOpen(false);
+    } catch (err) {
+      // Error handled in hook
+    }
   };
 
-  const viewInvoice = async (id) => {
-    try { const { data } = await API.get(Endpoints.billing.get(id)); setSelected(data); setViewOpen(true); }
-    catch {}
+  const viewDetail = (id) => {
+    setSelectedId(id);
+    setViewOpen(true);
   };
 
   const exportPdf = (id) => {
@@ -191,34 +165,26 @@ export default function BillingPage() {
 
   const saveEditInvoice = async () => {
     if (!editingInvoice?.invoice_id) return;
-    const invId = editingInvoice.invoice_id;
-    setSavingEdit(true);
     try {
-      const { data } = await API.patch(Endpoints.billing.patch(invId), {
-        status: editForm.status,
-        submitted_at: editForm.submitted_at,
-        paid_at: editForm.paid_at,
-      });
+      await updateBill({ id: editingInvoice.invoice_id, data: editForm });
       toast.success("Invoice updated");
       setEditOpen(false);
       setEditingInvoice(null);
-      await load();
-      if (viewOpen && selected?.invoice_id === invId) {
-        setSelected(data);
-      }
     } catch (err) {
-      toast.error(formatApiError(err.response?.data?.detail) || "Failed to save");
-    } finally {
-      setSavingEdit(false);
+      toast.error("Failed to save");
     }
   };
 
   const busesForFilter = filterDepot ? allBuses.filter((b) => b.depot === filterDepot) : allBuses;
-  const busesForGenerate = form.depot ? allBuses.filter((b) => b.depot === form.depot) : allBuses;
   const [billingTab, setBillingTab] = useState("invoices");
   const [qData, setQData] = useState(null);
   const loadQuarterly = useCallback(async () => {
-    try { const { data } = await API.get("/billing-quarterly-summary"); setQData(data); } catch {}
+    try {
+      const { data } = await API.get("/billing-quarterly-summary");
+      setQData(data);
+    } catch (err) {
+      console.error("Failed to load quarterly summary", err);
+    }
   }, []);
 
   return (
@@ -452,10 +418,10 @@ export default function BillingPage() {
                 loading={loading}
                 error={fetchError}
                 onRetry={load}
-                isEmpty={invoices.length === 0}
+                isEmpty={bills.length === 0}
                 emptyMessage="No invoices yet. Generate one to get started."
               >
-                {invoices.map((inv) => (
+                {bills.map((inv) => (
                 <TableRow key={inv.invoice_id} className="hover:bg-gray-50" data-testid={`invoice-row-${inv.invoice_id}`}>
                   <TableCell className="p-2 align-middle max-w-[132px]">
                     <div className="group flex items-center gap-0.5">
@@ -526,7 +492,7 @@ export default function BillingPage() {
                             <DropdownMenuSubContent className="text-xs">
                               <DropdownMenuItem
                                 className="gap-2"
-                                onClick={() => viewInvoice(inv.invoice_id)}
+                                onClick={() => viewDetail(inv.invoice_id)}
                                 data-testid={`view-invoice-${inv.invoice_id}`}
                               >
                                 <Eye className="h-3.5 w-3.5 opacity-70" /> View
@@ -567,11 +533,11 @@ export default function BillingPage() {
         <DialogContent data-testid="billing-generate-dialog">
           <DialogHeader><DialogTitle>Generate Invoice</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            <div className="space-y-2"><Label>Period Start</Label><Input type="date" value={form.period_start} onChange={(e) => setForm({ ...form, period_start: e.target.value, trip_id: "" })} data-testid="billing-period-start" /></div>
-            <div className="space-y-2"><Label>Period End</Label><Input type="date" value={form.period_end} onChange={(e) => setForm({ ...form, period_end: e.target.value, trip_id: "" })} data-testid="billing-period-end" /></div>
+            <div className="space-y-2"><Label>Period Start</Label><Input type="date" value={genForm.period_start} onChange={(e) => setGenForm({ ...genForm, period_start: e.target.value, trip_id: "" })} data-testid="billing-period-start" /></div>
+            <div className="space-y-2"><Label>Period End</Label><Input type="date" value={genForm.period_end} onChange={(e) => setGenForm({ ...genForm, period_end: e.target.value, trip_id: "" })} data-testid="billing-period-end" /></div>
             <div className="space-y-2">
               <Label>Depot (optional)</Label>
-              <Select value={form.depot || "all"} onValueChange={(v) => setForm({ ...form, depot: v === "all" ? "" : v, bus_id: "", trip_id: "" })}>
+              <Select value={genForm.depot || "all"} onValueChange={(v) => setGenForm({ ...genForm, depot: v === "all" ? "" : v, bus_id: "", trip_id: "" })}>
                 <SelectTrigger data-testid="billing-depot"><SelectValue placeholder="All depots" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All depots</SelectItem>
@@ -583,11 +549,11 @@ export default function BillingPage() {
             </div>
             <div className="space-y-2">
               <Label>Bus (optional)</Label>
-              <Select value={form.bus_id || "all"} onValueChange={(v) => setForm({ ...form, bus_id: v === "all" ? "" : v, trip_id: "" })}>
+              <Select value={genForm.bus_id || "all"} onValueChange={(v) => setGenForm({ ...genForm, bus_id: v === "all" ? "" : v, trip_id: "" })}>
                 <SelectTrigger data-testid="billing-bus"><SelectValue placeholder="All buses in scope" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All buses</SelectItem>
-                  {busesForGenerate.map((b) => (
+                  {allBuses.map((b) => (
                     <SelectItem key={b.bus_id} value={b.bus_id}>{b.bus_id}</SelectItem>
                   ))}
                 </SelectContent>
@@ -595,18 +561,18 @@ export default function BillingPage() {
             </div>
             <div className="space-y-2">
               <Label>Trip ID (optional)</Label>
-              <Select value={form.trip_id || "all"} onValueChange={(v) => setForm({ ...form, trip_id: v === "all" ? "" : v })} disabled={!form.bus_id || tripOptions.length === 0}>
-                <SelectTrigger data-testid="billing-trip"><SelectValue placeholder={!form.bus_id ? "Select bus first" : "All trips"} /></SelectTrigger>
+              <Select value={genForm.trip_id || "all"} onValueChange={(v) => setGenForm({ ...genForm, trip_id: v === "all" ? "" : v })} disabled={!genForm.bus_id || tripIds.length === 0}>
+                <SelectTrigger data-testid="billing-trip"><SelectValue placeholder={!genForm.bus_id ? "Select bus first" : "All trips"} /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All trips</SelectItem>
-                  {tripOptions.map((t) => (
+                  {tripIds.map((t) => (
                     <SelectItem key={t} value={t}>{t}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-            <Button onClick={handleGenerate} disabled={generating} className="w-full bg-[#C8102E] hover:bg-[#A50E25]" data-testid="billing-generate-submit">
-              {generating ? "Generating..." : "Generate Invoice"}
+            <Button onClick={handleGenerate} disabled={submitting} className="w-full bg-[#C8102E] hover:bg-[#A50E25]" data-testid="billing-generate-submit">
+              {submitting ? "Generating..." : "Generate Invoice"}
             </Button>
           </div>
         </DialogContent>
@@ -656,19 +622,17 @@ export default function BillingPage() {
                 <table className="w-full text-sm">
                   <tbody>
                     <tr className="border-b"><td className="p-3 text-gray-600">Total KM Operated</td><td className="p-3 text-right font-mono font-medium">{selected.total_km?.toLocaleString()} km</td></tr>
-                    <tr className="border-b"><td className="p-3 text-gray-600">Scheduled KM</td><td className="p-3 text-right font-mono">{selected.scheduled_km?.toLocaleString()} km</td></tr>
                     <tr className="border-b"><td className="p-3 text-gray-600">Avg PK Rate</td><td className="p-3 text-right font-mono">Rs. {selected.avg_pk_rate}/km</td></tr>
                     <tr className="border-b bg-green-50"><td className="p-3 font-medium">Base Payment (KM x PK Rate)</td><td className="p-3 text-right font-mono font-semibold">Rs. {selected.base_payment?.toLocaleString()}</td></tr>
                     <tr className="border-b"><td className="p-3 text-gray-600">Allowed Energy</td><td className="p-3 text-right font-mono">{selected.allowed_energy_kwh?.toLocaleString()} kWh</td></tr>
                     <tr className="border-b"><td className="p-3 text-gray-600">Actual Energy</td><td className="p-3 text-right font-mono">{selected.actual_energy_kwh?.toLocaleString()} kWh</td></tr>
-                    <tr className="border-b"><td className="p-3 text-gray-600">Tariff Rate</td><td className="p-3 text-right font-mono">Rs. {selected.tariff_rate}/kWh</td></tr>
+                    <tr className="border-b"><td className="p-3 text-gray-600">Base Electricity Tariff</td><td className="p-3 text-right font-mono">{formatInvoiceTariffRs(selected.base_electricity_tariff)}</td></tr>
+                    <tr className="border-b"><td className="p-3 text-gray-600">Actual Electricity Tariff</td><td className="p-3 text-right font-mono">{formatInvoiceTariffRs(selected.actual_electricity_tariff ?? selected.tariff_rate)}</td></tr>
                     <tr className="border-b bg-blue-50"><td className="p-3 font-medium">Energy Adjustment</td><td className="p-3 text-right font-mono font-semibold text-blue-700">Rs. {selected.energy_adjustment?.toLocaleString()}</td></tr>
-                    <tr className="border-b bg-emerald-50"><td className="p-3 font-medium">KM Incentive</td><td className="p-3 text-right font-mono font-semibold text-emerald-700">Rs. {selected.km_incentive?.toLocaleString() || "0"}</td></tr>
-                    <tr className="border-b bg-green-50"><td className="p-3 font-medium text-green-800">GCC KPI Incentives (§18)</td><td className="p-3 text-right font-mono font-semibold text-green-700">+ Rs. {(selected.kpi_incentives || 0).toLocaleString()}</td></tr>
-                    <tr className="border-b"><td className="p-3 text-gray-600">Missed KM</td><td className="p-3 text-right font-mono text-gray-500">{selected.missed_km?.toLocaleString()} km <span className="text-[10px] text-gray-400">(informational)</span></td></tr>
+                    <tr className="border-b bg-green-50"><td className="p-3 font-medium text-green-800">KPI Incentives</td><td className="p-3 text-right font-mono font-semibold text-green-700">+ Rs. {(selected.kpi_incentives || 0).toLocaleString()}</td></tr>
                     <tr className="border-b bg-amber-50"><td className="p-3 font-medium text-amber-900">(-) Infraction Deduction</td><td className="p-3 text-right font-mono font-semibold text-amber-700">Rs. {(selected.infraction_deduction ?? selected.rule_based_infraction_deduction ?? selected.performance_deduction ?? 0).toLocaleString()}</td></tr>
                     <tr className="border-b"><td className="p-3 text-gray-600">(-) System Deduction</td><td className="p-3 text-right font-mono text-red-600">Rs. {selected.system_deduction?.toLocaleString()}</td></tr>
-                    <tr className="border-b bg-red-50"><td className="p-3 font-medium text-red-900">(-) GCC KPI Damages (§18)</td><td className="p-3 text-right font-mono font-semibold text-red-600">Rs. {(selected.kpi_damages || 0).toLocaleString()}</td></tr>
+                    <tr className="border-b bg-red-50"><td className="p-3 font-medium text-red-900">(-) KPI Damages</td><td className="p-3 text-right font-mono font-semibold text-red-600">Rs. {(selected.kpi_damages || 0).toLocaleString()}</td></tr>
                     <tr className="border-b bg-red-100"><td className="p-3 font-bold">Total Deductions</td><td className="p-3 text-right font-mono font-bold text-red-700">Rs. {selected.total_deduction?.toLocaleString()}</td></tr>
                   </tbody>
                   <tfoot>
@@ -681,7 +645,7 @@ export default function BillingPage() {
               {selected.kpi_breakdown && Object.keys(selected.kpi_breakdown).length > 0 && (
                 <div className="border rounded-md overflow-hidden" data-testid="kpi-breakdown-table">
                   <div className="p-3 bg-red-50 border-b">
-                    <p className="font-semibold text-sm text-red-900">GCC KPI Breakdown (§18)</p>
+                    <p className="font-semibold text-sm text-red-900">KPI Breakdown</p>
                   </div>
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50">
@@ -730,74 +694,6 @@ export default function BillingPage() {
                 <p>Show-cause notice: {selected.artifact_refs?.show_cause_notice || "—"}</p>
                 <p>GST proof: {selected.artifact_refs?.gst_proof_ref || "—"}</p>
                 <p>Tax withholding ref: {selected.artifact_refs?.tax_withholding_ref || "—"}</p>
-              </div>
-
-              <div className="border rounded-md overflow-hidden">
-                <div className="p-3 bg-gray-50 border-b">
-                  <p className="font-semibold text-sm">Bus-wise summary</p>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="p-2 text-left">Bus</th>
-                        <th className="p-2 text-right">Trips</th>
-                        <th className="p-2 text-right">Sch KM</th>
-                        <th className="p-2 text-right">Optd KM</th>
-                        <th className="p-2 text-right">Passengers</th>
-                        <th className="p-2 text-right">Revenue (Rs)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(selected.bus_wise_summary || []).map((r) => (
-                        <tr key={r.bus_id} className="border-t">
-                          <td className="p-2 font-mono">{r.bus_id}</td>
-                          <td className="p-2 text-right">{r.trip_count?.toLocaleString()}</td>
-                          <td className="p-2 text-right">{r.scheduled_km?.toLocaleString()}</td>
-                          <td className="p-2 text-right">{r.actual_km?.toLocaleString()}</td>
-                          <td className="p-2 text-right">{r.passengers?.toLocaleString()}</td>
-                          <td className="p-2 text-right">{r.revenue_amount?.toLocaleString()}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div className="border rounded-md overflow-hidden">
-                <div className="p-3 bg-gray-50 border-b">
-                  <p className="font-semibold text-sm">Trip-wise details</p>
-                </div>
-                <div className="overflow-x-auto max-h-72">
-                  <table className="w-full text-xs">
-                    <thead className="bg-gray-50 sticky top-0">
-                      <tr>
-                        <th className="p-2 text-left">Date</th>
-                        <th className="p-2 text-left">Bus</th>
-                        <th className="p-2 text-left">Trip</th>
-                        <th className="p-2 text-left">Duty</th>
-                        <th className="p-2 text-right">Sch KM</th>
-                        <th className="p-2 text-right">Optd KM</th>
-                        <th className="p-2 text-right">Passengers</th>
-                        <th className="p-2 text-right">Revenue (Rs)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(selected.trip_wise_details || []).map((r, idx) => (
-                        <tr key={`${r.trip_id || "trip"}-${idx}`} className="border-t">
-                          <td className="p-2">{r.date ? formatDateIN(r.date) : "—"}</td>
-                          <td className="p-2 font-mono">{r.bus_id}</td>
-                          <td className="p-2 font-mono">{r.trip_id || "—"}</td>
-                          <td className="p-2 font-mono">{r.duty_id || "—"}</td>
-                          <td className="p-2 text-right">{r.scheduled_km?.toLocaleString()}</td>
-                          <td className="p-2 text-right">{r.actual_km?.toLocaleString()}</td>
-                          <td className="p-2 text-right">{r.passengers?.toLocaleString()}</td>
-                          <td className="p-2 text-right">{r.revenue_amount?.toLocaleString()}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
               </div>
 
               <div className="flex gap-2">
@@ -863,11 +759,11 @@ export default function BillingPage() {
                 type="button"
                 size="sm"
                 className="bg-[#C8102E] hover:bg-[#A50E25]"
-                disabled={savingEdit}
+                disabled={submitting}
                 onClick={saveEditInvoice}
                 data-testid="billing-edit-save"
               >
-                {savingEdit ? "Saving…" : "Save"}
+                {submitting ? "Saving…" : "Save"}
               </Button>
             </div>
           </div>

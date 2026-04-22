@@ -69,6 +69,12 @@ def normalize_catalog_infraction_code(raw: str | None) -> str:
             return "O11"
         if num == 12:
             return "O12"
+        if num == 13:
+            return "O13"
+        if num == 14:
+            return "O14"
+        if num == 15:
+            return "O15"
         return "O08"
     return s
 
@@ -112,7 +118,7 @@ TENDER_REPORT_HEADS = [
     "Early/ Late trip started from origin Report",
     "No driver/ no conductor report",
     "Breakdown report not attended within 2 hrs.",
-    "Breakdown 0.2% (As per article 16.6.3)",
+    "Breakdown 0.2% (Article 20.2 — Reliability / Breakdown Factor)",
     "Accident instances report",
     "Over speed report",
     "Assured KMs reconciliation report",
@@ -231,7 +237,7 @@ INFRACTION_MASTER = [
             "tow-away of the affected Bus within 1 (one) hour of the Breakdown. The Operator shall as soon as is "
             "reasonable practicable, provide a replacement Bus to complete the route after such breakdown, or shall "
             "transfer all (or as many as capacity permits) Users to the next Bus plying on the same Operational Route "
-            "in order to minimise inconvenience to the Users. If this is not done, the Operator shall be liable to "
+            "in order to minimise inconvenience to the Users. If this is not done, it shall be deemed an Operator Default and the Operator shall be liable to pay "
             "Damages of 20 kms deduction per instance. In case bus is not "
             "repaired or towed away from the break down spot within a period of 1 (one) hour, Operator shall be liable "
             "to pay additional damages of deduction of 20 kms per each additional hour."
@@ -245,7 +251,7 @@ INFRACTION_MASTER = [
         "table": "16.6",
         "description": (
             "The operator shall ensure regular communication with buses throughout the operation period "
-            "by making use of relevant technology."
+            "by making use of relevant technology, more specifically as provided in Clause 19.7 of this Agreement."
         ),
         "safety_flag": False,
         "schedule_group": "operations",
@@ -292,6 +298,49 @@ INFRACTION_MASTER = [
         "safety_flag": False,
         "schedule_group": "operations",
     },
+    # Schedule S / Article 20 KPI bridges (category OTHERS: no flat Schedule-S slab; damages per Article 20 formulas).
+    {
+        "code": "O13",
+        "category": "OTHERS",
+        "table": "S",
+        "description": (
+            "Schedule S (Article 20.10 context) — Reliability / Breakdown Factor (Clause 20.2). "
+            "BF = (aggregate breakdowns in the month × 10,000) ÷ (cumulative bus km operated in the month). "
+            "Damages: 0.1% of Monthly Fees for each 0.1 increase in BF above the 0.5 threshold (incentives below 0.5 per contract)."
+        ),
+        "safety_flag": True,
+        "schedule_group": "safety",
+        "calculation_mechanism": "Monthly BF vs 0.5; damages = 0.1% × Monthly Fees per 0.1 BF increment above threshold (per Clause 20.2.3).",
+        "data_provenance_note": "Next: breakdown count from ITS/maintenance logs; month km from odometer or GPS trip aggregates.",
+    },
+    {
+        "code": "O14",
+        "category": "OTHERS",
+        "table": "S",
+        "description": (
+            "Schedule S (Article 20.10 context) — Operational Availability (Clause 20.3). "
+            "Availability % = (buses available at scheduled shift start ÷ buses in deployment plan) × 100 vs 95% guaranteed availability. "
+            "Shortfall damages per contract table (bus-km equivalent per non-available bus per shift band)."
+        ),
+        "safety_flag": True,
+        "schedule_group": "safety",
+        "calculation_mechanism": "Compare monthly availability to 95%; apply slab damages (50/60/70 bus-km per shift per bus per Clause 20.3.6).",
+        "data_provenance_note": "Next: deployment plan vs depot turnout / AVL at shift start.",
+    },
+    {
+        "code": "O15",
+        "category": "OTHERS",
+        "table": "S",
+        "description": (
+            "Schedule S (Article 20.10 context) — Start & Arrival Punctuality (Clause 20.4). "
+            "Guaranteed Start Punctuality 90% and Arrival 80% with contract relaxations. "
+            "Damages: 1% of Monthly Fees per 1% shortfall vs guarantee (anti-double-count if both stem from late start per Clause 20.4.5)."
+        ),
+        "safety_flag": True,
+        "schedule_group": "safety",
+        "calculation_mechanism": "Monthly % on-time starts/arrivals vs thresholds; 1% Monthly Fees per 1% miss (per Clause 20.4.5).",
+        "data_provenance_note": "Next: scheduled vs actual first stop / last stop times from EBMS or ITS trip records.",
+    },
     # O-series rows (Category A slab with cap/escalation logic).
     {"code": "O08", "category": "A", "table": "H", "description": "Staff error or unauthorized curtailments by staff.", "safety_flag": False, "schedule_group": "operations"},
     {"code": "O09", "category": "A", "table": "H", "description": "A bus blocked in the garage and unable to depart on time.", "safety_flag": False, "schedule_group": "operations"},
@@ -332,6 +381,10 @@ def build_master_rows() -> list[dict]:
         if str(item.get("code", "")).upper() in incident_166_20km_codes:
             row["km_deduction_rule"] = "20_km_x_pk_rate"
             row["km_deduction_km"] = 20
+        if item.get("calculation_mechanism"):
+            row["calculation_mechanism"] = str(item["calculation_mechanism"])
+        if item.get("data_provenance_note"):
+            row["data_provenance_note"] = str(item["data_provenance_note"])
         rows.append(row)
     return rows
 

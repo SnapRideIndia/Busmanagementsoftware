@@ -33,16 +33,24 @@ class Settings:
 
     @property
     def frontend_url(self) -> str:
-        return os.environ.get("FRONTEND_URL", "http://localhost:3000")
+        return os.environ.get("FRONTEND_URL", "http://localhost:3000").strip().rstrip("/")
 
     @property
     def cors_origins(self) -> list[str]:
-        raw = os.environ.get("CORS_ORIGINS", "")
+        raw = os.environ.get("CORS_ORIGINS", "").strip()
         if raw == "*":
-            return ["*"]
-        if raw.strip():
-            return [o.strip() for o in raw.split(",") if o.strip()]
-        return [self.frontend_url]
+            # Credentials mode cannot use wildcard origin; fall back to frontend URL.
+            return [self.frontend_url]
+        if raw:
+            return [o.strip().rstrip("/") for o in raw.split(",") if o.strip()]
+        primary = self.frontend_url
+        origins = [primary]
+        # CRA often uses :3000; a second dev server bumps to :3001. Both need CORS.
+        if "localhost" in primary or primary.startswith("http://127.0.0.1"):
+            for origin in ("http://localhost:3000", "http://localhost:3001"):
+                if origin not in origins:
+                    origins.append(origin)
+        return origins
 
     @property
     def backend_root(self) -> Path:
@@ -52,14 +60,6 @@ class Settings:
     def memory_dir(self) -> Path:
         """Writable docs dir for dev credentials (works on Windows + Linux)."""
         return self.backend_root / "memory"
-
-    @property
-    def upload_dir(self) -> Path:
-        """Root directory for user uploads (incident attachments, etc.)."""
-        raw = os.environ.get("UPLOAD_DIR", "").strip()
-        if raw:
-            return Path(raw)
-        return self.backend_root / "uploads"
 
     @property
     def max_upload_bytes(self) -> int:
@@ -78,6 +78,29 @@ class Settings:
                 "application/pdf",
             }
         )
+
+    @property
+    def s3_bucket(self) -> str:
+        """S3 bucket for incident attachments (required for upload; empty disables uploads)."""
+        return os.environ.get("S3_INCIDENT_BUCKET", "").strip()
+
+    @property
+    def s3_region(self) -> str:
+        return (
+            os.environ.get("AWS_REGION")
+            or os.environ.get("AWS_DEFAULT_REGION")
+            or "us-east-1"
+        ).strip()
+
+    @property
+    def s3_key_prefix(self) -> str:
+        """Prefix for S3 keys, e.g. ebms-incidents/ — always ends with /."""
+        p = os.environ.get("S3_INCIDENT_PREFIX", "ebms-incidents/").strip()
+        return p if p.endswith("/") else f"{p}/"
+
+    @property
+    def incident_attachments_use_s3(self) -> bool:
+        return bool(self.s3_bucket)
 
 
 settings = Settings()

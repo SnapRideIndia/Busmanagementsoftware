@@ -1,6 +1,8 @@
 import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import Layout from "./components/Layout";
 import RingLoader from "./components/RingLoader";
@@ -11,11 +13,13 @@ import BusPage from "./pages/BusPage";
 import DepotsPage from "./pages/DepotsPage";
 import RoutesPage from "./pages/RoutesPage";
 import StopsPage from "./pages/StopsPage";
+import TerminalsPage from "./pages/TerminalsPage";
 import DriverPage from "./pages/DriverPage";
 import ConductorsPage from "./pages/ConductorsPage";
 import LiveTrackingPage from "./pages/LiveTrackingPage";
 import EnergyPage from "./pages/EnergyPage";
 import KpiPage from "./pages/KpiPage";
+import KpiDetailPage from "./pages/KpiDetailPage";
 import DeductionPage from "./pages/DeductionPage";
 import BillingPage from "./pages/BillingPage";
 import ReportsPage from "./pages/ReportsPage";
@@ -24,14 +28,25 @@ import IncidentPage from "./pages/IncidentPage";
 import SettingsPage from "./pages/SettingsPage";
 import RevenueDetailPage from "./pages/RevenueDetailPage";
 import KmDetailPage from "./pages/KmDetailPage";
-import DutyPage from "./pages/DutyPage";
+import DutyPage from "./pages/duty/DutyPage";
+import DutyAssignEditPage from "./pages/duty/DutyAssignEditPage";
 import DutySummaryPage from "./pages/DutySummaryPage";
 import PassengerDetailPage from "./pages/PassengerDetailPage";
 import InfractionsPage from "./pages/InfractionsPage";
 import BusinessRulesPage from "./pages/BusinessRulesPage";
-import GccKpiPage from "./pages/GccKpiPage";
 import AdminConsolePage from "./pages/AdminConsolePage";
 import AlertsCenterPage from "./pages/AlertsCenterPage";
+import GeofencesPage from "./pages/GeofencesPage";
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000, // 5 minutes
+      retry: 1,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -59,9 +74,10 @@ function PublicRoute({ children }) {
 
 function App() {
   return (
-    <AuthProvider>
-      <Toaster position="top-right" richColors />
-      <BrowserRouter>
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <Toaster position="top-right" richColors />
+        <BrowserRouter>
         <Routes>
           <Route
             path="/login"
@@ -108,6 +124,22 @@ function App() {
             element={
               <ProtectedRoute>
                 <StopsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/bus-terminals"
+            element={
+              <ProtectedRoute>
+                <TerminalsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/geofences"
+            element={
+              <ProtectedRoute>
+                <GeofencesPage />
               </ProtectedRoute>
             }
           />
@@ -158,6 +190,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <KpiPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/kpi/detail/:kpiSlug"
+            element={
+              <ProtectedRoute>
+                <KpiDetailPage />
               </ProtectedRoute>
             }
           />
@@ -250,6 +290,22 @@ function App() {
             }
           />
           <Route
+            path="/duties/new"
+            element={
+              <ProtectedRoute>
+                <DutyAssignEditPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/duties/:dutyId/edit"
+            element={
+              <ProtectedRoute>
+                <DutyAssignEditPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/duties"
             element={
               <ProtectedRoute>
@@ -282,18 +338,13 @@ function App() {
               </ProtectedRoute>
             }
           />
-          <Route
-            path="/gcc-kpi"
-            element={
-              <ProtectedRoute>
-                <GccKpiPage />
-              </ProtectedRoute>
-            }
-          />
+          <Route path="/gcc-kpi" element={<Navigate to="/kpi" replace />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </BrowserRouter>
+      <ReactQueryDevtools initialIsOpen={false} />
     </AuthProvider>
+  </QueryClientProvider>
   );
 }
 

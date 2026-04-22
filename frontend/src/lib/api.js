@@ -1,14 +1,26 @@
 import axios from "axios";
 import { Endpoints } from "./endpoints";
 
+const ACCESS_TOKEN_KEY = "ebms_access_token";
+const REFRESH_TOKEN_KEY = "ebms_refresh_token";
+
 /**
  * Backend origin without trailing slash.
  * In dev, default to localhost:8000 when env is unset so requests don't go to the CRA dev server as `/api/...` (404).
  * In production, empty means same-origin `/api` (reverse proxy).
  */
 export function getBackendOrigin() {
-  const raw = String(process.env.REACT_APP_BACKEND_URL ?? "").trim().replace(/\/+$/, "");
-  if (raw && raw !== "undefined") return raw;
+  const raw = String(process.env.REACT_APP_BACKEND_URL ?? "")
+    .trim()
+    .replace(/\/+$/, "");
+  if (raw && raw !== "undefined") {
+    const isBrowserHttps = typeof window !== "undefined" && window.location.protocol === "https:";
+    if (isBrowserHttps && raw.startsWith("http://")) {
+      console.warn("Ignoring insecure REACT_APP_BACKEND_URL on an HTTPS page. Falling back to same-origin /api.");
+      return "";
+    }
+    return raw;
+  }
   if (process.env.NODE_ENV === "development") return "http://localhost:8000";
   return "";
 }
@@ -18,9 +30,53 @@ const apiBaseURL = (() => {
   return origin ? `${origin}/api` : "/api";
 })();
 
+if (typeof console !== "undefined") {
+  console.info("[API CONFIG] backend origin:", getBackendOrigin() || "(same-origin)");
+  console.info("[API CONFIG] axios baseURL:", apiBaseURL);
+}
+
 const API = axios.create({
   baseURL: apiBaseURL,
   withCredentials: true,
+});
+
+export function getStoredAccessToken() {
+  return window.localStorage.getItem(ACCESS_TOKEN_KEY) || "";
+}
+
+export function getStoredRefreshToken() {
+  return window.localStorage.getItem(REFRESH_TOKEN_KEY) || "";
+}
+
+export function storeAuthTokens(accessToken, refreshToken = "") {
+  if (accessToken) {
+    window.localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+  }
+  if (refreshToken) {
+    window.localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+  }
+}
+
+export function clearStoredAuthTokens() {
+  window.localStorage.removeItem(ACCESS_TOKEN_KEY);
+  window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+}
+
+API.interceptors.request.use((config) => {
+  const resolvedBase = String(config.baseURL || apiBaseURL || "");
+  const resolvedPath = String(config.url || "");
+  const resolvedUrl = /^https?:\/\//i.test(resolvedPath) ? resolvedPath : `${resolvedBase.replace(/\/+$/, "")}/${resolvedPath.replace(/^\/+/, "")}`;
+  if (typeof console !== "undefined" && process.env.NODE_ENV === "development") {
+    console.info(`[API REQUEST] ${String(config.method || "GET").toUpperCase()} ${resolvedUrl}`);
+  }
+  const token = getStoredAccessToken();
+  if (token && !config.headers?.Authorization) {
+    config.headers = {
+      ...config.headers,
+      Authorization: `Bearer ${token}`,
+    };
+  }
+  return config;
 });
 
 API.interceptors.response.use(
@@ -31,17 +87,26 @@ API.interceptors.response.use(
       if (window.location.pathname === "/login" || err.config.url?.includes("/auth/me")) {
         return Promise.reject(err);
       }
-      
+
       err.config._retry = true;
       try {
-        await API.post(Endpoints.auth.refresh());
+        const refreshToken = getStoredRefreshToken();
+        const refreshHeaders = refreshToken ? { Authorization: `Bearer ${refreshToken}` } : {};
+        const { data } = await axios.post(`${apiBaseURL}${Endpoints.auth.refresh()}`, null, {
+          withCredentials: true,
+          headers: refreshHeaders,
+        });
+        if (data?.token || data?.refresh_token) {
+          storeAuthTokens(data.token || "", data.refresh_token || "");
+        }
         return API(err.config);
       } catch {
+        clearStoredAuthTokens();
         window.location.href = "/login";
       }
     }
     return Promise.reject(err);
-  }
+  },
 );
 
 /** Omit empty values and literal "all" so query params match backend filters. */
@@ -108,7 +173,10 @@ export function formatApiError(detail) {
   if (detail == null) return "Something went wrong.";
   if (typeof detail === "string") return detail;
   if (Array.isArray(detail))
-    return detail.map((e) => e?.msg || JSON.stringify(e)).filter(Boolean).join(" ");
+    return detail
+      .map((e) => e?.msg || JSON.stringify(e))
+      .filter(Boolean)
+      .join(" ");
   if (detail?.msg) return detail.msg;
   return String(detail);
 }

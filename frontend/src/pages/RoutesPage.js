@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, Fragment } from "react";
 import { Link } from "react-router-dom";
-import API, { buildQuery, unwrapListResponse, fetchAllPaginated, messageFromAxiosError } from "../lib/api";
-import { Endpoints } from "../lib/endpoints";
+import { useRoutes, useRouteGeofences, useRouteMutations } from "../features/routes/api/useRoutes";
+import { useAllDepotNames } from "../features/depots/api/useDepots";
+import { useAllStops } from "../features/stops/api/useStops";
 import TablePaginationBar from "../components/TablePaginationBar";
 import TableLoadRows from "../components/TableLoadRows";
 import { Button } from "../components/ui/button";
@@ -15,6 +16,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, MapPin } from "lucide-react";
 import { toast } from "sonner";
 
+/** Page size for the expanded route → stops preview table */
+const ROUTE_STOPS_PAGE_SIZE = 25;
+
+const CHARGING_STATUS_OPTIONS = [
+  { value: "unknown", label: "Unknown" },
+  { value: "available", label: "Available" },
+  { value: "occupied", label: "Occupied" },
+  { value: "maintenance", label: "Maintenance" },
+  { value: "offline", label: "Offline" },
+];
+
 const emptyForm = {
   route_id: "",
   name: "",
@@ -24,6 +36,8 @@ const emptyForm = {
   depot: "",
   active: true,
   stop_sequence: [],
+  alternate_charging_stop_id: "",
+  charging_point_status: "unknown",
 };
 
 function sortResolvedStops(s) {
@@ -41,6 +55,20 @@ function stopSequenceForApi(rows) {
       stop_id: (x.stop_id || "").trim(),
     }))
     .filter((x) => x.stop_id.length > 0);
+}
+
+/** Stop IDs currently on the route form (for alternate charging dropdown). */
+function stopIdsFromFormSequence(stopSequence) {
+  const seen = new Set();
+  const out = [];
+  for (const x of stopSequence || []) {
+    const id = (x.stop_id || "").trim();
+    if (id && !seen.has(id)) {
+      seen.add(id);
+      out.push(id);
+    }
+  }
+  return out;
 }
 
 /** Build editable rows from API route (prefers `stop_sequence`, else hydrated `stops`, with name→master fallback). */
@@ -69,7 +97,6 @@ function stopRowsFromRoute(r, nameToStopId) {
 }
 
 export default function RoutesPage() {
-  const [rows, setRows] = useState([]);
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(emptyForm);
@@ -77,56 +104,34 @@ export default function RoutesPage() {
   const [filterActive, setFilterActive] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [meta, setMeta] = useState({ total: 0, pages: 1, limit: 30 });
-  const [depotNames, setDepotNames] = useState([]);
-  const [masterStops, setMasterStops] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState(null);
+  const [metaLimit, setMetaLimit] = useState(30);
   const [expandedRouteId, setExpandedRouteId] = useState(null);
+  const [expandedStopsPage, setExpandedStopsPage] = useState(1);
+
+  const { data: depotNames = [] } = useAllDepotNames();
+  const { data: masterStops = [] } = useAllStops();
+  const { data: routeFenceMap = {} } = useRouteGeofences();
+  const { data: routesData, isLoading: loading, error: fetchError, refetch: load } = useRoutes({
+    depot: filterDepot,
+    active: filterActive,
+    search,
+    page,
+    limit: metaLimit,
+  });
+
+  const rows = routesData?.items || [];
+  const meta = {
+    total: routesData?.total || 0,
+    pages: routesData?.pages || 1,
+    limit: routesData?.limit || metaLimit,
+  };
+
+  const { createRoute, updateRoute, deleteRoute, isSaving } = useRouteMutations();
+
 
   useEffect(() => {
-    (async () => {
-      try {
-        const depots = await fetchAllPaginated(Endpoints.masters.depots.list(), {});
-        setDepotNames(depots.map((d) => d.name).filter(Boolean).sort());
-      } catch {
-        setDepotNames([]);
-      }
-    })();
-  }, []);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const stops = await fetchAllPaginated(Endpoints.masters.stops.list(), {});
-        setMasterStops([...stops].sort((a, b) => String(a.name).localeCompare(String(b.name))));
-      } catch {
-        setMasterStops([]);
-      }
-    })();
-  }, []);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setFetchError(null);
-    try {
-      const { data } = await API.get(Endpoints.masters.routes.legacyList(), {
-        params: buildQuery({ depot: filterDepot, active: filterActive, search, page, limit: meta.limit }),
-      });
-      const u = unwrapListResponse(data);
-      setRows(u.items);
-      setMeta({ total: u.total, pages: u.pages, limit: u.limit });
-    } catch (err) {
-      setFetchError(messageFromAxiosError(err, "Failed to load routes"));
-      setRows([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [filterDepot, filterActive, search, page, meta.limit]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+    setPage(1);
+  }, [search, filterDepot, filterActive]);
 
   const handleSave = async () => {
     const name = (form.name || "").trim();
@@ -139,6 +144,12 @@ export default function RoutesPage() {
       toast.error("Route ID is required");
       return;
     }
+    const seq = stopSequenceForApi(form.stop_sequence);
+    const alt = (form.alternate_charging_stop_id || "").trim();
+    if (alt && !seq.some((s) => s.stop_id === alt)) {
+      toast.error("Alternate charging point must be one of the stops on this route");
+      return;
+    }
     const payload = {
       name,
       origin: (form.origin || "").trim(),
@@ -146,33 +157,30 @@ export default function RoutesPage() {
       distance_km: form.distance_km === "" ? 0 : Number(form.distance_km),
       depot: (form.depot || "").trim(),
       active: !!form.active,
-      stop_sequence: stopSequenceForApi(form.stop_sequence),
+      stop_sequence: seq,
+      alternate_charging_stop_id: alt,
+      charging_point_status: form.charging_point_status || "unknown",
     };
     try {
       if (editingId) {
-        await API.put(Endpoints.masters.routes.update(editingId), payload);
-        toast.success("Route updated");
+        await updateRoute({ id: editingId, payload });
       } else {
-        await API.post(Endpoints.masters.routes.create(), { ...payload, route_id: routeId });
-        toast.success("Route created");
+        await createRoute({ ...payload, route_id: routeId });
       }
       setOpen(false);
       setEditingId(null);
       setForm(emptyForm);
-      load();
     } catch (err) {
-      toast.error(messageFromAxiosError(err, "Could not save route"));
+      // Error handled in hook
     }
   };
 
   const handleDelete = async (routeId) => {
     if (!window.confirm(`Delete route "${routeId}"?`)) return;
     try {
-      await API.delete(Endpoints.masters.routes.remove(routeId));
-      toast.success("Deleted");
-      load();
+      await deleteRoute(routeId);
     } catch (err) {
-      toast.error(messageFromAxiosError(err, "Could not delete route"));
+      // Error handled in hook
     }
   };
 
@@ -192,6 +200,8 @@ export default function RoutesPage() {
       depot: r.depot || "",
       active: r.active !== false,
       stop_sequence: rows.length ? rows : [{ seq: "1", stop_id: "" }],
+      alternate_charging_stop_id: r.alternate_charging_stop_id || "",
+      charging_point_status: r.charging_point_status || "unknown",
     });
     setEditingId(r.route_id);
     setOpen(true);
@@ -219,20 +229,35 @@ export default function RoutesPage() {
   const removeStopRow = (index) => {
     const rows = [...(form.stop_sequence || [])];
     rows.splice(index, 1);
+    const nextSeq = rows.length ? rows : [{ seq: "1", stop_id: "" }];
+    const ids = new Set(stopIdsFromFormSequence(nextSeq));
+    const alt = (form.alternate_charging_stop_id || "").trim();
     setForm({
       ...form,
-      stop_sequence: rows.length ? rows : [{ seq: "1", stop_id: "" }],
+      stop_sequence: nextSeq,
+      ...(alt && !ids.has(alt) ? { alternate_charging_stop_id: "" } : {}),
     });
   };
 
   const updateStopRow = (index, field, value) => {
     const rows = [...(form.stop_sequence || [])];
     rows[index] = { ...rows[index], [field]: value };
-    setForm({ ...form, stop_sequence: rows });
+    const ids = new Set(stopIdsFromFormSequence(rows));
+    const alt = (form.alternate_charging_stop_id || "").trim();
+    setForm({
+      ...form,
+      stop_sequence: rows,
+      ...(field === "stop_id" && alt && !ids.has(alt) ? { alternate_charging_stop_id: "" } : {}),
+    });
   };
 
+  /** 12px typography and controls (matches duty form; portals need the same on DialogContent). */
+  const routePageText =
+    "text-[12px] leading-normal [&_label]:!text-[12px] [&_input]:!text-[12px] md:[&_input]:!text-[12px] [&_[role=combobox]]:!text-[12px] [&_button]:!text-[12px] [&_.text-sm]:!text-[12px] [&_.page-title]:!text-[12px] md:[&_.page-title]:!text-[12px] [&_.page-lead]:!text-[12px] md:[&_.page-lead]:!text-[12px] [&_.table-header]:!text-[12px] sm:[&_.table-header]:!text-[12px]";
+  const selectContent12 = "[&_[role=option]]:!text-[12px] [&_[role=group]]:!text-[12px]";
+
   return (
-    <div data-testid="routes-page">
+    <div data-testid="routes-page" className={routePageText}>
       <div className="page-header">
         <h1 className="page-title">Routes</h1>
         <Button onClick={openCreate} className="bg-[#C8102E] hover:bg-[#A50E25]" data-testid="add-route-btn">
@@ -248,13 +273,13 @@ export default function RoutesPage() {
           <Link to="/bus-stops" className="text-[#C8102E] font-medium hover:underline">
             Stops
           </Link>{" "}
-          master (same stop can appear on several routes). Demo data: RT-101–RT-606.
+          master (same stop can appear on several routes). Demo data: RT-101–RT-505.
         </span>
       </p>
 
       <div className="flex flex-wrap gap-3 mb-4 items-end">
         <div className="space-y-1">
-          <label className="text-xs font-medium uppercase text-gray-500">Search</label>
+          <label className="text-[12px] font-medium uppercase text-gray-500">Search</label>
           <Input
             placeholder="ID, name, origin…"
             value={search}
@@ -267,7 +292,7 @@ export default function RoutesPage() {
           />
         </div>
         <div className="space-y-1">
-          <label className="text-xs font-medium uppercase text-gray-500">Depot</label>
+          <label className="text-[12px] font-medium uppercase text-gray-500">Depot</label>
           <Select
             value={filterDepot || "all"}
             onValueChange={(v) => {
@@ -275,10 +300,10 @@ export default function RoutesPage() {
               setPage(1);
             }}
           >
-            <SelectTrigger className="w-48" data-testid="routes-filter-depot">
+            <SelectTrigger className="w-48 h-8" data-testid="routes-filter-depot">
               <SelectValue placeholder="All depots" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className={selectContent12}>
               <SelectItem value="all">All depots</SelectItem>
               {depotNames.map((d) => (
                 <SelectItem key={d} value={d}>
@@ -289,7 +314,7 @@ export default function RoutesPage() {
           </Select>
         </div>
         <div className="space-y-1">
-          <label className="text-xs font-medium uppercase text-gray-500">Status</label>
+          <label className="text-[12px] font-medium uppercase text-gray-500">Status</label>
           <Select
             value={filterActive || "all"}
             onValueChange={(v) => {
@@ -297,10 +322,10 @@ export default function RoutesPage() {
               setPage(1);
             }}
           >
-            <SelectTrigger className="w-40" data-testid="routes-filter-active">
+            <SelectTrigger className="w-40 h-8" data-testid="routes-filter-active">
               <SelectValue placeholder="All" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className={selectContent12}>
               <SelectItem value="all">All</SelectItem>
               <SelectItem value="true">Active</SelectItem>
               <SelectItem value="false">Inactive</SelectItem>
@@ -322,13 +347,15 @@ export default function RoutesPage() {
                 <TableHead className="text-right">Km</TableHead>
                 <TableHead>Depot</TableHead>
                 <TableHead className="text-center">Stops</TableHead>
+                <TableHead>Alternate charging</TableHead>
+                <TableHead>Route fence</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               <TableLoadRows
-                colSpan={10}
+                colSpan={12}
                 loading={loading}
                 error={fetchError}
                 onRetry={load}
@@ -361,12 +388,58 @@ export default function RoutesPage() {
                     </TableCell>
                     <TableCell className="text-[12px]">{r.depot || "—"}</TableCell>
                     <TableCell className="text-center font-mono text-[12px]">{r.stop_count ?? (Array.isArray(r.stops) ? r.stops.length : 0)}</TableCell>
+                    <TableCell className="text-[12px] max-w-[200px]">
+                      {(() => {
+                        const hasAlt = !!(r.alternate_charging_stop_id || "").trim();
+                        if (!hasAlt) return <span className="text-gray-400">—</span>;
+                        const st = (r.charging_point_status || "unknown").toLowerCase();
+                        return (
+                          <>
+                            <div
+                              className="leading-snug text-gray-800"
+                              title={r.alternate_charging_display || r.alternate_charging_stop_id || ""}
+                            >
+                              {r.alternate_charging_display || r.alternate_charging_stop_id}
+                            </div>
+                            {st !== "unknown" ? (
+                              <Badge
+                                variant="outline"
+                                className={
+                                  st === "available"
+                                    ? "mt-1 text-[12px] border-green-300 text-green-800 bg-green-50"
+                                    : st === "occupied"
+                                      ? "mt-1 text-[12px] border-amber-300 text-amber-900 bg-amber-50"
+                                      : st === "maintenance"
+                                        ? "mt-1 text-[12px] border-blue-300 text-blue-800 bg-blue-50"
+                                        : st === "offline"
+                                          ? "mt-1 text-[12px] border-gray-300 text-gray-700 bg-gray-50"
+                                          : "mt-1 text-[12px] border-slate-200 text-slate-600 bg-slate-50"
+                                }
+                              >
+                                {st}
+                              </Badge>
+                            ) : null}
+                          </>
+                        );
+                      })()}
+                    </TableCell>
+                    <TableCell>
+                      {routeFenceMap[r.route_id] ? (
+                        <Badge className="text-[12px]" variant={routeFenceMap[r.route_id].active ? "default" : "outline"}>
+                          {routeFenceMap[r.route_id].buffer_m ? `${routeFenceMap[r.route_id].buffer_m}m` : "linked"}
+                        </Badge>
+                      ) : (
+                        <Badge className="text-[12px]" variant="outline">
+                          missing
+                        </Badge>
+                      )}
+                    </TableCell>
                     <TableCell>
                       <Badge
                         className={
                           r.active !== false
-                            ? "bg-green-100 text-green-700 hover:bg-green-100"
-                            : "bg-gray-100 text-gray-600 hover:bg-gray-100"
+                            ? "text-[12px] bg-green-100 text-green-700 hover:bg-green-100"
+                            : "text-[12px] bg-gray-100 text-gray-600 hover:bg-gray-100"
                         }
                       >
                         {r.active !== false ? "active" : "inactive"}
@@ -390,46 +463,70 @@ export default function RoutesPage() {
                   </TableRow>
                     {expandedRouteId === r.route_id ? (
                       <TableRow key={`${r.route_id}-stops`} className="bg-amber-50/50">
-                        <TableCell colSpan={10} className="p-4">
-                          <div className="flex items-center gap-2 text-sm font-semibold text-gray-800 mb-2">
+                        <TableCell colSpan={12} className="p-4">
+                          <div className="flex items-center gap-2 text-[12px] font-semibold text-gray-800 mb-2">
                             <MapPin size={16} className="text-[#C8102E]" />
                             Stops — {r.name} ({r.origin} → {r.destination})
                           </div>
                           {sortResolvedStops(r.stops).length === 0 ? (
-                            <p className="text-sm text-gray-500">No stops defined. Edit the route to add boarding points from stop master.</p>
+                            <p className="text-[12px] text-gray-500">No stops defined. Edit the route to add boarding points from stop master.</p>
                           ) : (
-                            <div className="rounded-md border border-amber-200/80 bg-white overflow-hidden">
-                              <Table>
-                                <TableHeader>
-                                  <TableRow className="bg-amber-100/60">
-                                    <TableHead className="w-14">Seq</TableHead>
-                                    <TableHead className="min-w-[100px]">Stop ID</TableHead>
-                                    <TableHead>Stop name</TableHead>
-                                    <TableHead>Locality</TableHead>
-                                    <TableHead>Landmark</TableHead>
-                                    <TableHead className="text-right">Lat</TableHead>
-                                    <TableHead className="text-right">Lng</TableHead>
-                                  </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                  {sortResolvedStops(r.stops).map((s) => (
-                                    <TableRow key={`${r.route_id}-s-${s.seq}-${s.stop_id || s.name}`}>
-                                      <TableCell className="font-mono text-sm">{s.seq}</TableCell>
-                                      <TableCell className="font-mono text-xs text-gray-700">{s.stop_id || "—"}</TableCell>
-                                      <TableCell className="text-sm font-medium">{s.name}</TableCell>
-                                      <TableCell className="text-sm text-gray-600">{s.locality || "—"}</TableCell>
-                                      <TableCell className="text-sm text-gray-500">{s.landmark || "—"}</TableCell>
-                                      <TableCell className="text-right font-mono text-xs text-gray-600">
-                                        {s.lat != null ? Number(s.lat).toFixed(4) : "—"}
-                                      </TableCell>
-                                      <TableCell className="text-right font-mono text-xs text-gray-600">
-                                        {s.lng != null ? Number(s.lng).toFixed(4) : "—"}
-                                      </TableCell>
-                                    </TableRow>
-                                  ))}
-                                </TableBody>
-                              </Table>
-                            </div>
+                            (() => {
+                              const allStops = sortResolvedStops(r.stops);
+                              const totalStops = allStops.length;
+                              const stopPages = Math.max(1, Math.ceil(totalStops / ROUTE_STOPS_PAGE_SIZE));
+                              const safePage = Math.min(expandedStopsPage, stopPages);
+                              const pagedStops = allStops.slice(
+                                (safePage - 1) * ROUTE_STOPS_PAGE_SIZE,
+                                safePage * ROUTE_STOPS_PAGE_SIZE
+                              );
+                              return (
+                                <div className="space-y-0">
+                                  <div className="rounded-md border border-amber-200/80 bg-white overflow-hidden">
+                                    <Table className="text-[12px]">
+                                      <TableHeader>
+                                        <TableRow className="bg-amber-100/60">
+                                          <TableHead className="w-14 text-[12px]">Seq</TableHead>
+                                          <TableHead className="min-w-[100px] text-[12px]">Stop ID</TableHead>
+                                          <TableHead className="text-[12px]">Stop name</TableHead>
+                                          <TableHead className="text-[12px]">Locality</TableHead>
+                                          <TableHead className="text-[12px]">Landmark</TableHead>
+                                          <TableHead className="text-right text-[12px]">Lat</TableHead>
+                                          <TableHead className="text-right text-[12px]">Lng</TableHead>
+                                        </TableRow>
+                                      </TableHeader>
+                                      <TableBody>
+                                        {pagedStops.map((s) => (
+                                          <TableRow key={`${r.route_id}-s-${s.seq}-${s.stop_id || s.name}`}>
+                                            <TableCell className="font-mono text-[12px]">{s.seq}</TableCell>
+                                            <TableCell className="font-mono text-[12px] text-gray-700">{s.stop_id || "—"}</TableCell>
+                                            <TableCell className="text-[12px] font-medium">{s.name}</TableCell>
+                                            <TableCell className="text-[12px] text-gray-600">{s.locality || "—"}</TableCell>
+                                            <TableCell className="text-[12px] text-gray-500">{s.landmark || "—"}</TableCell>
+                                            <TableCell className="text-right font-mono text-[12px] text-gray-600">
+                                              {s.lat != null ? Number(s.lat).toFixed(4) : "—"}
+                                            </TableCell>
+                                            <TableCell className="text-right font-mono text-[12px] text-gray-600">
+                                              {s.lng != null ? Number(s.lng).toFixed(4) : "—"}
+                                            </TableCell>
+                                          </TableRow>
+                                        ))}
+                                      </TableBody>
+                                    </Table>
+                                  </div>
+                                  {totalStops > ROUTE_STOPS_PAGE_SIZE ? (
+                                    <TablePaginationBar
+                                      page={safePage}
+                                      pages={stopPages}
+                                      total={totalStops}
+                                      limit={ROUTE_STOPS_PAGE_SIZE}
+                                      onPageChange={setExpandedStopsPage}
+                                      className="rounded-b-md border border-t-0 border-amber-200/80 bg-amber-50/50"
+                                    />
+                                  ) : null}
+                                </div>
+                              );
+                            })()
                           )}
                         </TableCell>
                       </TableRow>
@@ -445,15 +542,21 @@ export default function RoutesPage() {
             total={meta.total} 
             limit={meta.limit} 
             onPageChange={setPage} 
-            onLimitChange={(l) => setMeta(prev => ({ ...prev, limit: l }))}
+            onLimitChange={(l) => {
+              setPage(1);
+              setMetaLimit(l);
+            }}
           />
         </CardContent>
       </Card>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent data-testid="route-dialog" className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent
+          data-testid="route-dialog"
+          className={`max-w-lg max-h-[90vh] overflow-y-auto ${routePageText}`}
+        >
           <DialogHeader>
-            <DialogTitle>{editingId ? "Edit route" : "Add route"}</DialogTitle>
+            <DialogTitle className="!text-[12px]">{editingId ? "Edit route" : "Add route"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
@@ -503,10 +606,10 @@ export default function RoutesPage() {
             <div className="space-y-2">
               <Label>Operating depot</Label>
               <Select value={form.depot || "none"} onValueChange={(v) => setForm({ ...form, depot: v === "none" ? "" : v })}>
-                <SelectTrigger data-testid="route-depot">
+                <SelectTrigger className="h-8" data-testid="route-depot">
                   <SelectValue placeholder="Optional" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className={selectContent12}>
                   <SelectItem value="none">None</SelectItem>
                   {depotNames.map((d) => (
                     <SelectItem key={d} value={d}>
@@ -518,7 +621,7 @@ export default function RoutesPage() {
             </div>
             <div className="space-y-2 border-t border-gray-100 pt-4">
               <div className="flex items-center justify-between gap-2 flex-wrap">
-                <Label className="text-base">Stops (from master)</Label>
+                <Label className="!text-[12px]">Stops (from master)</Label>
                 <div className="flex items-center gap-2">
                   <Button variant="outline" size="sm" asChild>
                     <Link to="/bus-stops">Manage stops</Link>
@@ -528,11 +631,16 @@ export default function RoutesPage() {
                   </Button>
                 </div>
               </div>
-              <p className="text-xs text-gray-500">
-                Pick a <span className="font-mono">stop_id</span> for each sequence. Rows with no stop are ignored on save. Names and coordinates live on the Stops page.
+              <p className="text-[12px] text-gray-500">
+                Pick a <span className="font-mono">stop_id</span> for each sequence. Rows with no stop are ignored on save. Names and coordinates live on the Stops page. Use{" "}
+                <strong>Add row</strong> / trash to change the list — same pattern as linking stops on{" "}
+                <Link to="/bus-terminals" className="text-[#C8102E] font-medium hover:underline">
+                  Terminals
+                </Link>
+                . Any route that includes a stop will show under that terminal&apos;s <strong>Served routes</strong> after save.
               </p>
               {masterStops.length === 0 ? (
-                <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md p-2">
+                <p className="text-[12px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md p-2">
                   No active stops loaded. Open <Link to="/bus-stops" className="underline font-medium">Stops</Link> and add stops, or check the API connection.
                 </p>
               ) : null}
@@ -540,29 +648,29 @@ export default function RoutesPage() {
                 {(form.stop_sequence || []).map((s, idx) => (
                   <div key={`stop-${idx}`} className="grid grid-cols-12 gap-2 items-end border border-gray-100 rounded-md p-2 bg-gray-50/80">
                     <div className="col-span-2 space-y-1">
-                      <span className="text-[10px] uppercase text-gray-500">Seq</span>
+                      <span className="text-[12px] uppercase text-gray-500">Seq</span>
                       <Input
-                        className="h-8 text-sm"
+                        className="h-8 text-[12px]"
                         value={s.seq}
                         onChange={(e) => updateStopRow(idx, "seq", e.target.value)}
                         data-testid={`route-stop-seq-${idx}`}
                       />
                     </div>
                     <div className="col-span-9 space-y-1">
-                      <span className="text-[10px] uppercase text-gray-500">Stop</span>
+                      <span className="text-[12px] uppercase text-gray-500">Stop</span>
                       <Select
                         value={s.stop_id || "__none__"}
                         onValueChange={(v) => updateStopRow(idx, "stop_id", v === "__none__" ? "" : v)}
                       >
-                        <SelectTrigger className="h-8 text-sm" data-testid={`route-stop-select-${idx}`}>
+                        <SelectTrigger className="h-8 text-[12px]" data-testid={`route-stop-select-${idx}`}>
                           <SelectValue placeholder="Choose stop…" />
                         </SelectTrigger>
-                        <SelectContent className="max-h-64">
+                        <SelectContent className={`max-h-64 ${selectContent12}`}>
                           <SelectItem value="__none__">— None —</SelectItem>
                           {masterStops.map((ms) => (
                             <SelectItem key={ms.stop_id} value={ms.stop_id}>
-                              <span className="font-mono text-xs">{ms.stop_id}</span>
-                              <span className="text-gray-600">
+                              <span className="font-mono text-[12px]">{ms.stop_id}</span>
+                              <span className="text-gray-600 text-[12px]">
                                 {" "}
                                 — {ms.name}
                                 {ms.active === false ? " (inactive)" : ""}
@@ -581,6 +689,48 @@ export default function RoutesPage() {
                 ))}
               </div>
             </div>
+            <div className="space-y-2 border-t border-gray-100 pt-4">
+              <Label>Alternate charging point</Label>
+              <p className="text-[12px] text-gray-500">Choose a stop from this route&apos;s sequence (add stops above first).</p>
+              <Select
+                value={form.alternate_charging_stop_id || "none"}
+                onValueChange={(v) => setForm({ ...form, alternate_charging_stop_id: v === "none" ? "" : v })}
+              >
+                <SelectTrigger className="h-8" data-testid="route-alternate-charging">
+                  <SelectValue placeholder="None" />
+                </SelectTrigger>
+                <SelectContent className={selectContent12}>
+                  <SelectItem value="none">— None —</SelectItem>
+                  {stopIdsFromFormSequence(form.stop_sequence).map((sid) => {
+                    const ms = masterStops.find((m) => m.stop_id === sid);
+                    return (
+                      <SelectItem key={sid} value={sid}>
+                        <span className="font-mono text-[12px]">{sid}</span>
+                        {ms ? <span className="text-gray-600 text-[12px]"> — {ms.name}</span> : null}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Charging status</Label>
+              <Select
+                value={form.charging_point_status || "unknown"}
+                onValueChange={(v) => setForm({ ...form, charging_point_status: v })}
+              >
+                <SelectTrigger className="h-8" data-testid="route-charging-status">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className={selectContent12}>
+                  {CHARGING_STATUS_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="flex items-center gap-2">
               <input
                 type="checkbox"
@@ -593,8 +743,8 @@ export default function RoutesPage() {
                 Active
               </Label>
             </div>
-            <Button onClick={handleSave} className="w-full bg-[#C8102E] hover:bg-[#A50E25]" data-testid="route-save-btn">
-              {editingId ? "Update" : "Save"}
+            <Button onClick={handleSave} disabled={isSaving} className="w-full bg-[#C8102E] hover:bg-[#A50E25]" data-testid="route-save-btn">
+              {isSaving ? "Saving..." : (editingId ? "Update" : "Save")}
             </Button>
           </div>
         </DialogContent>

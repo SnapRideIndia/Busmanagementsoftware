@@ -1,0 +1,106 @@
+{
+  "_source": "backend/app/core/seed.py — lean_stop_master_seed, lean_route_stop_ids, route_seed_docs (demo seed; applied when SEED_MODE runs seed)",
+  "stop_master": [
+    {"stop_id": "ST-HYD-MYP-BS", "name": "Miyapur Bus Stand", "locality": "Miyapur", "landmark": "Near Miyapur metro", "region": "Hyderabad", "lat": 17.4979, "lng": 78.3617, "active": true},
+    {"stop_id": "ST-HYD-KKP-HB", "name": "Kukatpally HB Colony", "locality": "Kukatpally", "landmark": "Y-junction", "region": "Hyderabad", "lat": 17.4949, "lng": 78.4002, "active": true},
+    {"stop_id": "ST-HYD-AME", "name": "Ameerpet", "locality": "Ameerpet", "landmark": "Metro interchange", "region": "Hyderabad", "lat": 17.4353, "lng": 78.4447, "active": true},
+    {"stop_id": "ST-HYD-BEG", "name": "Begumpet", "locality": "Begumpet", "landmark": "", "region": "Hyderabad", "lat": 17.4442, "lng": 78.4708, "active": true},
+    {"stop_id": "ST-HYD-PAR", "name": "Paradise", "locality": "Secunderabad", "landmark": "Opp. railway station", "region": "Hyderabad", "lat": 17.4417, "lng": 78.4872, "active": true},
+    {"stop_id": "ST-HYD-LBN-RR", "name": "LB Nagar Ring Road", "locality": "LB Nagar", "landmark": "Depot approach", "region": "Hyderabad", "lat": 17.3507, "lng": 78.5475, "active": true},
+    {"stop_id": "ST-HYD-DIL", "name": "Dilsukhnagar", "locality": "Dilsukhnagar", "landmark": "Chandana Bros", "region": "Hyderabad", "lat": 17.3704, "lng": 78.5254, "active": true},
+    {"stop_id": "ST-HYD-MAL", "name": "Malakpet", "locality": "Malakpet", "landmark": "", "region": "Hyderabad", "lat": 17.3736, "lng": 78.4988, "active": true},
+    {"stop_id": "ST-HYD-AFZ", "name": "Afzalgunj", "locality": "Afzalgunj", "landmark": "", "region": "Hyderabad", "lat": 17.3744, "lng": 78.4761, "active": true},
+    {"stop_id": "ST-HYD-MGBS", "name": "MGBS", "locality": "MGBS", "landmark": "Imperial", "region": "Hyderabad", "lat": 17.3773, "lng": 78.4836, "active": true},
+    {"stop_id": "ST-HYD-KPHB", "name": "KPHB Colony", "locality": "Kukatpally", "landmark": "Phase-3", "region": "Hyderabad", "lat": 17.4878, "lng": 78.3955, "active": true},
+    {"stop_id": "ST-HYD-SRN", "name": "SR Nagar", "locality": "SR Nagar", "landmark": "", "region": "Hyderabad", "lat": 17.4432, "lng": 78.4406, "active": true},
+    {"stop_id": "ST-HYD-ABI", "name": "Abids", "locality": "Abids", "landmark": "", "region": "Hyderabad", "lat": 17.3935, "lng": 78.4763, "active": true},
+    {"stop_id": "ST-HYD-CHR", "name": "Charminar", "locality": "Old City", "landmark": "Monument circle", "region": "Hyderabad", "lat": 17.3616, "lng": 78.4747, "active": true},
+    {"stop_id": "ST-HYD-SEC-STN", "name": "Secunderabad Station", "locality": "Secunderabad", "landmark": "", "region": "Hyderabad", "lat": 17.4337, "lng": 78.5016, "active": true},
+    {"stop_id": "ST-HYD-UPP-OR", "name": "Uppal Ring Road", "locality": "Uppal", "landmark": "NH163", "region": "Hyderabad", "lat": 17.401812306203425, "lng": 78.56877445564773, "active": true},
+    {"stop_id": "ST-HYD-GHT", "name": "Ghatkesar", "locality": "Ghatkesar", "landmark": "ORR exit", "region": "Hyderabad", "lat": 17.452164285002805, "lng": 78.68239941614085, "active": true},
+    {"stop_id": "ST-HYD-BHO", "name": "Bhongir", "locality": "Bhongir", "landmark": "", "region": "Hyderabad", "lat": 17.51656714753325, "lng": 78.88727898775723, "active": true},
+    {"stop_id": "ST-HYD-WRL", "name": "Warangal Bus Stand", "locality": "Warangal", "landmark": "GWMC", "region": "Hyderabad", "lat": 17.9745, "lng": 79.6054, "active": true},
+    {"stop_id": "ST-HYD-UPP-MET", "name": "Uppal Metro", "locality": "Uppal", "landmark": "", "region": "Hyderabad", "lat": 17.40194053306272, "lng": 78.56208812043853, "active": true}
+  ],
+  "routes": [
+    {
+      "route_id": "RT-101",
+      "name": "Route-101 Miyapur-Secunderabad",
+      "origin": "Miyapur",
+      "destination": "Secunderabad",
+      "distance_km": 28.5,
+      "depot": "Miyapur Depot",
+      "active": true,
+      "stop_sequence": [
+        {"stop_id": "ST-HYD-MYP-BS", "seq": 1},
+        {"stop_id": "ST-HYD-KKP-HB", "seq": 2},
+        {"stop_id": "ST-HYD-AME", "seq": 3},
+        {"stop_id": "ST-HYD-BEG", "seq": 4},
+        {"stop_id": "ST-HYD-PAR", "seq": 5}
+      ]
+    },
+    {
+      "route_id": "RT-202",
+      "name": "Route-202 LB Nagar-MGBS",
+      "origin": "LB Nagar",
+      "destination": "MGBS",
+      "distance_km": 22,
+      "depot": "LB Nagar Depot",
+      "active": true,
+      "stop_sequence": [
+        {"stop_id": "ST-HYD-LBN-RR", "seq": 1},
+        {"stop_id": "ST-HYD-DIL", "seq": 2},
+        {"stop_id": "ST-HYD-MAL", "seq": 3},
+        {"stop_id": "ST-HYD-AFZ", "seq": 4},
+        {"stop_id": "ST-HYD-MGBS", "seq": 5}
+      ]
+    },
+    {
+      "route_id": "RT-303",
+      "name": "Route-303 Kukatpally-Charminar",
+      "origin": "Kukatpally",
+      "destination": "Charminar",
+      "distance_km": 19,
+      "depot": "Miyapur Depot",
+      "active": true,
+      "stop_sequence": [
+        {"stop_id": "ST-HYD-KPHB", "seq": 1},
+        {"stop_id": "ST-HYD-SRN", "seq": 2},
+        {"stop_id": "ST-HYD-ABI", "seq": 3},
+        {"stop_id": "ST-HYD-CHR", "seq": 4}
+      ]
+    },
+    {
+      "route_id": "RT-404",
+      "name": "Route-404 Secunderabad-Warangal",
+      "origin": "Secunderabad",
+      "destination": "Warangal",
+      "distance_km": 145,
+      "depot": "Miyapur Depot",
+      "active": true,
+      "stop_sequence": [
+        {"stop_id": "ST-HYD-SEC-STN", "seq": 1},
+        {"stop_id": "ST-HYD-UPP-OR", "seq": 2},
+        {"stop_id": "ST-HYD-GHT", "seq": 3},
+        {"stop_id": "ST-HYD-BHO", "seq": 4},
+        {"stop_id": "ST-HYD-WRL", "seq": 5}
+      ]
+    },
+    {
+      "route_id": "RT-505",
+      "name": "Route-505 Uppal-Mehdipatnam",
+      "origin": "Uppal",
+      "destination": "Mehdipatnam",
+      "distance_km": 24,
+      "depot": "LB Nagar Depot",
+      "active": true,
+      "stop_sequence": [
+        {"stop_id": "ST-HYD-UPP-MET", "seq": 1},
+        {"stop_id": "ST-HYD-PAR", "seq": 2},
+        {"stop_id": "ST-HYD-BEG", "seq": 3},
+        {"stop_id": "ST-HYD-AME", "seq": 4}
+      ]
+    }
+  ],
+  "note": "DB rows also get created_at and updated_at ISO timestamps on insert. API list/get adds hydrated 'stops' and 'stop_count' — see routes.py _hydrate_route_stops_row. To patch an existing MongoDB without re-seeding: python backend/scripts/patch_stops_real_coords.py"
+}

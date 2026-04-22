@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
-import { useSearchParams } from "react-router-dom";
-import API, { buildQuery, formatApiError } from "../lib/api";
+import { useState, useEffect } from "react";
+import { useRevenueDetails } from "../features/revenue/api/useRevenue";
+import API, { messageFromAxiosError } from "../lib/api";
 import { Endpoints } from "../lib/endpoints";
 import TablePaginationBar from "../components/TablePaginationBar";
 import AsyncPanel from "../components/AsyncPanel";
@@ -13,54 +13,44 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Badge } from "../components/ui/badge";
 import { IndianRupee, ArrowLeft, TrendingUp, Users, Bus } from "lucide-react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+
+const inNum = (v) => (v == null ? "—" : Number(v).toLocaleString("en-IN"));
+
+const BUS_SUMMARY_PAGE_SIZE = 12;
 
 export default function RevenueDetailPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [data, setData] = useState(null);
   const [depot, setDepot] = useState(searchParams.get("depot") || "");
   const [busId, setBusId] = useState(searchParams.get("bus") || "");
   const [dateFrom, setDateFrom] = useState(searchParams.get("from") || "");
   const [dateTo, setDateTo] = useState(searchParams.get("to") || "");
   const [period, setPeriod] = useState("daily");
   const [route, setRoute] = useState("");
-  const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
-  const [fetchError, setFetchError] = useState(null);
+  const [busSummaryPage, setBusSummaryPage] = useState(1);
 
-  const inNum = (n) => (n == null ? "—" : Number(n).toLocaleString("en-IN"));
+  const filters = {
+    period,
+    depot,
+    bus_id: busId,
+    route,
+    date_from: dateFrom,
+    date_to: dateTo,
+    page,
+    limit: 20,
+  };
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setFetchError(null);
-    try {
-      const params = buildQuery({
-        period,
-        depot,
-        bus_id: busId,
-        route,
-        date_from: dateFrom,
-        date_to: dateTo,
-        page,
-        limit: 20,
-      });
-      const { data: d } = await API.get(Endpoints.revenue.details(), { params });
-      setData(d);
-    } catch (err) {
-      setFetchError(formatApiError(err.response?.data?.detail) || err.message || "Failed to load revenue details");
-    } finally {
-      setLoading(false);
-    }
-  }, [depot, busId, route, dateFrom, dateTo, period, page]);
+  const { data, isLoading: loading, error: fetchError, refetch: load } = useRevenueDetails(filters);
 
   useEffect(() => {
     setPage(1);
   }, [depot, busId, route, dateFrom, dateTo, period]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    setBusSummaryPage(1);
+  }, [depot, busId, route, dateFrom, dateTo, period, data?.row_total, data?.page]);
 
   // Aggregate for charts
   const chartData = data?.data
@@ -88,6 +78,12 @@ export default function RevenueDetailPage() {
         return Object.values(agg).sort((a, b) => b.revenue - a.revenue);
       })()
     : [];
+
+  const busSummaryTotal = topBuses.length;
+  const busSummaryPages = Math.max(1, Math.ceil(busSummaryTotal / BUS_SUMMARY_PAGE_SIZE));
+  const safeBusSummaryPage = Math.min(busSummaryPage, busSummaryPages);
+  const busSummaryStart = (safeBusSummaryPage - 1) * BUS_SUMMARY_PAGE_SIZE;
+  const topBusesPage = topBuses.slice(busSummaryStart, busSummaryStart + BUS_SUMMARY_PAGE_SIZE);
 
   const avgDaily = chartData.length > 0 ? (data?.total_revenue || 0) / chartData.length : 0;
 
@@ -191,7 +187,7 @@ export default function RevenueDetailPage() {
 
       {fetchError && !loading ? (
         <div className="mb-6">
-          <AsyncPanel error={fetchError} onRetry={load} />
+          <AsyncPanel error={messageFromAxiosError(fetchError, "Failed to load revenue details")} onRetry={load} />
         </div>
       ) : null}
       {loading && !data ? (
@@ -304,7 +300,7 @@ export default function RevenueDetailPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {topBuses.map((b) => (
+              {topBusesPage.map((b) => (
                 <TableRow key={b.bus_id} className="hover:bg-gray-50" data-testid={`rev-bus-${b.bus_id}`}>
                   <TableCell className="font-mono font-medium">{b.bus_id}</TableCell>
                   <TableCell>{b.depot}</TableCell>
@@ -315,6 +311,9 @@ export default function RevenueDetailPage() {
               ))}
             </TableBody>
           </Table>
+          {busSummaryTotal > BUS_SUMMARY_PAGE_SIZE ? (
+            <TablePaginationBar page={safeBusSummaryPage} pages={busSummaryPages} total={busSummaryTotal} limit={BUS_SUMMARY_PAGE_SIZE} onPageChange={setBusSummaryPage} />
+          ) : null}
         </CardContent>
       </Card>
 
